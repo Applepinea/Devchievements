@@ -1,0 +1,13 @@
+[package]
+name = "devch-helper-spike-gix"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 0 spike, approach B: read the repository in-process with gix (ADR-0002)."
+
+[workspace]
+
+[dependencies]
+gix = { version = "0.74", default-features = false, features = ["revision"] }
+
+[profile.release]
+opt-level = 2

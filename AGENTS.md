@@ -96,30 +96,44 @@ devchievements/
 
 ### 4.2 常用命令
 
-```bash
-# Rust
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo build --workspace
+**最重要的一条**：验证整个仓库用
 
-# WASM
-cargo build -p devchievements-core --target wasm32-unknown-unknown --release
+```powershell
+node scripts/verify.mjs
+```
 
-# Node / TS
-pnpm install
-pnpm typecheck
-pnpm lint
-pnpm test
-pnpm build
+它会依次跑 fmt / clippy / test / build / build-wasm / extension-build，并把日志写入 `.verify/`。
+STATUS.md 引用的就是它的输出。
 
-# 扩展
+底层命令（环境由 `scripts/env.ps1` 配好）：
+
+```powershell
+# Rust（推荐用脚本，避免 PowerShell 吞掉 cargo 输出）
+node scripts/cargo-run.mjs fmt --all -- --check
+node scripts/cargo-run.mjs clippy --workspace --all-targets -- -D warnings
+node scripts/cargo-run.mjs test --workspace
+node scripts/cargo-run.mjs build --workspace
+node scripts/cargo-run.mjs build -p devchievements-core --target wasm32-unknown-unknown --release
+
+# 前端 / 扩展
+pnpm install --ignore-scripts        # 沙箱禁止生命周期脚本
 pnpm --filter @devchievements/extension build
 
-# Golden Tests
-cargo test -p devchievements-golden-tests
-pnpm --filter @devchievements/golden-tests test
+# Git 行为实验（生成 .out/ 与 fixtures 原始数据）
+node scripts/git-experiments/run-experiments.mjs
+node scripts/git-experiments/bench-three-approaches.mjs
+
+# WASM spike
+node scripts/wasm-spike/run-wasm-spike.mjs
 ```
+
+### 4.2.1 本机必须知道的四件事
+
+1. **PowerShell 会吞掉 cargo 的 stderr** → 一律用 `scripts/cargo-run.mjs` 或 `scripts/verify.mjs`。
+2. **沙箱禁止管道式 stdio** → 任何要捕获子进程输出的脚本必须用**文件重定向**。
+   曾经因为 `spawnSync({encoding:'utf8'})` 静默返回空串，导致依赖解析「假装成功」。
+3. **`.ps1` 必须纯 ASCII**（PowerShell 5.1 + GBK）。
+4. **pnpm 需 `--ignore-scripts` + `node-linker=hoisted`**，且要手动跑 `wxt prepare`。
 
 ### 4.3 提交流程（每个 Phase 内的每个变更都要走完）
 

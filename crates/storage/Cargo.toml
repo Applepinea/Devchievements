@@ -8,9 +8,11 @@ authors.workspace = true
 description = "SQLite/SQLx adapter, migrations, projections. Never contains achievement judgement logic."
 
 [dependencies]
-# Intentionally empty: SQLx is the Phase 1 choice (AGENTS.md forbids mixing it
-# with rusqlite), but it cannot be built on this host -- see ADR-0012 and
-# crates/storage/README.md.
+# SQLx only -- AGENTS.md forbids mixing SQLx with rusqlite.
+sqlx = { version = "0.8", default-features = false, features = ["runtime-async-std", "sqlite", "macros", "migrate"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

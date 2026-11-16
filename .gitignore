@@ -27,6 +27,8 @@ apps/extension/.wxt/
 /.crate-cache/
 /.logs/
 /.cargo/config.toml
+# Spike crates copy the repo cargo config in at build time; never commit it
+/scripts/**/.cargo/
 
 # DSH / local toolchain (never commit)
 /_toolchain/
@@ -44,6 +46,9 @@ apps/extension/.wxt/
 
 # Browser profiles created during automated verification attempts
 **/chrome-profile*/
+
+# Verification output (regenerable)
+/.verify/
 
 # OS / editors
 .DS_Store

@@ -34,6 +34,24 @@ if ((Test-Path $cargoBin) -and ($env:PATH -notlike "*$cargoBin*")) {
     $env:PATH = $cargoBin + ';' + $env:PATH
 }
 
+# GNU compiler toolchain. Two separate pieces are required and both must be on
+# PATH before cargo runs:
+#   - _mingw-gcc: a real C compiler (gcc/cc1 + binutils ar/ranlib + sysroot), which
+#     cc-rs needs to build libsqlite3-sys (SQLite) for SQLx;
+#   - the Rust toolchain's self-contained dir: the assembler (as.exe) that dlltool
+#     invokes when producing Windows import libraries for windows-sys.
+$mingwBin     = Join-Path $toolchain '_mingw-gcc\mingw64\bin'
+$selfContained = Join-Path $toolchain 'rustup\toolchains\stable-x86_64-pc-windows-gnu\lib\rustlib\x86_64-pc-windows-gnu\bin\self-contained'
+if (Test-Path $mingwBin) {
+    if ($env:PATH -notlike "*$mingwBin*") { $env:PATH = $mingwBin + ';' + $env:PATH }
+    $env:CC = Join-Path $mingwBin 'gcc.exe'
+} else {
+    Write-Warning 'env.ps1: mingw gcc not found; C dependencies (SQLx) will not build. Run scripts/install-toolchain.ps1'
+}
+if (Test-Path $selfContained) {
+    if ($env:PATH -notlike "*$selfContained*") { $env:PATH = $selfContained + ';' + $env:PATH }
+}
+
 # npm / pnpm cache must live inside the workspace (outside is not writable).
 $npmCache = Join-Path $workspace '_npm-cache'
 if (-not (Test-Path $npmCache)) {
