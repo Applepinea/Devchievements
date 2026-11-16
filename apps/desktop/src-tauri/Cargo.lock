@@ -892,6 +892,7 @@ dependencies = [
  "devchievements-events",
  "devchievements-git-hooks",
  "devchievements-notifications",
+ "devchievements-privacy",
  "devchievements-sound",
  "devchievements-storage",
  "serde",
@@ -928,6 +929,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "devchievements-privacy"
+version = "0.0.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "devchievements-sound"
 version = "0.0.0"
 dependencies = [
@@ -941,6 +949,7 @@ dependencies = [
  "devchievements-core",
  "devchievements-daily-rank",
  "devchievements-events",
+ "serde",
  "serde_json",
  "sqlx",
 ]

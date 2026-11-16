@@ -29,35 +29,24 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-/// The sound played when nothing else applies, and the last line of defence.
+/// The reward sound shipped with the app.
 ///
-/// A literal id rather than a file path: resolution to a file is the host's job.
-pub const FALLBACK_SOUND: &str = "default";
+/// One sound for the whole reward family (every rarity and every daily rank). Spec 19
+/// allows per-category sounds, but Phase 2a ships built-in defaults only and the
+/// product owner supplied a single achievement sound, so the tiers share it. Per-tier
+/// files belong to the Sound Manager in Phase 4a, and the selection logic already
+/// supports them: only this constant has to change.
+pub const REWARD_SOUND: &str = "achievement";
+
+/// The sound played when nothing else applies. Same asset as the reward sound, so an
+/// unfilled slot still plays something the user recognises.
+pub const FALLBACK_SOUND: &str = REWARD_SOUND;
 
 /// The sound used for a plain commit (spec 16.4: a light acknowledgement).
+///
+/// Deliberately NOT the reward sound: a 0.8 s jingle on every commit would be exactly
+/// the interruption that rule exists to prevent.
 pub const COMMIT_SOUND: &str = "commit";
-
-/// The built-in sound id for a rarity.
-pub fn rarity_sound(rarity: Rarity) -> &'static str {
-    match rarity {
-        Rarity::Common => "rarity-common",
-        Rarity::Uncommon => "rarity-uncommon",
-        Rarity::Rare => "rarity-rare",
-        Rarity::Epic => "rarity-epic",
-        Rarity::Legendary => "rarity-legendary",
-    }
-}
-
-/// The built-in sound id for a daily rank.
-pub fn daily_rank_sound(rank: DailyRank) -> &'static str {
-    match rank {
-        DailyRank::Common => "daily-common",
-        DailyRank::Uncommon => "daily-uncommon",
-        DailyRank::Rare => "daily-rare",
-        DailyRank::Epic => "daily-epic",
-        DailyRank::Legendary => "daily-legendary",
-    }
-}
 
 /// A rarity, mirrored here so this crate stays free of presentation dependencies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -251,13 +240,13 @@ pub fn select(
                 let key = format!("daily:{}", rank_key(*rank));
                 candidates.push((
                     overrides.get(&key),
-                    Some(daily_rank_sound(*rank)),
+                    Some(REWARD_SOUND),
                     SoundSource::DailyRankCustom,
                 ));
             }
             candidates.push((
                 overrides.get(&rarity_slot),
-                Some(rarity_sound(*rarity)),
+                Some(REWARD_SOUND),
                 SoundSource::RarityCustom,
             ));
             candidates.push((
@@ -323,20 +312,7 @@ mod tests {
     /// Everything a normal install ships.
     fn all_builtins() -> BTreeSet<String> {
         let mut set = BTreeSet::new();
-        for s in [
-            FALLBACK_SOUND,
-            COMMIT_SOUND,
-            rarity_sound(Rarity::Common),
-            rarity_sound(Rarity::Uncommon),
-            rarity_sound(Rarity::Rare),
-            rarity_sound(Rarity::Epic),
-            rarity_sound(Rarity::Legendary),
-            daily_rank_sound(DailyRank::Common),
-            daily_rank_sound(DailyRank::Uncommon),
-            daily_rank_sound(DailyRank::Rare),
-            daily_rank_sound(DailyRank::Epic),
-            daily_rank_sound(DailyRank::Legendary),
-        ] {
+        for s in [FALLBACK_SOUND, COMMIT_SOUND, REWARD_SOUND] {
             set.insert(s.to_string());
         }
         set
@@ -351,13 +327,13 @@ mod tests {
     }
 
     #[test]
-    fn a_reward_with_no_overrides_uses_its_rarity_sound() {
+    fn a_reward_with_no_overrides_uses_the_reward_sound() {
         let selection = select(
             &reward("first_commit", Rarity::Rare, None),
             &SoundOverrides::new(),
             &all_builtins(),
         );
-        assert_eq!(selection.sound, rarity_sound(Rarity::Rare));
+        assert_eq!(selection.sound, REWARD_SOUND);
         assert_eq!(selection.source, SoundSource::BuiltIn);
     }
 
@@ -426,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn a_rarity_built_in_outranks_a_global_custom_sound() {
+    fn the_reward_sound_outranks_a_global_custom_sound() {
         // Documented judgement call: category order is preserved, so a user who set
         // only a global sound still hears the rarity distinction. The alternative
         // would make every rarity sound identical.
@@ -436,7 +412,7 @@ mod tests {
         available.insert("custom-global".to_string());
 
         let selection = select(&reward("x", Rarity::Common, None), &overrides, &available);
-        assert_eq!(selection.sound, rarity_sound(Rarity::Common));
+        assert_eq!(selection.sound, REWARD_SOUND);
         assert_eq!(selection.source, SoundSource::BuiltIn);
     }
 
@@ -464,7 +440,7 @@ mod tests {
             // note: deleted-file is NOT in the available set
             &all_builtins(),
         );
-        assert_eq!(selection.sound, rarity_sound(Rarity::Rare));
+        assert_eq!(selection.sound, REWARD_SOUND);
         assert_eq!(selection.source, SoundSource::BuiltIn);
     }
 
@@ -542,32 +518,23 @@ mod tests {
     }
 
     #[test]
-    fn every_rarity_and_rank_has_a_distinct_built_in() {
-        // A duplicate id would make two rarities sound identical and look like a bug.
-        let mut ids = BTreeSet::new();
-        for r in [
-            Rarity::Common,
-            Rarity::Uncommon,
-            Rarity::Rare,
-            Rarity::Epic,
-            Rarity::Legendary,
-        ] {
-            assert!(
-                ids.insert(rarity_sound(r)),
-                "duplicate rarity sound for {r:?}"
-            );
+    fn the_reward_family_shares_one_built_in() {
+        // Documents the shipped policy: every rarity and daily rank resolves to the
+        // same asset, because Phase 2a ships one user-supplied achievement sound.
+        // The selection still routes category-specific CUSTOM sounds first, so adding
+        // per-tier files later needs no change here.
+        let builtins = all_builtins();
+        for r in [Rarity::Common, Rarity::Epic, Rarity::Legendary] {
+            let selection = select(&reward("x", r, None), &SoundOverrides::new(), &builtins);
+            assert_eq!(selection.sound, REWARD_SOUND);
         }
-        for r in [
-            DailyRank::Common,
-            DailyRank::Uncommon,
-            DailyRank::Rare,
-            DailyRank::Epic,
-            DailyRank::Legendary,
-        ] {
-            assert!(
-                ids.insert(daily_rank_sound(r)),
-                "duplicate rank sound for {r:?}"
+        for rank in [DailyRank::Common, DailyRank::Legendary] {
+            let selection = select(
+                &reward("daily:x", Rarity::Common, Some(rank)),
+                &SoundOverrides::new(),
+                &builtins,
             );
+            assert_eq!(selection.sound, REWARD_SOUND);
         }
     }
 

@@ -103,9 +103,14 @@ impl RegistrationState {
         match self {
             RegistrationState::Ready => "registered".to_string(),
             RegistrationState::ShortcutMissing { path } => {
-                format!("shortcut missing: {} (run scripts/install-companion.ps1)", path.display())
+                format!(
+                    "shortcut missing: {} (run scripts/install-companion.ps1)",
+                    path.display()
+                )
             }
-            RegistrationState::NoAppData => "APPDATA is not set; cannot locate the Start Menu".to_string(),
+            RegistrationState::NoAppData => {
+                "APPDATA is not set; cannot locate the Start Menu".to_string()
+            }
         }
     }
 }
@@ -241,8 +246,13 @@ pub fn create_shortcut(lnk: &std::path::Path, target: &std::path::Path) -> Resul
 }
 
 #[cfg(not(windows))]
-pub fn create_shortcut(_lnk: &std::path::Path, _target: &std::path::Path) -> Result<(), ToastError> {
-    Err(ToastError::Registration("shortcuts are Windows-only".into()))
+pub fn create_shortcut(
+    _lnk: &std::path::Path,
+    _target: &std::path::Path,
+) -> Result<(), ToastError> {
+    Err(ToastError::Registration(
+        "shortcuts are Windows-only".into(),
+    ))
 }
 
 /// Show a toast.

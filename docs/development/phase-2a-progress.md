@@ -540,3 +540,60 @@ SOUND play id=commit from=BuiltIn
 
 重构安装器命令时，投递出口的 **Toast 调用被整段丢掉过一次**。
 这次重写出口时补回，并由 `TOAST READY` / `TOAST FAILED` 日志可见。
+
+---
+
+## 12. 本轮：换成指定音效 + 最小诊断视图数据侧
+
+### 12.1 音效调整
+
+按用户提供的 `achievement.wav`（0.78 s，48 kHz 立体声 16-bit）替换默认音：
+
+| 槽位 | 音效 |
+| --- | --- |
+| 奖励（任意稀有度 / 每日等级） | `achievement`（用户提供） |
+| 普通提交 | `commit`（合成的 55 ms 轻提示音） |
+
+**保留提交音不变是刻意的**：§16.4 要求普通提交是「轻提示音」。
+每次提交播一段 0.78 秒的成就音，正是那条规则要避免的打扰。
+
+稀有度/每日等级的**分档音效仍然是能力**——选择逻辑没有删，
+只是这套内置资源共用一个文件。要恢复分档，改 `REWARD_SOUND` 一处即可（Phase 4a 的 Sound Manager）。
+
+同时修掉一个资源管理隐患：构建脚本原来只做 `xcopy`，
+**删掉的音效不会从产物里消失**。改成先删目录再复制。
+
+### 12.2 最小诊断视图（§32.1）数据侧
+
+新增 `crates/storage/src/diagnostics.rs` 与 `--diagnostics` 命令，输出真实 JSON：
+
+```json
+{
+  "dataDir": "~/Documents/.../data/devchievements",
+  "snapshot": {
+    "events": 3,
+    "notifications_never_shown": 0,
+    "outbox": [{ "count": 6, "status": "completed" }],
+    "repositories": [{ "alias": "repo-dd5e0648c95dc648c41e", "commits": 3 }],
+    "schema_version": 1,
+    "unlocked_achievements": ["first_commit"]
+  },
+  "sounds": ["achievement", "commit"],
+  "spool": { "pendingBytes": 0, "pendingRecords": 0 },
+  "toast": { "detail": "registered", "ready": true }
+}
+```
+
+关键点：
+
+- **仓库名是稳定别名**（§26.2），原始 id 不出现在任何可分享的输出里；
+- **数据目录被折叠**成 `~`，用户名不泄漏；
+- `notifications_never_shown` 单独统计——这是用户真正会抱怨的失败模式（§17.9）。
+
+### 12.3 写 e2e 时踩的两个坑（都是我的错）
+
+1. **脚本里误启动了一个永不退出的托盘进程**，导致整个 e2e 变成后台任务挂住。
+2. **git 提交没带 `LOCALAPPDATA`**，helper 把记录写进了真实用户目录，
+   于是 companion 读到 0 条——看起来像摄取坏了，其实是测试自己写错了地方。
+
+第 2 条尤其值得记：它会让「测试通过」建立在污染真实环境上。

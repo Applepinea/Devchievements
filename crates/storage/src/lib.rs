@@ -15,6 +15,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod diagnostics;
 pub mod history_import;
 pub mod indexeddb;
 pub mod ingest;

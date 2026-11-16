@@ -121,13 +121,13 @@ async function main() {
     // Spec 19: the leading item decides the sound, and the built-in rarity sound is
     // what an un-customised install plays.
     check(
-      "the merged popup used the rarity sound",
-      /SOUND play id=rarity-common/.test(log),
+      "the merged popup used the reward sound",
+      /SOUND play id=achievement/.test(log),
       log
     );
     check(
-      "the rank upgrade used the daily sound",
-      /SOUND play id=daily-uncommon/.test(log),
+      "the rank upgrade used the reward sound",
+      /SOUND play id=achievement/.test(log),
       log
     );
   }

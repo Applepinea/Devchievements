@@ -48,7 +48,10 @@ impl DeliverySink for DesktopSink {
                     &popup.primary_id,
                     to_sound_rarity(popup.rarity),
                 ));
-                println!("SOUND play id={} from={:?}", selection.sound, selection.source);
+                println!(
+                    "SOUND play id={} from={:?}",
+                    selection.sound, selection.source
+                );
 
                 // Spec 16.6: a popup shows the leading reward plus up to three
                 // sub-lines; the toast body carries the same shape.
@@ -65,7 +68,10 @@ impl DeliverySink for DesktopSink {
                 // because interrupting for every commit is exactly what that rule
                 // exists to prevent.
                 let selection = audio::play_for(&devchievements_sound::SoundRequest::Commit);
-                println!("SOUND play id={} from={:?}", selection.sound, selection.source);
+                println!(
+                    "SOUND play id={} from={:?}",
+                    selection.sound, selection.source
+                );
                 SHOWN.fetch_add(1, Ordering::Relaxed);
             }
             Presentation::Nothing => {}
@@ -271,6 +277,61 @@ fn main() {
         std::process::exit(if state.is_ready() { 0 } else { 3 });
     }
 
+    // Report a diagnostics snapshot as JSON (spec 32.1: minimal diagnostics view).
+    // The window that would render this cannot start here, but the data can be
+    // produced and checked, which is the part that can silently be wrong.
+    if std::env::args().any(|a| a == "--diagnostics") {
+        let data_dir = default_data_dir();
+        let rt = async_std::task::block_on(async {
+            let pool = devchievements_storage::open(&data_dir.join("companion.db")).await?;
+            devchievements_storage::ingest::migrate(&pool).await?;
+            devchievements_storage::diagnostics::snapshot(&pool, |id| {
+                // Spec 26.2: repository names are reduced to stable aliases before
+                // they appear anywhere the user might share.
+                devchievements_privacy::stable_alias(id)
+            })
+            .await
+        });
+
+        match rt {
+            Ok(snapshot) => {
+                let toast_state = toast::registration_state();
+                let spool =
+                    devchievements_git_hooks::spool::Spool::open(data_dir.join("spool")).ok();
+                let (spool_bytes, spool_records) = spool
+                    .as_ref()
+                    .and_then(|s| s.stats().ok())
+                    .unwrap_or((0, 0));
+
+                let report = serde_json::json!({
+                    "dataDir": devchievements_privacy::redact_path(
+                        &data_dir.to_string_lossy(),
+                        std::env::var("USERPROFILE").ok().as_deref(),
+                    ),
+                    "toast": {
+                        "ready": toast_state.is_ready(),
+                        "detail": toast_state.describe(),
+                    },
+                    "spool": {
+                        "pendingBytes": spool_bytes,
+                        "pendingRecords": spool_records,
+                    },
+                    "sounds": audio::available_sound_ids(),
+                    "snapshot": snapshot,
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report).unwrap_or_default()
+                );
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("{{\"error\":\"{e}\"}}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     if std::env::args().any(|a| a == "--toast-probe") {
         let tag = std::env::args()
             .position(|a| a == "--tag")
@@ -310,7 +371,15 @@ fn main() {
                 .build(app)?;
 
             let toast_state = toast::registration_state();
-            println!("TOAST {} ({})", if toast_state.is_ready() { "READY" } else { "UNAVAILABLE" }, toast_state.describe());
+            println!(
+                "TOAST {} ({})",
+                if toast_state.is_ready() {
+                    "READY"
+                } else {
+                    "UNAVAILABLE"
+                },
+                toast_state.describe()
+            );
             println!("TRAY READY data={:?}", default_data_dir());
             spawn_drain_loop();
             Ok(())

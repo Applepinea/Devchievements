@@ -43,6 +43,11 @@ fn available() -> std::collections::BTreeSet<String> {
     set
 }
 
+/// The sound ids that resolved to a file, for the diagnostics view.
+pub fn available_sound_ids() -> Vec<String> {
+    available().into_iter().collect()
+}
+
 /// Map the notification's leading reward onto a sound request.
 ///
 /// The daily-rank variant is recognised from the id the delivery layer assigns

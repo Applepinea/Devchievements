@@ -47,7 +47,9 @@ set BUILD_EXIT=%errorlevel%
 REM Sound assets must sit next to the executable: the audio layer resolves
 REM them relative to current_exe(). Copying here means every build has them.
 if exist "%~dp0..\..\apps\desktop\assets\sounds" (
-  if not exist "target\debug\sounds" mkdir "target\debug\sounds"
+  REM Mirror, do not merge: a removed sound must disappear from the build too.
+  if exist "target\debug\sounds" rmdir /S /Q "target\debug\sounds"
+  mkdir "target\debug\sounds"
   xcopy /E /I /Y /Q "%~dp0..\..\apps\desktop\assets\sounds\*.wav" "target\debug\sounds\" >nul
 )
 
