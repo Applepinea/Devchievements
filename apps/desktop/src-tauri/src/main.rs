@@ -65,14 +65,19 @@ impl DeliverySink for DesktopSink {
                 );
 
                 // Spec 16.6: the leading item's sound plays, exactly one per event.
-                let selection = audio::play_for(&audio::request_for(
-                    &popup.primary_id,
-                    to_sound_rarity(popup.rarity),
-                ));
-                println!(
-                    "SOUND play id={} from={:?}",
-                    selection.sound, selection.source
+                let prefs = settings::Settings::load(&settings_path());
+                let selection = audio::play_for_with(
+                    &audio::request_for(&popup.primary_id, to_sound_rarity(popup.rarity)),
+                    prefs.volume,
+                    prefs.muted,
                 );
+                match selection {
+                    Some(s) => println!(
+                        "SOUND play id={} from={:?} volume={}",
+                        s.sound, s.source, prefs.volume
+                    ),
+                    None => println!("SOUND suppressed muted={}", prefs.muted),
+                }
 
                 // Spec 26.2: privacy mode hides the repository and the detail and
                 // keeps the achievement name. The copy is built by the privacy crate so
@@ -100,6 +105,14 @@ impl DeliverySink for DesktopSink {
                 // The popup IS the notification channel: the system toast is not used
                 // at all, because it could not be demonstrated on this platform
                 // (ADR-0015) and a channel nobody verified is not a channel.
+                if !prefs.notifications {
+                    // Spec 34.1: the switch controls interruption only. The unlock is
+                    // already recorded and appears in the gallery.
+                    println!("POPUP suppressed notifications=off");
+                    SHOWN.fetch_add(1, Ordering::Relaxed);
+                    return DisplayOutcome::Shown;
+                }
+
                 let count = SHOWN.fetch_add(1, Ordering::Relaxed) + 1;
                 let payload = popup::PopupPayload {
                     title: copy.title.clone(),
@@ -432,6 +445,11 @@ struct SettingsView {
     privacy: String,
     timezone: Option<String>,
     data_dir: String,
+    notifications: bool,
+    volume: u8,
+    muted: bool,
+    run_mode: String,
+    database_bytes: i64,
 }
 
 /// A read-only summary for the status section.
@@ -456,6 +474,17 @@ fn get_settings() -> SettingsView {
         emails: stored.emails,
         privacy: stored.privacy.as_str().to_string(),
         timezone: stored.timezone,
+        notifications: stored.notifications,
+        volume: stored.volume,
+        muted: stored.muted,
+        // Spec 2: the mode is determined by whether the extension is present. It is
+        // never inferred from a wish; until the extension exists it is Desktop Only.
+        run_mode: "Desktop Only".to_string(),
+        database_bytes: std::fs::metadata(&data_dir)
+            .ok()
+            .and_then(|_| std::fs::metadata(data_dir.join("companion.db")).ok())
+            .map(|m| m.len() as i64)
+            .unwrap_or(0),
         // Spec 26.2: the page shows where data lives, so it is redacted the same way
         // a diagnostic export would be.
         data_dir: devchievements_privacy::redact_path(
@@ -482,6 +511,11 @@ fn save_settings(settings: SettingsView) -> Result<(), String> {
         _ => settings::PrivacyMode::Normal,
     };
     stored.timezone = settings.timezone.filter(|t| !t.trim().is_empty());
+    stored.notifications = settings.notifications;
+    // Clamp instead of trusting the caller: a volume outside 0-100 would either be
+    // ignored by the audio path or overflow the gain arithmetic.
+    stored.volume = settings.volume.min(100);
+    stored.muted = settings.muted;
 
     stored.save(&path).map_err(|e| e.to_string())?;
 
@@ -787,6 +821,72 @@ fn main() {
         std::process::exit(0);
     }
 
+    // Set the user-facing notification controls from the command line. The window is
+    // the normal route; a test cannot toggle a switch.
+    if let Some(i) = std::env::args().position(|a| a == "--set-notifications") {
+        let Some(value) = std::env::args().nth(i + 1) else {
+            println!("SETTINGS FAILED: --set-notifications needs on or off");
+            std::process::exit(2);
+        };
+        let path = settings_path();
+        let mut stored = settings::Settings::load(&path);
+        stored.notifications = value == "on";
+        match stored.save(&path) {
+            Ok(()) => {
+                println!("NOTIFICATIONS {}", if stored.notifications { "on" } else { "off" });
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("SETTINGS FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if let Some(i) = std::env::args().position(|a| a == "--set-volume") {
+        let Some(value) = std::env::args().nth(i + 1) else {
+            println!("SETTINGS FAILED: --set-volume needs 0-100");
+            std::process::exit(2);
+        };
+        let Ok(volume) = value.parse::<u8>() else {
+            println!("SETTINGS FAILED: volume must be a number");
+            std::process::exit(2);
+        };
+        let path = settings_path();
+        let mut stored = settings::Settings::load(&path);
+        stored.volume = volume.min(100);
+        match stored.save(&path) {
+            Ok(()) => {
+                println!("VOLUME {}", stored.volume);
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("SETTINGS FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if let Some(i) = std::env::args().position(|a| a == "--set-muted") {
+        let Some(value) = std::env::args().nth(i + 1) else {
+            println!("SETTINGS FAILED: --set-muted needs on or off");
+            std::process::exit(2);
+        };
+        let path = settings_path();
+        let mut stored = settings::Settings::load(&path);
+        stored.muted = value == "on";
+        match stored.save(&path) {
+            Ok(()) => {
+                println!("MUTED {}", if stored.muted { "on" } else { "off" });
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("SETTINGS FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     if std::env::args().any(|a| a == "--capabilities") {
         let caps = current_capabilities();
         let report = serde_json::json!({
@@ -912,9 +1012,13 @@ fn main() {
             commands::onboarding_status,
             commands::install_hooks,
             commands::complete_onboarding,
+            commands::open_data_folder,
+            commands::clear_data,
             commands::onboarding_status,
             commands::install_hooks,
             commands::complete_onboarding,
+            commands::open_data_folder,
+            commands::clear_data,
             commands::restore_database,
             commands::open_window,
         ])

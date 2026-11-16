@@ -1,11 +1,40 @@
 import { useCallback, useEffect, useState } from "react";
-import { getSettings, saveSettings, type SettingsView } from "../ipc";
+import {
+  backupDatabase,
+  clearData,
+  getSettings,
+  openDataFolder,
+  saveSettings,
+  type SettingsView,
+} from "../ipc";
 
 export default function Settings() {
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>("");
   const [saving, setSaving] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [backupNotice, setBackupNotice] = useState<string>("");
+
+  const onBackup = async () => {
+    try {
+      const report = await backupDatabase();
+      setBackupNotice("Backup written: " + (report.bytes / 1024).toFixed(1) + " KB");
+    } catch (e) {
+      setBackupNotice("Backup failed: " + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
+  const onClear = async () => {
+    try {
+      await clearData();
+      setBackupNotice("Statistics deleted.");
+      setConfirmClear(false);
+      await load();
+    } catch (e) {
+      setBackupNotice("Delete failed: " + (e instanceof Error ? e.message : String(e)));
+    }
+  };
 
   const load = useCallback(
     () =>
@@ -92,6 +121,55 @@ export default function Settings() {
         screen sharing.
       </p>
 
+      <h3>Notifications</h3>
+      <label className="row">
+        <input
+          type="checkbox"
+          checked={settings.notifications}
+          onChange={(e) => update({ notifications: e.target.checked })}
+        />
+        <span>Show a popup when an achievement unlocks</span>
+      </label>
+      <p className="muted">
+        Turning this off stops the interruption, not the counting: unlocks still
+        happen and still appear in the gallery.
+      </p>
+
+      <h3>Sound</h3>
+      <label className="row">
+        <input
+          type="checkbox"
+          checked={settings.muted}
+          onChange={(e) => update({ muted: e.target.checked })}
+        />
+        <span>Mute all sound</span>
+      </label>
+      <div className="row">
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={settings.volume}
+          disabled={settings.muted}
+          onChange={(e) => update({ volume: Number(e.target.value) })}
+          className="slider"
+        />
+        <span className="mono">{settings.volume}</span>
+      </div>
+      <p className="muted">
+        Volume applies to this app only, by scaling the played samples rather than
+        changing the system volume.
+      </p>
+
+      <h3>Run mode</h3>
+      <p className="muted">
+        <strong>{settings.runMode}</strong>
+      </p>
+      <p className="muted">
+        Browser-based features (pull requests, releases, issues) need the extension;
+        in Desktop Only they are listed as unavailable rather than hidden.
+      </p>
+
       <h3>Timezone</h3>
       <input
         value={settings.timezone ?? ""}
@@ -103,7 +181,35 @@ export default function Settings() {
       </p>
 
       <h3>Data</h3>
+      <p className="muted">
+        Database: {(settings.databaseBytes / 1024).toFixed(1)} KB
+      </p>
       <p className="tiny">{settings.dataDir}</p>
+      <div className="row">
+        <button onClick={() => void openDataFolder()}>Open folder</button>
+        <button onClick={() => void onBackup()}>Back up now</button>
+      </div>
+      <p className="notice">{backupNotice}</p>
+
+      <div className="row">
+        {confirmClear ? (
+          <>
+            <button className="danger" onClick={() => void onClear()}>
+              Yes, delete everything
+            </button>
+            <button className="ghost" onClick={() => setConfirmClear(false)}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button className="ghost" onClick={() => setConfirmClear(true)}>
+            Delete all statistics
+          </button>
+        )}
+      </div>
+      <p className="muted">
+        Deleting removes the database and the spool. Settings and backups stay.
+      </p>
 
       <div className="row">
         <button onClick={() => void save()} disabled={saving}>

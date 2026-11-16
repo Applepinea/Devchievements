@@ -104,6 +104,11 @@ export interface SettingsView {
   privacy: "normal" | "privacy";
   timezone: string | null;
   dataDir: string;
+  notifications: boolean;
+  volume: number;
+  muted: boolean;
+  runMode: string;
+  databaseBytes: number;
 }
 
 export interface StatusView {
@@ -178,4 +183,6 @@ export const onboardingStatus = () =>
 export const installHooks = (repoPath: string) =>
   invoke<HookInstallResult[]>("install_hooks", { repoPath });
 export const completeOnboarding = () => invoke<void>("complete_onboarding");
+export const openDataFolder = () => invoke<void>("open_data_folder");
+export const clearData = () => invoke<void>("clear_data");
 export const uiReady = (view: string) => invoke<void>("ui_ready", { view });

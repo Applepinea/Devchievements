@@ -67,9 +67,29 @@ pub struct Settings {
     /// IANA timezone used for local_date (spec 12).
     #[serde(default)]
     pub timezone: Option<String>,
+    /// Whether notifications are shown at all (spec 34.1).
+    ///
+    /// Achievements are still recorded when this is off: the setting controls
+    /// interruption, not whether work counts.
+    #[serde(default = "default_true")]
+    pub notifications: bool,
+    /// Playback volume, 0-100.
+    #[serde(default = "default_volume")]
+    pub volume: u8,
+    /// Whether sound is muted entirely.
+    #[serde(default)]
+    pub muted: bool,
     /// Whether the first-run wizard has been completed (spec 25).
     #[serde(default, rename = "onboardingCompleted")]
     pub onboarding_completed: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_volume() -> u8 {
+    80
 }
 
 fn default_schema_version() -> u32 {
@@ -83,6 +103,9 @@ impl Default for Settings {
             emails: Vec::new(),
             privacy: PrivacyMode::Normal,
             timezone: None,
+            notifications: true,
+            volume: 80,
+            muted: false,
             onboarding_completed: false,
         }
     }

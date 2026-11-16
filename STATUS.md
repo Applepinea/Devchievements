@@ -55,7 +55,7 @@ ALL CHECKS PASSED
 | 2b.2 | 兼容性矩阵更新（§29.6） | `Partially Implemented` | 本轮实测行已更新；其余平台未验证 |
 | 2b.3 | Dashboard / Gallery / Activity / Repository Manager / About | `Tested` | 5 个页面全部读真实数据库；`pages` e2e 18 项通过 |
 | 2b.4 | 历史导入界面与完整流程 | `Tested` | 管线 + Repository Manager + **向导导入步骤**；静默/幂等/跨路径去重/原始日期已测 |
-| 2b.5 | 基础 Settings 界面 | `Tested` | 身份/隐私/时区/数据四块 + 无身份引导 |
+| 2b.5 | 基础 Settings | `Tested` | 身份/通知开关/音量与静音/隐私/运行模式/时区/数据管理（打开目录、备份、清除）；`notification-settings` e2e 12 项 |
 | 2b.6 | 安装向导 / 卸载机制 | `Tested` | 三步向导（身份→钩子→完成）+ 残留 Hook 静默退出；`wizard` e2e 9 项、`uninstall` 4 项 |
 | 2b.7 | 数据备份与恢复 | `Tested` | `backup-restore` e2e 13 项：真备份、真删除、真恢复、数据一致、拒收非数据库 |
 | 2b.8 | Outbox 可观测性（延迟分布与原因码） | `Tested` | 7 个测试（含真实数据库）；已并入 `--diagnostics` |

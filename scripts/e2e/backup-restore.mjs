@@ -108,10 +108,11 @@ function main() {
     JSON.stringify(snapshotAfter?.snapshot?.repositories) === JSON.stringify(snapshotBefore?.snapshot?.repositories),
     JSON.stringify(snapshotAfter?.snapshot?.repositories)
   );
+  check("the snapshot actually lists an achievement", (snapshotBefore?.snapshot?.unlocked_achievements ?? []).length > 0, JSON.stringify(snapshotBefore?.snapshot?.unlocked_achievements));
   check(
     "the restored database still knows the achievement",
-    JSON.stringify(snapshotAfter?.snapshot?.unlockedAchievements) === JSON.stringify(snapshotBefore?.snapshot?.unlockedAchievements),
-    JSON.stringify(snapshotAfter?.snapshot?.unlockedAchievements)
+    JSON.stringify(snapshotAfter?.snapshot?.unlocked_achievements) === JSON.stringify(snapshotBefore?.snapshot?.unlocked_achievements),
+    JSON.stringify(snapshotAfter?.snapshot?.unlocked_achievements)
   );
 
   // A file that is not a database must be refused rather than overwrite the data.

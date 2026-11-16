@@ -418,6 +418,46 @@ pub fn complete_onboarding() -> Result<(), String> {
     Ok(())
 }
 
+/// Open the data directory in the file manager.
+#[tauri::command]
+pub fn open_data_folder() -> Result<(), String> {
+    let dir = default_data_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // Opening a folder is a shell action, not something to reimplement.
+    std::process::Command::new("explorer.exe")
+        .arg(&dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Delete every recorded statistic, keeping the settings file.
+///
+/// This is the destructive half of data management, so it is a separate command
+/// that the UI only calls after an explicit confirmation.
+#[tauri::command]
+pub async fn clear_data() -> Result<(), String> {
+    let dir = default_data_dir();
+    let db = dir.join("companion.db");
+
+    // Deleting while a pool has the file open fails on Windows, so the files are
+    // removed rather than truncated.
+    for suffix in ["", "-wal", "-shm"] {
+        let path = std::path::PathBuf::from(format!("{}{suffix}", db.to_string_lossy()));
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+        }
+    }
+
+    let spool = dir.join("spool");
+    if spool.exists() {
+        std::fs::remove_dir_all(&spool).map_err(|e| e.to_string())?;
+    }
+
+    println!("DATA cleared");
+    Ok(())
+}
+
 /// Open the settings window (used by the dashboard shortcut).
 #[tauri::command]
 pub fn open_window(app: tauri::AppHandle) -> Result<(), String> {

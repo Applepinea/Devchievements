@@ -120,7 +120,7 @@ function main() {
   );
   check(
     "the schema version is reported",
-    (b?.snapshot?.schema_version ?? b?.snapshot?.schemaVersion ?? 0) > 0,
+    (b?.snapshot?.schema_version ?? 0) > 0,
     JSON.stringify(b?.snapshot)
   );
 
