@@ -75,7 +75,7 @@ ALL CHECKS PASSED
 | 2a.7 | SQLite 持久化接入 Helper | `Tested` | 完整闭环：commit→hook→helper→spool→companion→SQLite |
 | 2a.8 | Outbox Consumer（Desktop 子集） | `Tested` | 投递、重试、`delivery_unknown` 均有测试 |
 | 2a.9 | 桌面弹窗与提示音 | `Partially Implemented` | **提示音已完成并实测**；Toast 注册与调用已实现（安装器 exit 0），**端到端未通过** |
-| 2a.15 | Toast 端到端验证 | `Platform Unverified` | 已排除 API/运行时/Package Identity/签名有无/启动方式；见 [报告](docs/development/toast-identity-blocker.md) |
+| 2a.15 | Toast 端到端 | `Platform Unverified` | 注册已实测正确（快捷方式/注册表/进程 AUMID），但 `CreateToastNotifierWithId` 对**任何** AUMID 均返回 `0x80073D54`；PowerShell 同 AUMID 成功 → 失败在进程层 |
 | 2a.16 | AppNotificationManager 替代路线 | `Not Started` | 见 [ADR-0016](docs/decisions/0016-notification-api-choice.md) |
 | 2a.17 | Sparse Packaging（若确需 Package Identity） | `Not Started` | 见 ADR-0016 |
 | 2a.10 | Companion 启动消费 Spool | `Tested` | 无头 Companion 真实消费并计数 |

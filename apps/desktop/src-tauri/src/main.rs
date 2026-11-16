@@ -864,6 +864,32 @@ fn main() {
         std::process::exit(0);
     }
 
+    // Probe with a specific AUMID: separates our registration from the process.
+    if let Some(i) = std::env::args().position(|a| a == "--toast-aumid") {
+        let Some(aumid) = std::env::args().nth(i + 1) else {
+            println!("TOAST FAILED: --toast-aumid needs an identifier");
+            std::process::exit(2);
+        };
+        match toast::show_with_aumid(&aumid, "Devchievements", "probe") {
+            Ok(()) => println!("TOAST OK aumid={aumid}"),
+            Err(e) => println!("TOAST FAILED aumid={aumid} error={e}"),
+        }
+        std::process::exit(0);
+    }
+
+    if std::env::args().any(|a| a == "--toast-selftest") {
+        let lines = toast::selftest();
+        for line in &lines {
+            println!("{line}");
+        }
+        // Launching through a shortcut cannot redirect stdout, so the result is also
+        // written to a file when asked. Without this the shortcut case is untestable.
+        if let Some(path) = std::env::var_os("DEVCH_SELFTEST_OUT") {
+            let _ = std::fs::write(path, lines.join("\n"));
+        }
+        std::process::exit(0);
+    }
+
     if std::env::args().any(|a| a == "--toast-probe") {
         let tag = std::env::args()
             .position(|a| a == "--tag")

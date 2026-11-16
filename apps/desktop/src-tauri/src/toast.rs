@@ -268,6 +268,118 @@ pub fn show(title: &str, body: &str, tag: &str) -> Result<(), ToastError> {
     show_registered(title, body, tag)
 }
 
+/// Show a toast as an explicit AppUserModelID.
+///
+/// Exists for diagnostics: probing a known-good identifier separates a broken
+/// registration of ours from a process that cannot use toasts at all.
+pub fn show_with_aumid(aumid: &str, title: &str, body: &str) -> Result<(), ToastError> {
+    use windows::core::HSTRING;
+    use windows::UI::Notifications::{
+        ToastNotification, ToastNotificationManager, ToastTemplateType,
+    };
+
+    let xml = ToastNotificationManager::GetTemplateContent(ToastTemplateType::ToastText02)
+        .map_err(|e| ToastError::WinRt(format!("GetTemplateContent: {e}")))?;
+    let texts = xml
+        .GetElementsByTagName(&HSTRING::from("text"))
+        .map_err(|e| ToastError::WinRt(format!("GetElementsByTagName: {e}")))?;
+    let title_node = xml
+        .CreateTextNode(&HSTRING::from(title))
+        .map_err(|e| ToastError::Payload(format!("title: {e}")))?;
+    texts
+        .Item(0)
+        .and_then(|n| n.AppendChild(&title_node))
+        .map_err(|e| ToastError::Payload(format!("append title: {e}")))?;
+    let body_node = xml
+        .CreateTextNode(&HSTRING::from(body))
+        .map_err(|e| ToastError::Payload(format!("body: {e}")))?;
+    texts
+        .Item(1)
+        .and_then(|n| n.AppendChild(&body_node))
+        .map_err(|e| ToastError::Payload(format!("append body: {e}")))?;
+
+    let toast = ToastNotification::CreateToastNotification(&xml)
+        .map_err(|e| ToastError::WinRt(format!("CreateToastNotification: {e}")))?;
+    let notifier = ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(aumid))
+        .map_err(|e| ToastError::WinRt(format!("CreateToastNotifierWithId({aumid}): {e}")))?;
+    notifier
+        .Show(&toast)
+        .map_err(|e| ToastError::WinRt(format!("Show: {e}")))?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn show_with_aumid(_aumid: &str, _title: &str, _body: &str) -> Result<(), ToastError> {
+    Err(ToastError::Registration("toasts are Windows-only".into()))
+}
+
+/// Diagnose the toast path step by step.
+///
+/// Prints each step's result because the API reports one opaque HRESULT for very
+/// different failures, and guessing which step failed has already cost time.
+pub fn selftest() -> Vec<String> {
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::UI::Notifications::{ToastNotificationManager, ToastTemplateType};
+    use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+
+    let mut out = Vec::new();
+
+    // Apartment test. PowerShell 5.1 runs STA and its toasts work here; this process
+    // does not initialise COM on the CLI path, so WinRT picks MTA. If the notification
+    // factory cares about the apartment, this line changes the result below.
+    let hr = unsafe {
+        windows::Win32::System::Com::CoInitializeEx(
+            None,
+            windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
+        )
+    };
+    out.push(format!("CoInitializeEx(STA): {hr:?}"));
+
+    let wide: Vec<u16> = APP_USER_MODEL_ID
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let set = unsafe { SetCurrentProcessExplicitAppUserModelID(PCWSTR(wide.as_ptr())) };
+    out.push(match set {
+        Ok(()) => "SetCurrentProcessExplicitAppUserModelID: ok".to_string(),
+        Err(e) => format!("SetCurrentProcessExplicitAppUserModelID: {e}"),
+    });
+
+    out.push(format!(
+        "shortcut present: {}",
+        shortcut_path().map(|p| p.exists()).unwrap_or(false)
+    ));
+
+    match ToastNotificationManager::GetTemplateContent(ToastTemplateType::ToastText02) {
+        Ok(_) => out.push("GetTemplateContent: ok".to_string()),
+        Err(e) => out.push(format!("GetTemplateContent: {e}")),
+    }
+
+    // The no-argument overload uses the process AUMID and is documented for
+    // unpackaged apps that set one.
+    match ToastNotificationManager::CreateToastNotifier() {
+        Ok(_) => out.push("CreateToastNotifier(): ok".to_string()),
+        Err(e) => out.push(format!("CreateToastNotifier(): {e}")),
+    }
+
+    match ToastNotificationManager::CreateToastNotifierWithId(&HSTRING::from(APP_USER_MODEL_ID)) {
+        Ok(_) => out.push("CreateToastNotifierWithId(ours): ok".to_string()),
+        Err(e) => out.push(format!("CreateToastNotifierWithId(ours): {e}")),
+    }
+
+    // What identity Windows associates with this process right now.
+    match unsafe { windows::Win32::UI::Shell::GetCurrentProcessExplicitAppUserModelID() } {
+        Ok(id) => out.push(format!("process AUMID: {:?}", unsafe { id.to_string() })),
+        Err(e) => out.push(format!("process AUMID: none ({e})")),
+    }
+    out
+}
+
+#[cfg(not(windows))]
+pub fn selftest() -> Vec<String> {
+    vec!["toasts are Windows-only".to_string()]
+}
+
 #[cfg(windows)]
 fn show_registered(title: &str, body: &str, tag: &str) -> Result<(), ToastError> {
     use windows::core::HSTRING;

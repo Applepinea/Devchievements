@@ -69,3 +69,50 @@ node scripts/verify.mjs
 powershell -File scripts/install-companion.ps1
 node scripts/e2e/toast.mjs        # 退出码 0 才可把 STATUS 改成 Tested
 ```
+
+---
+
+## 2026-11-17 复测：结论被推翻
+
+### 本轮测得的硬事实
+
+| 测量 | 结果 |
+| --- | --- |
+| `msedgewebview2.exe --version` 退出码 13 | **与 Toast 无关**（该参数不被支持） |
+| 快捷方式 target | 正是当前 exe，且 `Get-StartApps` 读到 `Devchievements.Companion` |
+| 注册表 `HKCU\Software\Classes\AppUserModelId` | 存在，DisplayName 正确 |
+| 进程 AUMID | `GetCurrentProcessExplicitAppUserModelID` = `Devchievements.Companion` |
+| `GetTemplateContent` | 成功（WinRT 本身可用） |
+| `CreateToastNotifierWithId(ours)` | `0x80073D54` |
+| **`CreateToastNotifierWithId(Microsoft.Windows.Explorer)`** | **同样 `0x80073D54`** |
+| `CreateToastNotifier()`（无参重载） | `0x80070490` |
+| 从开始菜单快捷方式启动 | 无差别 |
+| STA 公寓（`CoInitializeEx` 返回 S_OK） | 无差别 |
+| **PowerShell 用我们的 AUMID 弹窗** | **成功** |
+
+### 这推翻了什么
+
+旧文档写的是「缺快捷方式导致 `0x80073D54`」。
+**这个因果是错的**：快捷方式完全正确，失败依旧。
+
+决定性证据是 **Explorer 的系统 AUMID 也失败**——
+如果问题在注册，系统自带的标识不可能也失败。
+
+所以失败点在**进程**，不在标识。
+
+### 因此也没有「修好注册就能好」这回事
+
+ADR-0015 的结论「注册齐了就成功」不再成立。
+在找到进程级差异之前，**不能声称修好了注册就能弹窗**。
+
+### 仍未排除的方向
+
+1. **应用清单缺 `maxversiontested`**：微软对未打包应用的文档要求该项，
+   Rust MSVC 默认清单不含它。这是目前最有说服力的剩余猜想。
+2. **Windows App SDK 的 `AppNotificationManager`**：官方为未打包应用准备的正路，
+   但需要引入 AppRuntime 引导器（见 2a.16）。
+
+### 状态
+
+Toast 端到端仍为 **未验证**。`node scripts/e2e/toast.mjs` 退出码 2（环境阻止验证）。
+降级链中间档在本机不可用，产品侧已按 §29.1 降级为仅应用内提示。
