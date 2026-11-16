@@ -1,105 +1,167 @@
 # Devchievements
 
-**Achievements for Developers**
+让每一次代码提交，都成为值得收藏的成就。
 
-Devchievements 是一个跨平台桌面软件 + 浏览器扩展，把开发者的 Git 活动转化为游戏化的成就、每日等级、提示音和可自定义的视觉通知。
+编写代码 · 提交成果 · 解锁成就
 
-> **独立第三方应用。** 与 GitHub 无隶属、认可或赞助关系。
-> **本地优先。** 所有活动数据默认只存在本地，遥测默认关闭。
+Devchievements 是一款面向开发者的本地成就系统，将日常开发活动转化为游戏化的成就、等级与里程碑。
 
----
+每一次代码提交、每一个项目、每一次技术突破，都值得被记录。
 
-## 当前状态：Phase 0（技术验证）
+让开发不再只有代码，还有值得收藏的成长记录。
 
-**这个仓库现在还跑不出成就弹窗。** Phase 0 的目标是验证架构可行性、建立工程基础，并产出 ADR 与 Git 行为实验数据。产品功能从 Phase 2a 开始出现。
+⸻
 
-真实进度见 **[STATUS.md](STATUS.md)** —— 它是唯一权威进度表。
+✨ 核心功能
 
----
+🏆 成就系统
 
-## 快速开始
+将开发过程中的各种活动转化为可解锁的成就。
 
-```powershell
-# 1. 一次性：重建隔离工具链（幂等；约 1.6 GB，全部在 ../_toolchain 内）
-. .\scripts\install-toolchain.ps1
+* 编程成就：记录代码提交、编程活动和开发里程碑。
+* GitHub 成就：记录仓库、拉取请求、议题等活动。
+* 项目成就：追踪项目创建、开发进度和重要版本。
+* 学习成就：记录技术探索与知识积累。
+* 隐藏成就：发现特殊条件，解锁隐藏奖励。
 
-# 2. 每个新 Shell：下发环境变量
-. .\scripts\env.ps1
+成就解锁后将永久保存，不会因为后续活动变化而丢失。
 
-# 3. 每个新 Shell：启动本地 crates 代理（本机 schannel 缺陷的绕过）
-. .\scripts\start-crates-proxy.ps1
+📈 开发者等级
 
-# 4. 验证一切
-node scripts/verify.mjs
-```
+让每天的开发活动都有迹可循。
 
-预期输出：
+* 根据每日代码提交次数计算等级进度。
+* 记录每日开发里程碑。
+* 查看个人开发活动和历史记录。
+* 追踪长期开发进度。
 
-```text
-PASS  fmt / clippy / test / build / build-wasm / extension-build
-ALL CHECKS PASSED
-```
+🔔 成就通知
 
-> ⚠️ Rust 工具链装在**仓库外**的 `../_toolchain```，未写入系统环境变量。
-> 原因（无管理员权限、无 MSVC、schannel 损坏）见 [ADR-0012](docs/decisions/0012-isolated-dev-toolchain.md)。
+重要时刻，不应该悄无声息。
 
----
+* Windows 桌面成就通知。
+* 成就解锁音效。
+* 等级提升提醒。
+* 自定义通知外观与提示音。
 
-## 仓库结构
+🎨 个性化设置
 
-```text
-devchievements/
-├── apps/
-│   ├── desktop/          # Tauri 2 + React + TS（Phase 2a 起）
-│   ├── extension/        # WXT + MV3 浏览器扩展
-│   └── native-host/      # Native Messaging Host（Rust）
-├── crates/
-│   ├── core/             # Engine：纯逻辑，可编译到 native 与 wasm32
-│   ├── git-hooks/        # 直读 .git 的 Helper（含 inflate 与 commit 解析）
-│   ├── storage/          # SQLite + SQLx 适配器
-│   └── ...               # events / achievements / daily-rank / notifications / ...
-├── packages/
-│   └── golden-tests/fixtures/git-traces/   # 15 份可回放的 Git 行为 trace
-├── docs/
-│   ├── spec/             # 产品规范拆分件（逐字一致）
-│   ├── decisions/        # ADR
-│   └── development/      # 环境基线、风险分析、实验记录、兼容性矩阵
-├── scripts/              # 环境脚本、Git 实验、WASM spike、verify.mjs
-└── AGENTS.md  STATUS.md
-```
+打造属于自己的成就体验。
 
----
+* 自定义成就通知图片。
+* 自定义提示音。
+* 调整通知窗口大小。
+* 自定义部分成就规则与统计范围。
 
-## 文档入口
+🔒 本地优先
 
-| 文档 | 用途 |
-| --- | --- |
-| [AGENTS.md](AGENTS.md) | 所有 Agent 的强制约束 |
-| [STATUS.md](STATUS.md) | 唯一权威进度表 |
-| [docs/spec/README.md](docs/spec/README.md) | 产品规范章节索引 |
-| [environment-baseline.md](docs/development/environment-baseline.md) | 本机环境事实 |
-| [risk-analysis.md](docs/development/risk-analysis.md) | 技术风险与当前状态 |
-| [git-behavior-experiments.md](docs/development/git-behavior-experiments.md) | 15 场景 Git 行为实验记录 |
-| [phase-0-report.md](docs/development/phase-0-report.md) | Phase 0 结果与下一步 |
-| [platform-matrix.md](docs/development/platform-matrix.md) | 平台兼容性矩阵 |
-| [docs/decisions/README.md](docs/decisions/README.md) | ADR 索引 |
-| [startup-checklist.md](docs/development/startup-checklist.md) | 每次开工的自检清单 |
+你的开发数据应该由你掌控。
 
----
+* 本地保存成就和活动记录。
+* 尽可能减少不必要的数据收集。
+* 明确区分本地 Git 事件与 GitHub 平台数据。
+* 外部账号授权遵循最小权限原则。
 
-## 技术栈
+⸻
 
-Tauri 2 · Rust · React · TypeScript · WXT · Manifest V3 · SQLite + SQLx · IndexedDB · Native Messaging · WASM
+🖥️ 平台支持
 
----
+操作系统
 
-## 许可证
+平台	支持状态
+Windows 10 / 11	首发目标平台
+Linux	暂不支持
+macOS	暂不支持
 
-尚未确定（`UNLICENSED`）。公开发布前需用户确认。
+平台集成
 
----
+平台	支持状态
+GitHub	当前唯一目标平台
+哔哩哔哩	暂不支持
+YouTube	暂不支持
+其他平台	暂不支持
 
-## Platform
+当前版本专注于 Windows 和 GitHub 生态，暂不支持其他操作系统及内容平台。
 
-Windows 10/11 only. macOS and Linux are out of scope by decision
-([ADR-0017](docs/decisions/0017-windows-only.md)).
+⸻
+
+🎮 成就分类
+
+Devchievements 将成就划分为多个类别：
+
+分类	说明
+💻 编程	编程与代码活动
+🌐 社区	GitHub 社区与协作
+🚀 项目	项目创建与开发里程碑
+🧠 学习	技术学习与知识积累
+🔍 探索	技术探索与工具使用
+🏅 里程碑	长期开发里程碑
+👀 隐藏	需要探索才能解锁的特殊成就
+
+⸻
+
+🛠️ 技术架构
+
+Devchievements 采用模块化架构，将成就判定、数据采集、持久化存储和通知系统分离。
+
+核心设计目标：
+
+* 模块化架构：各功能模块保持低耦合。
+* 事件驱动引擎：通过统一事件模型处理开发活动。
+* 本地数据存储：持久化保存成就和活动数据。
+* 可扩展集成架构：为未来接入其他平台预留扩展能力。
+* 可靠通知机制：通过可靠的事件队列处理通知任务。
+
+⸻
+
+🚧 开发路线图
+
+Devchievements 目前仍处于开发阶段，以下为当前规划。
+
+* [ ]	核心成就判定引擎
+* [ ]	Git 活动采集与事件处理
+* [ ]	本地数据库与成就持久化
+* [ ]	Windows 桌面通知系统
+* [ ]	每日等级与里程碑系统
+* [ ]	主界面与成就图鉴
+* [ ]	GitHub 浏览器集成
+* [ ]	自定义成就与通知设置
+* [ ]	正式发布与自动更新
+
+功能和开发计划可能根据实际进度调整。
+
+⸻
+
+📦 安装
+
+敬请期待。
+
+项目目前处于开发阶段，暂未提供稳定的正式发行版本。
+
+正式版本发布后，将在 GitHub 发布页面提供安装包。
+
+⸻
+
+🤝 参与贡献
+
+欢迎开发者参与 Devchievements 的改进。
+
+如果你发现了问题、有新的成就设计，或希望提出功能建议，欢迎通过 GitHub Issues 提交反馈。
+
+在提交代码前，请先阅读项目贡献指南（发布后）。
+
+⸻
+
+📄 开源协议
+
+开源协议将在首次公开发布前确定。
+
+⸻
+
+<div align="center">
+
+让每一次提交，都有所成就。
+
+你的代码记录着成长，你的成就见证着旅程。
+
+</div>
