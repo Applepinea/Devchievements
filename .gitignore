@@ -47,6 +47,13 @@ apps/extension/.wxt/
 # Browser profiles created during automated verification attempts
 **/chrome-profile*/
 
+# End-to-end scratch directories (regenerable)
+/scripts/e2e/.crash/
+/scripts/e2e/.loop/
+/scripts/e2e/.out/
+/scripts/e2e/.out2/
+/scripts/e2e/.dbg/
+
 # Verification output (regenerable)
 /.verify/
 

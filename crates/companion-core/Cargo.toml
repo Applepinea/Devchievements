@@ -1,0 +1,25 @@
+[package]
+name = "devchievements-companion-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Headless Companion data loop: spool consumption, ingestion, outbox delivery. No UI, no windowing, fully testable."
+
+[dependencies]
+devchievements-core = { path = "../core" }
+devchievements-events = { path = "../events" }
+devchievements-storage = { path = "../storage" }
+devchievements-notifications = { path = "../notifications" }
+# Same SQLx-only rule as the storage crate (AGENTS.md 3: never mix with rusqlite).
+sqlx = { version = "0.8", default-features = false, features = ["runtime-async-std", "sqlite", "migrate"] }
+devchievements-git-hooks = { path = "../git-hooks" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

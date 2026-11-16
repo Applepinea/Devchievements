@@ -92,7 +92,7 @@ sh.exe: *** fatal error - couldn't create signal pipe, Win32 error 5
 
 | 项 | 阻塞原因 |
 | --- | --- |
-| Tauri Companion 与系统托盘 | **无 MSVC** |
+| Tauri Companion 与系统托盘 | **无 MSVC**（但**数据闭环已完成**，见 §5） |
 | 桌面弹窗与提示音 | 需要 Companion 窗口 |
 | 实时 IPC 通道（Named Pipe 服务端） | 需要 Companion 进程 |
 | Outbox Consumer | 需要 Companion 循环 |
@@ -116,3 +116,65 @@ sh.exe: *** fatal error - couldn't create signal pipe, Win32 error 5
 但「一个真实的 Husky/Lefthook 环境里链式是否真的被调用」**未验证**。
 
 这一条同时记在 [platform-matrix.md](platform-matrix.md) 与 STATUS。
+
+---
+
+## 5. 本轮：把 Companion 的数据回路做完并真实验证
+
+### 5.1 为什么先做无头 Companion
+
+§32.1 要求的「SQLite 持久化、Engine 调用、Outbox Consumer、启动消费 Spool」
+**没有一项需要窗口**。只有最后的弹窗需要。
+
+所以把数据回路做成独立库 `crates/companion-core` + 无头二进制
+`apps/companion-headless`，好处是实质性的：
+
+1. **可以真测**：真 SQLite 文件、真 Spool 目录、真记录格式。
+2. **崩溃可测**：§32.5 要求 kill 进程。kill 一个无头二进制是常规操作，
+   kill 一个 GUI 再断言其内部状态不是。
+
+Tauri 层将来只是「加窗口 + 调用同一组方法」，不重新实现任何逻辑。
+
+### 5.2 完整闭环已跑通
+
+`node scripts/e2e/full-loop.mjs`：
+
+```text
+  ok   commit 0/1/2 succeeded with the hook installed
+  info helper wrote 3 spool file(s)
+  |  DRAIN read=3 ingested=3 dup=0 refused=0 failed=0 queued=6 consumed=3
+  |  NOTIFY ach:first_commit:... achievement_unlocked
+  |  NOTIFY rank:common:... daily_rank_upgrade
+  |  NOTIFY rank:uncommon:... daily_rank_upgrade
+  |  DELIVER shown=6 unknown=0
+  ok   a second run reads nothing new
+FULL LOOP PASSED
+```
+
+真仓库、真 `git commit`、真 helper、真 Companion、真 SQLite。
+**唯一替换的是渲染层**（stdout 而非窗口），因为窗口需要 MSVC。
+
+### 5.3 Crash Recovery 矩阵（§32.5）部分完成
+
+`node scripts/e2e/crash-recovery.mjs` → **CRASH MATRIX PASSED**（12 项检查）
+
+| 场景 | 结果 |
+| --- | --- |
+| 1. Hook 写入 Spool | ✅ 计数一次，文件被消费 |
+| 3. 事务提交前中断 | ✅ 重放被判重，不重复计数 |
+| 4. 提交后、消费前中断 | ✅ 重启不重复投递 |
+| 6. 展示尝试已持久化、完成丢失 | ✅ 恢复为 unknown，**不再展示** |
+| 2. IPC 已到达但确认丢失 | ❌ 未覆盖（需要实时 IPC 通道） |
+| 5. Outbox 消费中 | ❌ 未覆盖（需要可强杀的窗口进程） |
+
+**未覆盖的两项是明确写出来的，不是悄悄跳过。**
+
+### 5.4 又是同一个坑：管道捕获
+
+第一版 crash 脚本全部失败。原因是 `spawnSync({encoding:'utf8'})` 用管道捕获输出，
+而沙箱禁止管道——拿到空字符串，于是所有正则都不匹配。
+
+**这是本项目第三次被同一个限制咬到。** 已全部改为文件重定向。
+
+还有一个更隐蔽的：生成的 JS 文件里 `\d` 反斜杠丢失，变成字面量 `d`，
+正则永远不匹配。改为不用正则解析。
