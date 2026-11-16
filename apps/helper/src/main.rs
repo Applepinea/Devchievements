@@ -23,6 +23,17 @@ use devchievements_git_hooks::gitread::Repository;
 use devchievements_git_hooks::ipc;
 use devchievements_git_hooks::spool::Spool;
 
+/// Whether the companion is installed, i.e. whether it owns a data directory.
+///
+/// Spec 34.1: hooks left behind after an uninstall must be silent. Creating the data
+/// directory here would resurrect app state the user just deleted, so the helper
+/// checks instead of creating -- the installer and the app are what create it.
+fn companion_present() -> bool {
+    devchievements_git_hooks::spool::default_data_dir()
+        .map(|dir| dir.is_dir())
+        .unwrap_or(false)
+}
+
 fn main() -> ExitCode {
     // Every failure mode returns success. A hook that fails a commit is worse than
     // a hook that misses an event (§9.2, §9.4).
@@ -31,6 +42,11 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Option<()> {
+    // Nothing to record to and nothing to tell: exit without touching the disk.
+    if !companion_present() {
+        return None;
+    }
+
     let mut args = std::env::args().skip(1);
     let first = args.next();
 

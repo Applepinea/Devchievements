@@ -65,6 +65,10 @@ async function scenario(mode, expectGeneric) {
   const root = path.join(scratch, mode);
   fs.rmSync(root, { recursive: true, force: true });
   const dataRoot = path.join(root, "data");
+  // The data directory exists after install; the helper now refuses to
+
+  // create it, so fixtures mirror an installed machine (spec 34.1).
+
   fs.mkdirSync(path.join(dataRoot, "devchievements", "spool"), { recursive: true });
   fs.writeFileSync(
     path.join(dataRoot, "devchievements", "settings.json"),

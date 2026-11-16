@@ -279,3 +279,78 @@ pnpm 在这台机器上卡在 `Scope: all 3 workspace projects`，
 
 所以 `verify.mjs` 直接调 vite，并声明依赖缺失时 SKIP 而不是失败——
 **CI 里 pnpm 可用时会自动走正常路径**。
+
+---
+
+## 6. Phase 2b 其余页面与流程
+
+### 6.1 页面
+
+| 页面 | 数据来源 | 空状态 |
+| --- | --- | --- |
+| Dashboard | statistics + activity + storage_health | 「还没有活动」 |
+| Achievements | unlocked_achievements + 内置目录 | 锁定项作为目标显示 |
+| Activity | daily_projection 聚合 | 「还没有记录」 |
+| Repositories | repository_projection（别名） + 导入入口 | 「装钩子或导入」 |
+| Settings | settings.json | 「还没有身份」引导 |
+| About | capabilities + outbox + storage | 「没有投递失败」 |
+
+**没有一处硬编码数字**，全部经 Rust 命令读 SQLite。
+
+### 6.2 新解锁标记覆盖四种来源
+
+§34.2 要求实时、延迟、回填、静默解锁都能显示标记。
+做法是**按 `viewed_at` 判定，而不是按来源判定**：
+
+````rust`
+viewed: row.get::<Option<i64>, _>("viewed_at").is_some(),
+`````
+
+这样四种来源共用一条规则，未来新增来源也不需要改这里。
+
+### 6.3 逐页端到端验证
+
+问题：没法用脚本点导航。
+
+解法：**页面 id 走 URL fragment**，冒烟测试可直达任一页。
+
+```text
+--window-smoke --page about  ->  index.html#about
+UI READY view=about
+```
+
+`scripts/e2e/pages.mjs` 对 6 个页面各跑一次，断言渲染 + 自报 + 未崩溃 → **18 项全过**。
+
+这能抓到「编译通过但运行时爆炸」的错误，构建检查抓不到。
+
+### 6.4 卸载：残留 Hook 必须静默退出
+
+§34.1 要求「清理 Hook 或确保残留 Hook 静默退出」。
+
+写了 `scripts/e2e/uninstall.mjs` 之后，**它抓到一个真实缺陷**：
+
+```text
+FAIL it does not recreate the data directory
+     ["spool"]
+```
+
+卸载后残留的 hook 仍然重建了数据目录——用户刚删掉的东西被复活了。
+
+修复：helper 启动时先看 companion 的数据目录是否存在，不存在就直接退出，什么都不建。
+目录由安装器和应用负责创建，**helper 只读不建**。
+
+改完 4 项全过。这个缺陷是纯理论审查看不出来的。
+
+### 6.5 备份与恢复
+
+- 备份用 `VACUUM INTO`：运行中直接拷文件可能拿到撕裂的写，VACUUM INTO 由 SQLite 保证一致性。
+- 恢复拒绝非 SQLite 文件，并先写到临时文件再改名——中断不会留下半个数据库。
+
+### 6.6 一个连锁回归
+
+helper 的新守卫让 3 个旧 e2e 失败：`hook-to-spool`、`full-loop`、`ipc-fallback`。
+它们的夹具假设 helper 会自己建目录。
+
+这不是 bug，是**行为变更**：装过的机器上目录本来就在。于是夹具改成「模拟已安装」。
+
+顺带修了 `window.mjs` 里写死 `view=settings` 的断言（默认页已变成 dashboard）。

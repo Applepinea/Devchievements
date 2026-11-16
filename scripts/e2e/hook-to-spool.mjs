@@ -76,6 +76,9 @@ function main() {
   // invoking a process, that process reading the repository, and the spool write.
   const hooksDir = path.join(repo, ".git", "hooks");
   fs.mkdirSync(hooksDir, { recursive: true });
+  // The data directory exists after install; the helper refuses to create it
+  // (spec 34.1), so the fixture mirrors an installed machine.
+  fs.mkdirSync(path.join(env.LOCALAPPDATA ?? process.env.LOCALAPPDATA ?? "", "devchievements"), { recursive: true });
 
   for (const name of ["post-commit", "post-rewrite", "post-merge"]) {
     fs.copyFileSync(helperExe, path.join(hooksDir, name + ".exe"));

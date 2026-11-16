@@ -45,6 +45,10 @@ function main() {
   fs.mkdirSync(scratch, { recursive: true });
 
   const dataRoot = path.join(scratch, "data");
+  // The data directory exists after install; the helper now refuses to
+
+  // create it, so fixtures mirror an installed machine (spec 34.1).
+
   fs.mkdirSync(path.join(dataRoot, "devchievements", "spool"), { recursive: true });
   fs.writeFileSync(
     path.join(dataRoot, "devchievements", "settings.json"),

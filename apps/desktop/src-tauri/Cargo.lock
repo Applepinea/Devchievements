@@ -888,6 +888,7 @@ name = "devchievements-desktop"
 version = "0.1.0"
 dependencies = [
  "async-std",
+ "devchievements-achievements",
  "devchievements-companion-core",
  "devchievements-core",
  "devchievements-events",

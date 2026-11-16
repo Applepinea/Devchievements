@@ -58,6 +58,10 @@ async function main() {
 
   const dataRoot = path.join(scratch, "data");
   fs.mkdirSync(dataRoot, { recursive: true });
+  // The data directory exists after install; the helper now refuses to
+
+  // create it, so fixtures mirror an installed machine (spec 34.1).
+
   fs.mkdirSync(path.join(dataRoot, "devchievements", "spool"), { recursive: true });
 
   const repo = path.join(scratch, "repo");

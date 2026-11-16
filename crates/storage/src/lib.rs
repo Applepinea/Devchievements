@@ -15,6 +15,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod backup;
 pub mod diagnostics;
 pub mod history_import;
 pub mod history_scan;
@@ -22,6 +23,7 @@ pub mod indexeddb;
 pub mod ingest;
 pub mod observability;
 pub mod projections;
+pub mod read_models;
 pub mod schema;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};

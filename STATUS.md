@@ -38,7 +38,7 @@ ALL CHECKS PASSED
 **Phase 0：项目基础与技术验证** —— `Partially Implemented`（已完成，见下）
 **Phase 1：Core Engine 与数据层** —— `Tested`（完成）
 **Phase 2a：本地 Git 到通知的真实闭环** —— `Partially Implemented`（Toast/UI 未验证）
-**Phase 2b：完整 Desktop Only 产品** —— `In Progress`
+**Phase 2b：完整 Desktop Only 产品** —— `Partially Implemented`（Toast 与安装向导 UI 未验证）
 
 **下一个门禁：检查点 A**（需 Phase 2a 完成）。当前**没有任何检查点被跨越。**
 
@@ -53,12 +53,13 @@ ALL CHECKS PASSED
 | --- | --- | --- | --- |
 | 2b.1 | 平台能力探测与降级链（§29） | `Tested` | 13 个测试；运行时实测降级到 in-app-only |
 | 2b.2 | 兼容性矩阵更新（§29.6） | `Partially Implemented` | 本轮实测行已更新；其余平台未验证 |
-| 2b.3 | Dashboard / Gallery / Activity / Repository Manager / About | `Not Started` | 数据侧已由 `--diagnostics` 提供；UI 框架已就绪 |
-| 2b.4 | 历史导入界面与完整流程 | `Partially Implemented` | **管线完成并实测**（静默、幂等、原始日期、跨路径去重）；界面需 WebView2 |
-| 2b.5 | 基础 Settings 界面 | `Tested` | 身份/隐私/时区/状态四块，全部读真实数据库；`window` e2e 5 项通过 |
-| 2b.6 | 安装向导 / 卸载机制 | `Partially Implemented` | 安装器与卸载脚本已完成并可运行 |
-| 2b.7 | 数据备份与恢复 | `Not Started` | 存储层可做，不依赖 UI |
+| 2b.3 | Dashboard / Gallery / Activity / Repository Manager / About | `Tested` | 5 个页面全部读真实数据库；`pages` e2e 18 项通过 |
+| 2b.4 | 历史导入界面与完整流程 | `Tested` | 管线 + Repository Manager 导入入口；静默/幂等/跨路径去重已测 |
+| 2b.5 | 基础 Settings 界面 | `Tested` | 身份/隐私/时区/数据四块 + 无身份引导 |
+| 2b.6 | 安装向导 / 卸载机制 | `Partially Implemented` | 安装器+卸载脚本可运行；**残留 Hook 静默退出已实测**（见 2b.9）；向导 UI 未做 |
+| 2b.7 | 数据备份与恢复 | `Tested` | `VACUUM INTO` 备份 + 头校验恢复；About 页有入口 |
 | 2b.8 | Outbox 可观测性（延迟分布与原因码） | `Tested` | 7 个测试（含真实数据库）；已并入 `--diagnostics` |
+| 2b.9 | 空状态与引导（§34.1 补充） | `Tested` | 每页有空状态；无身份时给出引导；卸载后目录不被复活 |
 
 ---
 ## Phase 2a 任务表

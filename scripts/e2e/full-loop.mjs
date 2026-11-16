@@ -49,7 +49,9 @@ function main() {
   fs.mkdirSync(scratch, { recursive: true });
 
   const dataDir = path.join(scratch, "data");
-  fs.mkdirSync(dataDir, { recursive: true });
+  // The helper refuses to create the data directory (spec 34.1), so the fixture
+  // mirrors an installed machine where the installer has already made it.
+  fs.mkdirSync(path.join(dataDir, "devchievements"), { recursive: true });
   const repo = path.join(scratch, "repo");
   fs.mkdirSync(repo, { recursive: true });
 

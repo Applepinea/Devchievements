@@ -14,9 +14,10 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod audio;
+pub(crate) mod audio;
+mod commands;
 mod settings;
-mod toast;
+pub(crate) mod toast;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
@@ -30,16 +31,16 @@ use tauri::tray::TrayIconBuilder;
 
 /// Privacy mode as a process-wide flag: the tray menu writes it and the drain
 /// thread reads it, and neither should have to own a lock for that.
-static PRIVACY_MODE: AtomicU8 = AtomicU8::new(0);
+pub(crate) static PRIVACY_MODE: AtomicU8 = AtomicU8::new(0);
 
 /// Whether a system notification has been demonstrated to work: 0 unknown,
 /// 1 works, 2 does not. Probing lazily avoids a test toast at every startup,
 /// and remembering the failure stops the log filling with the same error.
-static NOTIFICATION_STATE: AtomicU8 = AtomicU8::new(0);
+pub(crate) static NOTIFICATION_STATE: AtomicU8 = AtomicU8::new(0);
 
 /// Set by the page once it has rendered, so a smoke test can wait for real
 /// evidence instead of a fixed sleep.
-static UI_READY: AtomicBool = AtomicBool::new(false);
+pub(crate) static UI_READY: AtomicBool = AtomicBool::new(false);
 
 /// Set when the user asks for an immediate drain from the tray.
 static DRAIN_NOW: AtomicBool = AtomicBool::new(false);
@@ -163,7 +164,7 @@ fn to_sound_rarity(rarity: devchievements_notifications::Rarity) -> SoundRarity 
 /// Only two things are certain in-process: the tray exists (we created it) and a
 /// system notification either has or has not worked. Everything else stays
 /// Unverified -- spec 29.1 forbids claiming more than was measured.
-fn current_capabilities() -> devchievements_platform::Capabilities {
+pub(crate) fn current_capabilities() -> devchievements_platform::Capabilities {
     use devchievements_platform::{Capabilities, CapabilityState};
 
     let notification = match NOTIFICATION_STATE.load(Ordering::Relaxed) {
@@ -187,7 +188,7 @@ fn current_capabilities() -> devchievements_platform::Capabilities {
 }
 
 /// Read the process-wide privacy flag.
-fn current_privacy_mode() -> devchievements_privacy::PrivacyMode {
+pub(crate) fn current_privacy_mode() -> devchievements_privacy::PrivacyMode {
     if PRIVACY_MODE.load(Ordering::Relaxed) == 1 {
         devchievements_privacy::PrivacyMode::Privacy
     } else {
@@ -196,13 +197,13 @@ fn current_privacy_mode() -> devchievements_privacy::PrivacyMode {
 }
 
 /// Path of the settings file.
-fn settings_path() -> std::path::PathBuf {
+pub(crate) fn settings_path() -> std::path::PathBuf {
     default_data_dir().join("settings.json")
 }
 
 /// A clock frozen at process start, for one-shot CLI commands.
 #[derive(Debug)]
-struct FixedClock;
+pub(crate) struct FixedClock;
 impl devchievements_core::ClockProvider for FixedClock {
     fn now_unix_millis(&self) -> i64 {
         std::time::SystemTime::now()
@@ -213,7 +214,7 @@ impl devchievements_core::ClockProvider for FixedClock {
 }
 
 #[derive(Debug, Default)]
-struct PlainIds(u64);
+pub(crate) struct PlainIds(u64);
 impl devchievements_core::IdGenerator for PlainIds {
     fn next_id(&mut self) -> String {
         self.0 += 1;
@@ -222,7 +223,7 @@ impl devchievements_core::IdGenerator for PlainIds {
 }
 
 #[derive(Debug)]
-struct StaticConfig;
+pub(crate) struct StaticConfig;
 impl devchievements_core::ConfigurationProvider for StaticConfig {
     fn config_version(&self) -> u64 {
         1
@@ -235,7 +236,15 @@ impl devchievements_core::ConfigurationProvider for StaticConfig {
 /// profile next to the executable, and when that location is not writable the only
 /// symptom is E_ACCESSDENIED. Measured here -- the window went from always failing
 /// to working with this one line.
-fn open_main_window(app: &tauri::AppHandle) -> Result<(), String> {
+pub(crate) fn open_main_window(app: &tauri::AppHandle) -> Result<(), String> {
+    open_main_window_at(app, "dashboard")
+}
+
+/// Open the main window on a specific page.
+///
+/// The page travels in the URL fragment so the UI can select it without any
+/// scripted clicking, which is what makes per-page end-to-end tests possible.
+pub(crate) fn open_main_window_at(app: &tauri::AppHandle, page: &str) -> Result<(), String> {
     use tauri::Manager;
 
     if let Some(existing) = app.get_webview_window("main") {
@@ -244,7 +253,7 @@ fn open_main_window(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+    tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(format!("index.html#{page}").into()))
         .title("Devchievements")
         .inner_size(720.0, 520.0)
         .data_directory(default_data_dir().join("webview"))
@@ -253,7 +262,7 @@ fn open_main_window(app: &tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-fn default_data_dir() -> std::path::PathBuf {
+pub(crate) fn default_data_dir() -> std::path::PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -782,13 +791,27 @@ fn main() {
 
         let result = tauri::Builder::default()
             .invoke_handler(tauri::generate_handler![
-                get_settings,
-                save_settings,
-                get_status,
-                ui_ready
-            ])
+            get_settings,
+            save_settings,
+            get_status,
+            ui_ready,
+            commands::get_dashboard,
+            commands::get_gallery,
+            commands::mark_achievements_viewed,
+            commands::get_activity,
+            commands::get_repositories,
+            commands::get_about,
+            commands::backup_database,
+            commands::import_history,
+            commands::restore_database,
+            commands::open_window,
+        ])
             .setup(|app| {
-                match open_main_window(app.handle()) {
+                let page = std::env::args()
+                    .position(|a| a == "--page")
+                    .and_then(|i| std::env::args().nth(i + 1))
+                    .unwrap_or_else(|| "dashboard".to_string());
+                match open_main_window_at(app.handle(), &page) {
                     Ok(()) => println!("WINDOW created"),
                     Err(e) => {
                         println!("WINDOW FAILED error={e}");
@@ -828,7 +851,16 @@ fn main() {
             get_settings,
             save_settings,
             get_status,
-            ui_ready
+            ui_ready,
+            commands::get_dashboard,
+            commands::get_gallery,
+            commands::mark_achievements_viewed,
+            commands::get_activity,
+            commands::get_repositories,
+            commands::get_about,
+            commands::backup_database,
+            commands::restore_database,
+            commands::open_window,
         ])
         .setup(|app| {
             // Spec 26.2 requires a tray shortcut for privacy mode, so the menu item

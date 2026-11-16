@@ -112,6 +112,15 @@ pub struct ReadOutcome {
 }
 
 /// The Spool directory layout.
+/// The data directory the companion owns, derived the same way everywhere.
+///
+/// Returns None when LOCALAPPDATA is unset, which means the environment is not a
+/// normal user session and the helper should stay quiet.
+pub fn default_data_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .map(|base| base.join("devchievements"))
+}
 #[derive(Debug, Clone)]
 pub struct Spool {
     dir: PathBuf,

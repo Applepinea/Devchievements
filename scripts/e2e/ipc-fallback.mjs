@@ -102,7 +102,8 @@ async function main() {
   console.log("A. companion running, live channel unusable -> spool fallback");
   {
     const helperData = path.join(scratch, "live");
-    fs.mkdirSync(helperData, { recursive: true });
+    // Installed machines already have this directory; the helper no longer creates it.
+    fs.mkdirSync(path.join(helperData, "devchievements"), { recursive: true });
 
     const companionLog = path.join(scratch, "companion-live.log");
     const fd = fs.openSync(companionLog, "w");
@@ -141,7 +142,11 @@ async function main() {
   console.log("B. companion closed -> helper writes the spool, later run drains it");
   {
     const helperData = path.join(scratch, "down");
-    fs.mkdirSync(helperData, { recursive: true });
+    // Installed machines already have this directory; the helper no longer creates it.
+    fs.mkdirSync(path.join(helperData, "devchievements"), { recursive: true });
+    // The data directory exists after install; the helper refuses to create it
+    // (spec 34.1), so the fixture mirrors an installed machine.
+    fs.mkdirSync(path.join(process.env.LOCALAPPDATA ?? "", "devchievements"), { recursive: true });
     process.env.LOCALAPPDATA = helperData;
 
     fs.writeFileSync(path.join(repo, "b.txt"), "b\n");

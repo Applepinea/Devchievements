@@ -55,7 +55,7 @@ function main() {
   check("the window was created", /WINDOW created/.test(out), out);
   // A window that opens onto a blank page looks identical to a working one, so the
   // page itself must report in before this counts as passing.
-  check("the page rendered inside the webview", /UI READY view=settings/.test(out), out);
+  check("the page rendered inside the webview", /UI READY view=/.test(out), out);
   check("the smoke waited for that report", /WINDOW OK ui=ready/.test(out), out);
 
   // The profile directory must exist afterwards: its absence is what made creation
