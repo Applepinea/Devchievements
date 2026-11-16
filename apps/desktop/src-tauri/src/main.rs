@@ -15,17 +15,25 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
+mod settings;
 mod toast;
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
 use devchievements_companion_core::delivery::{DeliverySink, DisplayOutcome, OutboxProcessor};
 use devchievements_companion_core::{Companion, CompanionConfig};
 use devchievements_events::{EmailOrigin, Identity};
 use devchievements_notifications::Presentation;
 use devchievements_sound::Rarity as SoundRarity;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
+
+/// Privacy mode as a process-wide flag: the tray menu writes it and the drain
+/// thread reads it, and neither should have to own a lock for that.
+static PRIVACY_MODE: AtomicU8 = AtomicU8::new(0);
+
+/// Set when the user asks for an immediate drain from the tray.
+static DRAIN_NOW: AtomicBool = AtomicBool::new(false);
 
 /// Counts what has been shown, so the tray tooltip reflects real work.
 static SHOWN: AtomicU64 = AtomicU64::new(0);
@@ -53,14 +61,30 @@ impl DeliverySink for DesktopSink {
                     selection.sound, selection.source
                 );
 
-                // Spec 16.6: a popup shows the leading reward plus up to three
-                // sub-lines; the toast body carries the same shape.
-                let body = if popup.others.is_empty() {
+                // Spec 26.2: privacy mode hides the repository and the detail and
+                // keeps the achievement name. The copy is built by the privacy crate so
+                // the rule lives in one tested place, not in this file.
+                let mode = current_privacy_mode();
+                let detail = if popup.others.is_empty() {
                     format!("{:?} unlocked", popup.rarity)
                 } else {
                     popup.others.join(", ")
                 };
-                report_toast(&popup.primary_id, &popup.title, &body);
+                let copy = devchievements_privacy::notification_copy(
+                    mode,
+                    &devchievements_privacy::NotificationContext {
+                        headline: &popup.title,
+                        repository: None,
+                        detail: Some(&detail),
+                    },
+                );
+                println!(
+                    "COPY privacy={} title={:?} body={:?}",
+                    matches!(mode, devchievements_privacy::PrivacyMode::Privacy),
+                    copy.title,
+                    copy.body
+                );
+                report_toast(&popup.primary_id, &copy.title, &copy.body);
                 SHOWN.fetch_add(1, Ordering::Relaxed);
             }
             Presentation::SoundOnly => {
@@ -104,6 +128,20 @@ fn to_sound_rarity(rarity: devchievements_notifications::Rarity) -> SoundRarity 
         R::Epic => SoundRarity::Epic,
         R::Legendary => SoundRarity::Legendary,
     }
+}
+
+/// Read the process-wide privacy flag.
+fn current_privacy_mode() -> devchievements_privacy::PrivacyMode {
+    if PRIVACY_MODE.load(Ordering::Relaxed) == 1 {
+        devchievements_privacy::PrivacyMode::Privacy
+    } else {
+        devchievements_privacy::PrivacyMode::Normal
+    }
+}
+
+/// Path of the settings file.
+fn settings_path() -> std::path::PathBuf {
+    default_data_dir().join("settings.json")
 }
 
 fn default_data_dir() -> std::path::PathBuf {
@@ -170,7 +208,15 @@ fn spawn_drain_loop() {
                     _ => {}
                 }
                 let _ = processor.deliver_pending(&mut sink, 3).await;
-                std::thread::sleep(std::time::Duration::from_millis(500));
+
+                // Sleep in small slices so a tray request is honoured promptly
+                // instead of waiting out the full interval.
+                for _ in 0..50 {
+                    if DRAIN_NOW.swap(false, Ordering::SeqCst) {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
             }
         });
     });
@@ -280,6 +326,32 @@ fn main() {
     // Report a diagnostics snapshot as JSON (spec 32.1: minimal diagnostics view).
     // The window that would render this cannot start here, but the data can be
     // produced and checked, which is the part that can silently be wrong.
+    // Persist the privacy mode from the command line. The tray menu is the normal
+    // route (spec 26.2) but a test cannot click a menu item.
+    if let Some(i) = std::env::args().position(|a| a == "--set-privacy") {
+        let Some(raw) = std::env::args().nth(i + 1) else {
+            println!("PRIVACY FAILED: --set-privacy needs normal or privacy");
+            std::process::exit(2);
+        };
+        let Some(mode) = settings::PrivacyMode::parse(&raw) else {
+            println!("PRIVACY FAILED: unknown mode {raw}");
+            std::process::exit(2);
+        };
+        let path = settings_path();
+        let mut stored = settings::Settings::load(&path);
+        stored.privacy = mode;
+        match stored.save(&path) {
+            Ok(()) => {
+                println!("PRIVACY {}", mode.as_str());
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("PRIVACY FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     if std::env::args().any(|a| a == "--diagnostics") {
         let data_dir = default_data_dir();
         let rt = async_std::task::block_on(async {
@@ -317,6 +389,7 @@ fn main() {
                         "pendingRecords": spool_records,
                     },
                     "sounds": audio::available_sound_ids(),
+                    "privacy": settings::Settings::load(&settings_path()).privacy.as_str(),
                     "snapshot": snapshot,
                 });
                 println!(
@@ -351,9 +424,20 @@ fn main() {
 
     tauri::Builder::default()
         .setup(|app| {
+            // Spec 26.2 requires a tray shortcut for privacy mode, so the menu item
+            // is a checkbox bound to the persisted setting rather than a one-shot
+            // action: a user who turns it on and restarts must still have it on.
+            let privacy = CheckMenuItem::with_id(
+                app,
+                "privacy",
+                "Privacy mode",
+                true,
+                current_privacy_mode() == devchievements_privacy::PrivacyMode::Privacy,
+                None::<&str>,
+            )?;
             let drain = MenuItem::with_id(app, "drain", "Run one drain", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&drain, &quit])?;
+            let menu = Menu::with_items(app, &[&privacy, &drain, &quit])?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(
@@ -363,12 +447,43 @@ fn main() {
                 )
                 .tooltip("Devchievements")
                 .menu(&menu)
-                .on_menu_event(|_app, event| {
-                    if event.id.as_ref() == "quit" {
-                        std::process::exit(0);
+                .on_menu_event(|_app, event| match event.id.as_ref() {
+                    "quit" => std::process::exit(0),
+                    "drain" => {
+                        DRAIN_NOW.store(true, Ordering::SeqCst);
+                        println!("TRAY drain requested");
                     }
+                    "privacy" => {
+                        let next = current_privacy_mode().toggled();
+                        let on = matches!(next, devchievements_privacy::PrivacyMode::Privacy);
+                        PRIVACY_MODE.store(if on { 1 } else { 0 }, Ordering::SeqCst);
+
+                        // Persist, so the choice survives a restart (spec 26.4).
+                        let path = settings_path();
+                        let mut stored = settings::Settings::load(&path);
+                        stored.privacy = if on {
+                            settings::PrivacyMode::Privacy
+                        } else {
+                            settings::PrivacyMode::Normal
+                        };
+                        if let Err(e) = stored.save(&path) {
+                            eprintln!("tray: could not save privacy mode: {e}");
+                        }
+                        println!("TRAY privacy={}", stored.privacy.as_str());
+                    }
+                    _ => {}
                 })
                 .build(app)?;
+
+            // Apply the persisted privacy mode before any notification can render.
+            // This must happen in the tray setup, not in a CLI branch: the drain
+            // thread reads the flag this sets.
+            let stored = settings::Settings::load(&settings_path());
+            PRIVACY_MODE.store(
+                if matches!(stored.privacy, settings::PrivacyMode::Privacy) { 1 } else { 0 },
+                Ordering::SeqCst,
+            );
+            println!("SETTINGS privacy={}", stored.privacy.as_str());
 
             let toast_state = toast::registration_state();
             println!(

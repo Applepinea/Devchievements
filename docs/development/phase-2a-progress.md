@@ -597,3 +597,53 @@ SOUND play id=commit from=BuiltIn
    于是 companion 读到 0 条——看起来像摄取坏了，其实是测试自己写错了地方。
 
 第 2 条尤其值得记：它会让「测试通过」建立在污染真实环境上。
+
+---
+
+## 13. 本轮：托盘真实动作 + 隐私模式快捷入口
+
+### 13.1 托盘菜单
+
+| 项 | 行为 |
+| --- | --- |
+| Privacy mode（勾选） | 切换并**持久化**到 `settings.json`，重启后仍生效 |
+| Run one drain | 立刻唤醒摄取循环，而不是等满 500 ms |
+| Quit | 退出 |
+
+§26.2 明确要求「提供手动开关与托盘快捷入口」，所以隐私模式做成了**勾选项**而不是一次性动作：
+用户打开后重启，它必须还是开着的。
+
+### 13.2 隐私模式的实际效果
+
+同一个提交，两种设置下通知文案不同：
+
+```text
+privacy=normal   COPY privacy=false title="First Commit" body="Common Day"
+privacy=privacy  COPY privacy=true  title="First Commit" body="A new milestone has been reached"
+```
+
+成就名保留、上下文被替换——这正是 §26.2 规定的形状。
+文案由 `devchievements-privacy` 生成，规则只有一处实现、24 个测试。
+
+### 13.3 新增设置文件
+
+`settings.json`（`apps/desktop/src-tauri/src/settings.rs`）：
+
+```json
+{ "schemaVersion": 1, "emails": ["..."], "privacy": "privacy" }
+```
+
+为什么是文件而不是数据库表：身份门禁需要在**打开数据库之前**读到邮箱，
+而表要求数据库先存在——那是循环依赖。
+
+### 13.4 又一次「第一处匹配」的坑
+
+我用字符串替换插入「启动时读取隐私模式」，结果 `let toast_state = ...` 这一行
+在 `--diagnostics` 分支里也出现过，替换落在了**错误的那个**上：
+隐私值只在 diagnostics 分支被设置，托盘启动路径从未读取，
+于是日志一直打 `privacy=false`。
+
+修复方式不是猜，而是把两处出现都打印出来对比上下文，
+再用「托盘特有的后续代码」作为锚点插入。
+
+这类错误 e2e 会抓到，但它伪装成「功能没实现」，而不是「插入位置错了」。

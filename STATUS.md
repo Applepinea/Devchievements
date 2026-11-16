@@ -52,7 +52,7 @@ ALL CHECKS PASSED
 | 2a.3 | IPC 帧协议 | `Tested` | 9 个测试，含超限长度与截断 |
 | 2a.4 | Spool 回退 | `Tested` | 11 个测试，含并发与损坏恢复 |
 | 2a.5 | 实时 IPC 通道（客户端 + 服务端） | `Platform Unverified` | 已实现并编译；**本机沙箱拒绝命名管道**（os error 5）。回退路径已验证 |
-| 2a.6 | Tauri Companion 与托盘 | `Partially Implemented` | **MSVC 已装**：编译、链接、托盘运行、真实提交驱动均已验证；内嵌 webview 被沙箱拒绝 |
+| 2a.6 | Tauri Companion 与托盘 | `Partially Implemented` | 编译/链接/托盘运行/真实提交驱动已验证；托盘菜单含隐私开关与手动 drain；内嵌 webview 被沙箱拒绝 |
 | 2a.7 | SQLite 持久化接入 Helper | `Tested` | 完整闭环：commit→hook→helper→spool→companion→SQLite |
 | 2a.8 | Outbox Consumer（Desktop 子集） | `Tested` | 投递、重试、`delivery_unknown` 均有测试 |
 | 2a.9 | 桌面弹窗与提示音 | `Partially Implemented` | **提示音已完成并实测**；Toast 注册与调用已实现（安装器 exit 0），**端到端未通过** |
@@ -63,7 +63,8 @@ ALL CHECKS PASSED
 | 2a.11 | 最小诊断视图 | `Partially Implemented` | **数据侧完成**：`--diagnostics` 输出真实 JSON，仓库别名化、路径脱敏，12 项 e2e 校验；UI 需 WebView2 |
 | 2a.14 | 通知队列与合并（§16.4、§16.6） | `Tested` | 一个事件一个弹窗；普通提交只出声不弹窗 |
 | 2a.18 | 提示音：内置默认 + 基础播放（§19） | `Tested` | 15 个选择逻辑测试；真实提交实测；奖励音为用户提供的 achievement.wav |
-| 2a.13 | Privacy Mode 基础行为（§26.2） | `Tested` | 26 个测试；通知文案、稳定别名、路径脱敏、导出警告、配额 |
+| 2a.13 | Privacy Mode 基础行为（§26.2） | `Tested` | 26 个测试；**托盘开关 + 持久化 + 通知文案实测**（8 项 e2e） |
+| 2a.19 | 设置文件（§26.4 版本化配置） | `Tested` | `settings.json`：身份邮箱、隐私模式；未知字段忽略 |
 | 2a.12 | Crash Recovery 矩阵（§32.5） | `Partially Implemented` | 6 个场景中 4 个已真实通过；2 个需实时 IPC |
 
 > 详见 [phase-2a-progress.md](docs/development/phase-2a-progress.md)。
