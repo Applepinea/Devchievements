@@ -15,11 +15,10 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use devchievements_companion_core::delivery::{
-    DeliverySink, DisplayOutcome, OutboxProcessor, PendingNotification,
-};
+use devchievements_companion_core::delivery::{DeliverySink, DisplayOutcome, OutboxProcessor};
 use devchievements_companion_core::{serve_ipc_blocking, Companion, CompanionConfig};
 use devchievements_events::{EmailOrigin, Identity};
+use devchievements_notifications::Presentation;
 
 /// Prints notifications instead of rendering them.
 struct StdoutSink {
@@ -27,12 +26,27 @@ struct StdoutSink {
 }
 
 impl DeliverySink for StdoutSink {
-    fn show(&mut self, notification: &PendingNotification) -> DisplayOutcome {
-        println!(
-            "NOTIFY {} {} {}",
-            notification.notification_id, notification.kind, notification.payload
-        );
-        self.shown += 1;
+    fn present(&mut self, presentation: &Presentation) -> DisplayOutcome {
+        match presentation {
+            Presentation::Popup(popup) => {
+                // One line per popup, matching what a window would draw: the leading
+                // reward, then up to three sub-lines, then a "+N" summary.
+                println!(
+                    "NOTIFY popup title={:?} rarity={} others={:?} omitted={}",
+                    popup.title,
+                    popup.rarity.as_str(),
+                    popup.others,
+                    popup.omitted
+                );
+                self.shown += 1;
+            }
+            Presentation::SoundOnly => {
+                // Spec 16.4: a plain commit is acknowledged by sound, not a window.
+                println!("SOUND commit");
+                self.shown += 1;
+            }
+            Presentation::Nothing => return DisplayOutcome::Shown,
+        }
         DisplayOutcome::Shown
     }
 }

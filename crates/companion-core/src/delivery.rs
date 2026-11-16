@@ -1,10 +1,16 @@
-//! Outbox delivery: claiming, displaying, acknowledging (spec 16, 17.9, 32.1).
+//! Outbox delivery: grouping, merging, claiming, acknowledging (spec 16.4, 16.6, 17.9).
 //!
 //! # Why delivery is separated from the state machine
 //!
 //! `devchievements-notifications` decides what is LEGAL. This module decides what
-//! actually HAPPENS: which rows to pick up, in what order, and what to persist
-//! before showing anything.
+//! actually HAPPENS: which rows to pick up, how they group into one popup, in what
+//! order, and what to persist before showing anything.
+//!
+//! # Grouping happens here, not in storage
+//!
+//! Storage writes one row per intent, because each row is an independently tracked
+//! state machine entry. Merging is a PRESENTATION concern (spec 16.6), so it belongs
+//! at delivery time: one event produced N rows, the user must see one popup.
 //!
 //! # The crash rule, restated because it is easy to get wrong
 //!
@@ -12,10 +18,8 @@
 //! process dies after the attempt but before `completed`, recovery must NOT show it
 //! again; it becomes `delivery_unknown` and relies on the gallery's new-unlock marker
 //! so the user can still find it.
-//!
-//! The principle is "rather notify too little than notify twice", so every ambiguous
-//! state resolves toward silence.
 
+use devchievements_notifications::{present_event, NotificationItem, Presentation, Rarity};
 use sqlx::{Row, SqlitePool};
 
 /// An outbox row that is ready to be shown.
@@ -33,10 +37,10 @@ pub struct PendingNotification {
     pub attempts: u32,
 }
 
-/// What the host (Tauri window, console, test) did with a notification.
+/// What the host (Tauri window, console, test) did with a presentation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DisplayOutcome {
-    /// It was shown.
+    /// It was shown (or its sound played).
     Shown,
     /// It could not be shown (no window, muted, OS refused).
     NotShown,
@@ -45,10 +49,10 @@ pub enum DisplayOutcome {
 /// Whatever actually renders notifications.
 ///
 /// Implementing this as a trait is what lets the same delivery logic drive a Tauri
-/// window, a console printer in tests, and a crash-recovery harness.
+/// window, a console printer, and a crash-recovery harness.
 pub trait DeliverySink {
-    /// Show one notification. Called only after the attempt has been persisted.
-    fn show(&mut self, notification: &PendingNotification) -> DisplayOutcome;
+    /// Present one already-merged outcome. Called only after the attempt is persisted.
+    fn present(&mut self, presentation: &Presentation) -> DisplayOutcome;
 }
 
 /// Why delivery failed.
@@ -86,10 +90,10 @@ impl OutboxProcessor {
         OutboxProcessor { pool }
     }
 
-    /// Deliver everything that is ready, in creation order.
+    /// Deliver everything that is ready, one presentation per event.
     ///
-    /// Returns how many were shown and how many were abandoned as unknown. The
-    /// caller decides the cadence; a test calls this once per simulated step.
+    /// Returns how many presentations were shown and how many groups were abandoned
+    /// as unknown. The caller decides cadence; a test calls this once per step.
     pub async fn deliver_pending(
         &self,
         sink: &mut dyn DeliverySink,
@@ -100,24 +104,40 @@ impl OutboxProcessor {
         let mut shown = 0usize;
         let mut unknown = 0usize;
 
-        for pending in rows {
-            // CRASH RULE: record the attempt BEFORE showing (spec 17.9).
-            self.mark_attempt(&pending.notification_id).await?;
+        for group in group_by_event(rows) {
+            let presentation = presentation_for(&group);
+            if presentation == Presentation::Nothing {
+                // Nothing to show, but the rows must not stay pending forever.
+                for row in &group {
+                    self.mark(&row.notification_id, "suppressed").await?;
+                }
+                continue;
+            }
 
-            match sink.show(&pending) {
+            // CRASH RULE: record the attempt on EVERY row before showing (spec 17.9).
+            for row in &group {
+                self.mark_attempt(&row.notification_id).await?;
+            }
+
+            match sink.present(&presentation) {
                 DisplayOutcome::Shown => {
-                    self.mark(&pending.notification_id, "completed").await?;
+                    for row in &group {
+                        self.mark(&row.notification_id, "completed").await?;
+                    }
                     shown += 1;
                 }
                 DisplayOutcome::NotShown => {
-                    if pending.attempts + 1 >= max_attempts {
-                        // Retries exhausted: never claim success we did not achieve.
-                        self.mark(&pending.notification_id, "delivery_unknown")
-                            .await?;
+                    let exhausted = group.iter().all(|r| r.attempts + 1 >= max_attempts);
+                    for row in &group {
+                        if exhausted {
+                            // Never claim success we did not achieve.
+                            self.mark(&row.notification_id, "delivery_unknown").await?;
+                        } else {
+                            self.requeue(&row.notification_id).await?;
+                        }
+                    }
+                    if exhausted {
                         unknown += 1;
-                    } else {
-                        // Put it back for another try.
-                        self.requeue(&pending.notification_id).await?;
                     }
                 }
             }
@@ -205,6 +225,110 @@ impl OutboxProcessor {
     }
 }
 
+/// Group ready rows by event, preserving arrival order.
+///
+/// A `Vec` of groups rather than a map, so the output order is deterministic and a
+/// test can assert on it.
+fn group_by_event(rows: Vec<PendingNotification>) -> Vec<Vec<PendingNotification>> {
+    let mut groups: Vec<Vec<PendingNotification>> = Vec::new();
+    for row in rows {
+        match groups.iter_mut().find(|g| g[0].event_id == row.event_id) {
+            Some(group) => group.push(row),
+            None => groups.push(vec![row]),
+        }
+    }
+    groups
+}
+
+/// Build the presentation for one event's rows.
+pub fn presentation_for(group: &[PendingNotification]) -> Presentation {
+    let mut items = Vec::new();
+    let mut had_plain_commit = false;
+
+    for row in group {
+        match item_for(row) {
+            Some(item) => items.push(item),
+            None => {
+                if row.kind == "commit_recorded" {
+                    had_plain_commit = true;
+                }
+            }
+        }
+    }
+
+    present_event(items, had_plain_commit)
+}
+
+/// Resolve an outbox row into a mergeable item, if it describes a reward.
+///
+/// Returns `None` for a plain commit: it is an acknowledgement, not a reward, and
+/// must never take the popup's title or one of its three sub-line slots (spec 16.4).
+fn item_for(row: &PendingNotification) -> Option<NotificationItem> {
+    let payload: serde_json::Value = serde_json::from_str(&row.payload).ok()?;
+
+    match row.kind.as_str() {
+        "achievement_unlocked" => {
+            let id = payload.get("achievement_id")?.as_str()?;
+            let achievement = devchievements_achievements::builtin_achievements()
+                .into_iter()
+                .find(|a| a.achievement_id == id);
+            match achievement {
+                Some(a) => Some(NotificationItem {
+                    id: a.achievement_id.clone(),
+                    title: a.name.clone(),
+                    rarity: a.rarity,
+                    is_daily_rank: false,
+                }),
+                // An unknown id is still worth celebrating, but we cannot claim a
+                // rarity we do not know; Common is the honest floor.
+                None => Some(NotificationItem {
+                    id: id.to_string(),
+                    title: humanise(id),
+                    rarity: Rarity::Common,
+                    is_daily_rank: false,
+                }),
+            }
+        }
+        "daily_rank_upgrade" => {
+            let rank = payload.get("rank")?.as_str()?;
+            let rarity = rarity_for_rank(rank)?;
+            Some(NotificationItem {
+                id: format!("daily:{rank}"),
+                title: format!("{} Day", humanise(rank)),
+                rarity,
+                is_daily_rank: true,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn rarity_for_rank(rank: &str) -> Option<Rarity> {
+    match rank {
+        "common" => Some(Rarity::Common),
+        "uncommon" => Some(Rarity::Uncommon),
+        "rare" => Some(Rarity::Rare),
+        "epic" => Some(Rarity::Epic),
+        "legendary" => Some(Rarity::Legendary),
+        _ => None,
+    }
+}
+
+/// Turn a snake_case id into something readable.
+fn humanise(id: &str) -> String {
+    id.split('_')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Read pending rows without consuming them (diagnostics and tests).
 pub async fn pending(pool: &SqlitePool) -> Result<Vec<PendingNotification>, sqlx::Error> {
     let rows = sqlx::query(
@@ -227,36 +351,21 @@ pub async fn pending(pool: &SqlitePool) -> Result<Vec<PendingNotification>, sqlx
         .collect())
 }
 
-/// A notification as handed to the UI layer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeliveredNotification {
-    /// Stable id.
-    pub notification_id: String,
-    /// Kind, for choosing an icon and sound.
-    pub kind: String,
-    /// Raw JSON.
-    pub payload: String,
-}
-
 /// A sink that records instead of rendering, for tests and headless runs.
 #[derive(Debug, Default)]
 pub struct RecordingSink {
-    /// Everything that was shown, in order.
-    pub shown: Vec<DeliveredNotification>,
+    /// Every presentation that was shown, in order.
+    pub shown: Vec<Presentation>,
     /// Whether to report failure instead of success (for exercising retries).
     pub always_fail: bool,
 }
 
 impl DeliverySink for RecordingSink {
-    fn show(&mut self, notification: &PendingNotification) -> DisplayOutcome {
+    fn present(&mut self, presentation: &Presentation) -> DisplayOutcome {
         if self.always_fail {
             return DisplayOutcome::NotShown;
         }
-        self.shown.push(DeliveredNotification {
-            notification_id: notification.notification_id.clone(),
-            kind: notification.kind.clone(),
-            payload: notification.payload.clone(),
-        });
+        self.shown.push(presentation.clone());
         DisplayOutcome::Shown
     }
 }

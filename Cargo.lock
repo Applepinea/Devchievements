@@ -431,6 +431,7 @@ version = "0.0.0"
 name = "devchievements-companion-core"
 version = "0.0.0"
 dependencies = [
+ "devchievements-achievements",
  "devchievements-core",
  "devchievements-events",
  "devchievements-git-hooks",
@@ -450,6 +451,7 @@ dependencies = [
  "devchievements-companion-core",
  "devchievements-events",
  "devchievements-git-hooks",
+ "devchievements-notifications",
  "devchievements-storage",
  "serde_json",
  "sqlx",

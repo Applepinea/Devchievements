@@ -268,3 +268,54 @@ Helper 会**无限阻塞**，直接违反 §9.2。
 折叠成了 `~-two/work`。这会让诊断包把两个人的路径混为一谈。
 
 修复：前缀必须终止于路径分隔符或字符串末尾。
+
+
+---
+
+## 8. 本轮：通知队列与合并（§16.4、§16.6）
+
+### 8.1 发现的问题
+
+`merge_notification` 早就写好了，也有单元测试，但**没有任何地方调用它**。
+真实流程里每个 outbox 行都各自弹一次窗。
+
+也就是说：一个首次提交会**弹三个窗**（成就 + 提交 + 每日等级）。
+
+同一个提交还违反了 §16.4：「普通 Commit 轻提示音，不弹完整通知」——
+实际会弹一个完整的提交通知。
+
+### 8.2 修复
+
+合并是**展示层**的职责，所以放在投递阶段而不是存储阶段：
+
+- 存储仍然一意图一行（每一行是独立的状态机条目，崩溃恢复要用）；
+- 投递时按 `event_id` 分组，合并成一个展示。
+
+新增 `Presentation`：`Popup` / `SoundOnly` / `Nothing`。
+
+### 8.3 端到端实测输出
+
+```text
+DRAIN read=3 ingested=3 queued=6
+NOTIFY popup title="First Commit" rarity=common others=["Common Day"] omitted=0
+NOTIFY popup title="Uncommon Day" rarity=uncommon others=[]
+SOUND commit
+DELIVER shown=3 unknown=0
+```
+
+三个提交、六个 outbox 行、三次展示：
+
+1. 首次提交：成就 + 每日等级**合并为一个弹窗**，等级作为副行；
+2. 第二个提交升到 Uncommon：单独弹窗；
+3. 第三个提交没有新解锁：**只出声，不弹窗**。
+
+### 8.4 我的测试又写错了两处
+
+- **fixture 名冲突**：新测试用了 `"merge"`，和已有的
+  `a_merge_record_is_recorded_but_not_counted` 撞车，两个测试并行互删目录。
+  失败信息是「pending 为 0」，看起来像代码 bug，其实是测试隔离问题。
+- **前提错了**：我以为「同一天第二个提交不会升级」，
+  但 1 → 2 个提交正好是 Common → Uncommon。要用第三个提交才落在同一等级内。
+
+两处都是测试的错误，不是实现的错误 —— 但如果不写这两个测试，
+合并功能就会一直「看起来对」。

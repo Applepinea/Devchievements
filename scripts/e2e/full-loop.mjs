@@ -107,10 +107,24 @@ function main() {
   };
   const ingested = field(drainLine, "ingested");
   check("the companion ingested all three commits", ingested === 3, out);
-  check("notifications were produced", /NOTIFY/.test(out));
-  check("a daily rank upgrade fired", /daily_rank_upgrade/.test(out));
-  check("an achievement unlocked", /achievement_unlocked/.test(out));
-  check("notifications were delivered", /DELIVER shown=\d+/.test(out));
+  // Spec 16.6: the first commit unlocks an achievement AND reaches the Common daily
+  // rank; that must arrive as ONE popup with the rank as a sub-line, not two windows.
+  const popups = out.split(/\r?\n/).filter((l) => l.startsWith("NOTIFY popup"));
+  check(
+    "the first commit merges achievement and rank into one popup",
+    popups.length >= 1 &&
+      popups[0].includes('title="First Commit"') &&
+      popups[0].includes("Common Day"),
+    popups[0] ?? "(no popup)"
+  );
+  check(
+    "a rank upgrade opens its own popup",
+    popups.some((l) => l.includes('title="Uncommon Day"')),
+    popups.join(" | ")
+  );
+  // Spec 16.4: a commit that unlocks nothing is acknowledged by sound, not a window.
+  check("a plain commit only plays a sound", /SOUND commit/.test(out));
+  check("everything was delivered", /DELIVER shown=\d+/.test(out));
 
   // Second run must be a no-op.
   const second = run(

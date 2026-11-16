@@ -12,6 +12,7 @@ devchievements-core = { path = "../core" }
 devchievements-events = { path = "../events" }
 devchievements-storage = { path = "../storage" }
 devchievements-notifications = { path = "../notifications" }
+devchievements-achievements = { path = "../achievements" }
 # Same SQLx-only rule as the storage crate (AGENTS.md 3: never mix with rusqlite).
 sqlx = { version = "0.8", default-features = false, features = ["runtime-async-std", "sqlite", "migrate"] }
 devchievements-git-hooks = { path = "../git-hooks" }

@@ -9,11 +9,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use devchievements_companion_core::delivery::{
-    DeliverySink, DisplayOutcome, OutboxProcessor, PendingNotification, RecordingSink,
+    DeliverySink, DisplayOutcome, OutboxProcessor, RecordingSink,
 };
 use devchievements_companion_core::{Companion, CompanionConfig};
 use devchievements_events::{EmailOrigin, Identity};
 use devchievements_git_hooks::spool::Spool;
+use devchievements_notifications::Presentation;
 use devchievements_storage::ingest;
 use std::path::{Path, PathBuf};
 
@@ -336,7 +337,7 @@ async fn an_old_record_still_counts_but_is_quiet() {
 /// A sink that always reports success, used to prove the happy path.
 struct AlwaysShown;
 impl DeliverySink for AlwaysShown {
-    fn show(&mut self, _n: &PendingNotification) -> DisplayOutcome {
+    fn present(&mut self, _p: &Presentation) -> DisplayOutcome {
         DisplayOutcome::Shown
     }
 }
@@ -355,6 +356,126 @@ async fn a_successful_sink_completes_everything() {
         .expect("deliver");
     assert!(shown > 0);
     assert_eq!(unknown, 0);
+
+    fx.cleanup();
+}
+
+#[tokio::test]
+async fn one_commit_with_several_rewards_produces_exactly_one_popup() {
+    // Spec 16.6: several rewards from one event merge into a single popup. Before
+    // this was wired up, each intent became its own notification and the user would
+    // have seen three windows for one commit.
+    let fx = Fixture::new("merge-popup").await;
+    push_record(&fx.spool, "evt-1", &"6".repeat(40), now_ms(), 1);
+    fx.companion().drain_once(&identity()).await.expect("drain");
+
+    let queued = fx
+        .companion()
+        .pending_notifications()
+        .await
+        .expect("pending");
+    assert!(
+        queued.len() >= 2,
+        "the first commit queues several intents, got {}",
+        queued.len()
+    );
+
+    let processor = OutboxProcessor::new(fx.pool.clone());
+    let mut sink = RecordingSink::default();
+    let (shown, _) = processor
+        .deliver_pending(&mut sink, 3)
+        .await
+        .expect("deliver");
+
+    assert_eq!(shown, 1, "one event must yield one presentation");
+    assert_eq!(sink.shown.len(), 1, "and exactly one thing shown");
+
+    match &sink.shown[0] {
+        Presentation::Popup(popup) => {
+            assert!(
+                popup.title.to_lowercase().contains("first"),
+                "the achievement leads an equal-rarity merge, got {:?}",
+                popup.title
+            );
+            assert!(
+                popup
+                    .others
+                    .iter()
+                    .any(|o| o.to_lowercase().contains("day")),
+                "the daily rank appears as a sub-line, got {:?}",
+                popup.others
+            );
+        }
+        other => panic!("expected a merged popup, got {other:?}"),
+    }
+
+    // Everything is resolved, so nothing is left pending.
+    assert!(fx
+        .companion()
+        .pending_notifications()
+        .await
+        .expect("pending")
+        .is_empty());
+
+    fx.cleanup();
+}
+
+#[tokio::test]
+async fn a_plain_commit_plays_a_sound_and_shows_no_popup() {
+    // Spec 16.4: a normal commit gets a light acknowledgement, not a window.
+    let fx = Fixture::new("sound").await;
+    let processor = OutboxProcessor::new(fx.pool.clone());
+    let mut sink = RecordingSink::default();
+
+    // Commit 1 reaches Common, so it produces a popup.
+    push_record(&fx.spool, "evt-1", &"7".repeat(40), now_ms(), 1);
+    fx.companion()
+        .drain_once(&identity())
+        .await
+        .expect("drain 1");
+    processor
+        .deliver_pending(&mut sink, 3)
+        .await
+        .expect("deliver 1");
+    assert!(!sink.shown.is_empty(), "the first commit must celebrate");
+    sink.shown.clear();
+
+    // Commit 2 moves Common -> Uncommon, which is still an upgrade.
+    push_record(&fx.spool, "evt-2", &"8".repeat(40), now_ms(), 1);
+    fx.companion()
+        .drain_once(&identity())
+        .await
+        .expect("drain 2");
+    processor
+        .deliver_pending(&mut sink, 3)
+        .await
+        .expect("deliver 2");
+    assert!(
+        matches!(sink.shown.first(), Some(Presentation::Popup(_))),
+        "a rank upgrade is a popup, got {:?}",
+        sink.shown.first()
+    );
+    sink.shown.clear();
+
+    // Commit 3 stays inside Uncommon (2-4 commits), so nothing new unlocks.
+    push_record(&fx.spool, "evt-3", &"9".repeat(40), now_ms(), 1);
+    let report = fx
+        .companion()
+        .drain_once(&identity())
+        .await
+        .expect("drain 3");
+    assert_eq!(report.ingested, 1);
+    processor
+        .deliver_pending(&mut sink, 3)
+        .await
+        .expect("deliver 3");
+
+    assert_eq!(sink.shown.len(), 1, "one acknowledgement for one commit");
+    assert_eq!(
+        sink.shown[0],
+        Presentation::SoundOnly,
+        "a plain commit must not open a window"
+    );
 
     fx.cleanup();
 }

@@ -25,7 +25,7 @@
 pub mod delivery;
 pub mod spool_consumer;
 
-pub use delivery::{DeliveredNotification, DeliverySink, OutboxError, OutboxProcessor};
+pub use delivery::{presentation_for, DeliverySink, DisplayOutcome, OutboxError, OutboxProcessor};
 pub use spool_consumer::{serve_ipc_blocking, Companion, CompanionConfig, DrainReport};
 
 /// Crate version.

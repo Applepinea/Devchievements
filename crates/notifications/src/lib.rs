@@ -447,6 +447,62 @@ pub fn merge_notification(mut items: Vec<NotificationItem>) -> Option<MergedNoti
 // Re-export Rarity so this module's API reads cleanly.
 pub use devchievements_achievements::Rarity;
 
+/// What the consumer should actually do for one event (spec 16.4, 16.6).
+///
+/// The distinction exists because spec 16.4 does NOT treat every event the same:
+/// a plain commit gets a light sound and no popup, while an unlock gets a full
+/// popup. Treating them uniformly is the easy mistake, and it is a visible one --
+/// every commit would interrupt the user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Presentation {
+    /// Show a merged popup (spec 16.6).
+    Popup(Popup),
+    /// Play a light acknowledgement sound and show nothing.
+    SoundOnly,
+    /// Nothing at all.
+    Nothing,
+}
+
+/// The content of a merged popup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Popup {
+    /// The leading item's title.
+    pub title: String,
+    /// The id of the leading item, used to pick the sound and icon.
+    pub primary_id: String,
+    /// Rarity of the leading item.
+    pub rarity: Rarity,
+    /// Sub-lines, at most three (spec 16.6).
+    pub others: Vec<String>,
+    /// How many items did not fit and are summarised as "+N".
+    pub omitted: usize,
+}
+
+/// Decide what to present for a single event.
+///
+/// # Rules applied, in order
+///
+/// 1. An event that only produced a plain commit is sound-only (spec 16.4).
+/// 2. One or more unlocks produce exactly one popup, merged per spec 16.6.
+/// 3. No items and no commit means nothing.
+///
+/// The plain-commit signal is passed separately rather than folded into `items`
+/// because a commit is not a reward: it must never become the popup's title, and it
+/// must not consume one of the three sub-line slots.
+pub fn present_event(items: Vec<NotificationItem>, had_plain_commit: bool) -> Presentation {
+    match merge_notification(items) {
+        Some(merged) => Presentation::Popup(Popup {
+            title: merged.primary.title.clone(),
+            primary_id: merged.primary.id.clone(),
+            rarity: merged.primary.rarity,
+            others: merged.others.iter().map(|i| i.title.clone()).collect(),
+            omitted: merged.omitted,
+        }),
+        None if had_plain_commit => Presentation::SoundOnly,
+        None => Presentation::Nothing,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -736,5 +792,93 @@ mod tests {
             terminal,
             vec!["completed", "delivery_unknown", "failed", "suppressed"]
         );
+    }
+
+    fn item(id: &str, title: &str, rarity: Rarity, daily: bool) -> NotificationItem {
+        NotificationItem {
+            id: id.to_string(),
+            title: title.to_string(),
+            rarity,
+            is_daily_rank: daily,
+        }
+    }
+
+    #[test]
+    fn a_plain_commit_produces_a_sound_and_no_popup() {
+        // Spec 16.4: a normal commit gets a light acknowledgement, not a window.
+        assert_eq!(
+            present_event(vec![], true),
+            Presentation::SoundOnly,
+            "every commit must not interrupt the user"
+        );
+    }
+
+    #[test]
+    fn an_event_with_nothing_to_say_produces_nothing() {
+        assert_eq!(present_event(vec![], false), Presentation::Nothing);
+    }
+
+    #[test]
+    fn one_unlock_produces_one_popup() {
+        let presentation = present_event(
+            vec![item("first_commit", "First Commit", Rarity::Common, false)],
+            true,
+        );
+        match presentation {
+            Presentation::Popup(popup) => {
+                assert_eq!(popup.title, "First Commit");
+                assert!(popup.others.is_empty());
+                assert_eq!(popup.omitted, 0);
+            }
+            other => panic!("expected a popup, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unlock_wins_over_the_plain_commit_sound() {
+        // A commit that also unlocks something must show the popup, not just chime.
+        let presentation = present_event(
+            vec![item("first_commit", "First Commit", Rarity::Common, false)],
+            true,
+        );
+        assert!(matches!(presentation, Presentation::Popup(_)));
+    }
+
+    #[test]
+    fn the_highest_rarity_leads_the_merged_popup() {
+        // Spec 16.6: an Epic permanent achievement leads over a Rare daily rank.
+        let presentation = present_event(
+            vec![
+                item("daily:rare", "Rare Day", Rarity::Rare, true),
+                item("epic_thing", "Epic Thing", Rarity::Epic, false),
+            ],
+            true,
+        );
+        match presentation {
+            Presentation::Popup(popup) => {
+                assert_eq!(popup.title, "Epic Thing");
+                assert_eq!(popup.rarity, Rarity::Epic);
+                assert_eq!(popup.others, vec!["Rare Day".to_string()]);
+            }
+            other => panic!("expected a popup, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn more_than_three_items_are_summarised() {
+        // Spec 16.6: at most three sub-lines, the rest become "+N".
+        let items = (0..6)
+            .map(|i| item(&format!("a{i}"), &format!("A{i}"), Rarity::Common, false))
+            .collect();
+        match present_event(items, false) {
+            Presentation::Popup(popup) => {
+                assert_eq!(popup.others.len(), 3);
+                assert_eq!(
+                    popup.omitted, 2,
+                    "six items, one leads, three listed, two remain"
+                );
+            }
+            other => panic!("expected a popup, got {other:?}"),
+        }
     }
 }

@@ -58,6 +58,7 @@ ALL CHECKS PASSED
 | 2a.9 | 桌面弹窗与提示音 | `Blocked` | 需 Companion 窗口 |
 | 2a.10 | Companion 启动消费 Spool | `Tested` | 无头 Companion 真实消费并计数 |
 | 2a.11 | 最小诊断视图 | `Partially Implemented` | 脱敏、别名、导出策略、配额已实现并测试；**UI 仍被 MSVC 阻塞** |
+| 2a.14 | 通知队列与合并（§16.4、§16.6） | `Tested` | 一个事件一个弹窗；普通提交只出声不弹窗 |
 | 2a.13 | Privacy Mode 基础行为（§26.2） | `Tested` | 26 个测试；通知文案、稳定别名、路径脱敏、导出警告、配额 |
 | 2a.12 | Crash Recovery 矩阵（§32.5） | `Partially Implemented` | 6 个场景中 4 个已真实通过；2 个需实时 IPC |
 
