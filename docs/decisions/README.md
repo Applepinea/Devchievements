@@ -28,6 +28,7 @@
 | [0013](0013-packfile-support.md) | Packfile 与 delta 解析（解除风险 A3） | `Accepted` |
 | [0014](0014-desktop-shell-and-msvc.md) | 桌面外壳与 MSVC 工具链（解除 Phase 2a 构建阻塞） | `Accepted` |
 | [0015](0015-toast-notifications.md) | 通知呈现改用 Windows Toast（本机未能验证） | `Accepted` |
+| [0016](0016-notification-api-choice.md) | 通知 API 选型与兼容性边界（未定稿） | `Proposed` |
 | [0007](0007-ipc-and-spool.md) | IPC 与 Spool 传输设计 | `Accepted` |
 | 0006 | 数据模型与投影设计 | 目标 Phase 1 |
 
