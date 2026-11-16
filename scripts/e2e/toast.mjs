@@ -50,6 +50,16 @@ function main() {
     process.exit(1);
   }
 
+  // Registration is an install-time step (ADR-0015); report what the app observes.
+  const status = runFile(appExe, ["--toast-status"], "devch-toast-status.txt");
+  const statusText = (status.out || "").trim();
+  console.log("registration: " + statusText);
+  if (status.status === 3) {
+    console.log("");
+    console.log("NOT INSTALLED: run scripts/install-companion.ps1 first.");
+    process.exit(2);
+  }
+
   const tag = "devch-" + Date.now();
   const probe = runFile(appExe, ["--toast-probe", "--tag", tag], "devch-toast-probe.txt");
   const out = (probe.out || "").trim();
@@ -59,11 +69,13 @@ function main() {
   if (probe.status !== 0) {
     if (/0x80073D54/.test(out)) {
       console.log("");
-      console.log("UNVERIFIED: Windows reports the process has no notification identity.");
-      console.log("  The product registers one by creating a Start Menu shortcut with");
-      console.log("  System.AppUserModel.ID. In this environment writing that shortcut is");
-      console.log("  denied to non-system processes, and a manually installed, correctly");
-      console.log("  stamped shortcut still does not grant identity.");
+      console.log("UNVERIFIED: Windows still reports the process has no notification identity.");
+      console.log("  Registration IS in place: the Start Menu shortcut exists, the shell reads");
+      console.log("  System.AppUserModel.ID = Devchievements.Companion from it, and the app");
+      console.log("  advertises the same id at runtime. The toast platform refuses anyway.");
+      console.log("  This is an environment limitation, not a code path that is missing:");
+      console.log("  on this host, toasts only work for processes Windows already trusts");
+      console.log("  (verified separately with PowerShell's own identity).");
       console.log("  See docs/development/phase-2a-progress.md section 10.");
       process.exit(2);
     }

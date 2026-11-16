@@ -1,4 +1,4 @@
-# ADR-0015：通知呈现改用 Windows Toast
+# ADR-0015：通知呈现改用 Windows Toast（安装器注册身份）
 
 - **状态**：**Accepted**
 - **日期**：2026-11-16
@@ -9,44 +9,63 @@
 
 ## 背景
 
-规范设想的是 Tauri 自绘通知窗口。但本机内嵌 WebView2 无法启动
-（`os error 5`，见 ADR-0014），因此自绘窗口这条路在本机不可用。
+规范设想 Tauri 自绘通知窗口，但本机内嵌 WebView2 无法启动（ADR-0014）。
+实测确认 Windows 原生 Toast 可以正常弹出，因此改走 Toast。
 
-同时实测确认：**Windows 原生 Toast 在这个环境里可以正常弹出**
-（用 PowerShell 自身 AUMID 验证，通知中心可查到）。
+## 决策一：呈现用 Toast
 
-## 决策
+§16.4/§16.6 规定的是**行为**（普通提交只出声、多奖励合并为一个弹窗），
+没有规定必须自绘。Toast 还自带系统勿扰设置（§16.6 要求），且不依赖 WebView2。
 
-通知呈现走 **Windows Toast**，而不是自绘窗口。
+**代价**：§28 的自定义动画与皮肤无法用 Toast 实现，那部分仍未完成。
 
-理由：
+## 决策二：注册归安装器，应用只读检查
 
-- §16.4/§16.6 规定的是**行为**（普通提交只出声、多奖励合并成一个弹窗），
-  没有规定必须自绘；
-- Toast 遵循系统勿扰设置（§16.6 要求），自绘窗口反而要自己实现；
-- 不需要 WebView2，因而不受本机限制。
+非打包进程要用 Toast，必须同时具备：
 
-## 代价
+1. 开始菜单快捷方式，属性 `System.AppUserModel.ID` 指向 AUMID；
+2. `HKCU\Software\Classes\AppUserModelId\<id>` 提供显示名。
 
-- 视觉受限于系统模板，§28 的自定义动画与皮肤**无法用 Toast 实现**；
-  那部分仍是未实现项，不能声称完成。
-- 非打包 Win32 需要注册 AUMID（最快方式是一个带 `System.AppUserModel.ID` 的
-  开始菜单快捷方式）。
+这两件事都写系统位置。**应用每次启动都去改开始菜单和 HKCU 是不可接受的**：
+行为上像恶意软件，权限上也常常不被允许。
+
+所以职责分开：
+
+| 角色 | 职责 | 接口 |
+| --- | --- | --- |
+| `scripts/install-companion.ps1` | 写快捷方式、写注册表、通知 shell、自校验 | 调用应用的 `--register-shortcut` / `--notify-shell` |
+| `scripts/uninstall-companion.ps1` | 清理快捷方式与注册表；**不动用户数据** | — |
+| 应用 | 只读检查 | `--toast-status`（JSON，未就绪退出码 3） |
+
+安装器成功时输出（实测）：
+
+```text
+install: System.AppUserModel.ID = [Devchievements.Companion]
+{"detail":"registered","ready":true}
+install: done
+```
 
 ## 验证状态
 
-🔴 **本机未能验证**。
+🔴 **本机未能验证 Toast 本身。**
 
 | 步骤 | 结果 |
 | --- | --- |
-| 生成带 AUMID 的快捷方式 | ✅ 属性可被 Shell 正确读出 |
-| 写入开始菜单 | ❌ `0x80070005`（PowerShell 同目录可写） |
-| 快捷方式就位后弹 Toast | ❌ 仍 `0x80073D54` |
+| 生成带 AUMID 的快捷方式 | ✅ Shell 属性系统读得到 |
+| 装入开始菜单 | ✅（由安装器，exit 0） |
+| 应用读到注册状态 | ✅ `{"ready":true}` |
+| **实际弹出 Toast** | ❌ 仍 `0x80073D54` |
+| 以 PowerShell 自身身份弹出 | ✅ 对照实验成功 |
 
-因此 `scripts/e2e/toast.mjs` 以退出码 2 报告「无法验证」，
-STATUS 中该项为 `Implemented` 而非 `Tested`。
+对照实验说明：**Toast 机制本身可用，缺的是这个进程被平台信任**。
+具体原因未查明（怀疑安全软件，未验证）。
 
 ## 复查计划
 
-在不受限的 Windows 机器上运行 `node scripts/e2e/toast.mjs`；
-退出码 0 才可把 STATUS 改成 `Tested`。
+在普通 Windows 机器上：
+
+```text
+node scripts/verify.mjs
+powershell -File scripts/install-companion.ps1
+node scripts/e2e/toast.mjs        # 退出码 0 才可把 STATUS 改成 Tested
+```

@@ -405,65 +405,85 @@ Tauri 命令要求 `Send`，而 `drain_once` 跨 `await` 持有
 
 ---
 
-## 10. 本轮：Windows Toast 实现
+## 10. 本轮：Windows Toast（安装器注册，应用只检查）
 
-### 10.1 为什么不是「调用一下 Toast API」
+### 10.1 为什么分成两件事
 
-非打包 Win32 进程没有包标识，Toast API 直接拒绝，`0x80073D54`。
-这不是沙箱怪癖，是**所有非 MSIX 程序**的默认行为。
+非打包 Win32 进程没有包标识，Toast API 一律拒绝（`0x80073D54`）。
+这是**所有非 MSIX 程序**的默认行为。
 
-微软给的方案是两条**必须同时满足**：
+微软的要求是两条同时满足：
 
 1. 开始菜单里一个快捷方式，属性 `System.AppUserModel.ID` 指向我们的 AUMID；
 2. `HKCU\Software\Classes\AppUserModelId\<id>` 提供显示名。
 
-### 10.2 逐个排除的实测记录
+**这两件事都是安装行为，不是运行时行为。** 每次启动都去改开始菜单和注册表的程序，
+和恶意软件的行为没有区别；普通用户账户往往也没有权限。
+
+所以：
+
+| 角色 | 职责 |
+| --- | --- |
+| `scripts/install-companion.ps1` | 注册（写快捷方式、写注册表、通知 shell） |
+| `scripts/uninstall-companion.ps1` | 反向清理（不动用户数据） |
+| 应用 | **只读检查**（`--toast-status`），不写任何系统位置 |
+
+### 10.2 安装器实测输出
+
+`powershell -File scripts/install-companion.ps1` → **exit 0**
+
+```text
+install: writing the shortcut
+REGISTER OK ...\install-staging\Devchievements.lnk
+install: copying to C:\Users\csa\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Devchievements.lnk
+install: registering the display name
+install: notifying the shell
+SHELL NOTIFIED
+install: verifying
+install: System.AppUserModel.ID = [Devchievements.Companion]
+{"detail":"registered","ready":true}
+install: done
+```
+
+应用侧：`--toast-status` → `{"detail":"registered","ready":true}`（退出码 0）。
+
+### 10.3 逐个排除的记录
 
 | 尝试 | 结果 |
 | --- | --- |
 | 只写注册表键 | ❌ `0x80073D54` |
 | 再加 `SetCurrentProcessExplicitAppUserModelID` | ❌ `0x80073D54` |
-| 用 PowerShell 调用（有自身身份） | ✅ 弹出成功，历史可查 |
-| 完整实现（键 + 快捷方式 + 进程 AUMID） | ✅ 代码路径全部走通，**但本机写开始菜单被拒** |
+| 完整注册（键 + 快捷方式 + 进程 AUMID + shell 通知） | ❌ 仍 `0x80073D54` |
+| 用 PowerShell 以**它自己的身份**调用 | ✅ 弹出成功，通知中心可查 |
 
-注意第一条的教训：**PowerShell 那次「成功」不能证明注册表够用**，
-因为 powershell.exe 自己就有身份。我一开始据此下了错误结论。
+第一条的教训：**PowerShell 那次「成功」不能证明注册表够用**，
+因为 powershell.exe 自身就带 AUMID。我一开始据此下了错误结论，后来才纠正。
 
-### 10.3 实现
+### 10.4 🔴 结论：本机无法验证
 
-`apps/desktop/src-tauri/src/toast.rs`，COM 全流程：
+注册的每一步都成功、每一步都能被外部读到，Toast 平台仍然拒绝。
 
-ShellLink → 设置 `PKEY_AppUserModel_ID`（手工构造 `PROPVARIANT`，VT_LPWSTR + CoTaskMemAlloc）
-→ IPropertyStore::Commit → IPersistFile::Save。
+这不是缺少代码路径，而是**这台机器上只有 Windows 已经信任的进程**（如 PowerShell）
+能使用 Toast。具体原因尚未查明（可能是安全软件，**未验证**）。
 
-实测这一步**是成功的**：生成的 `.lnk` 里能搜到 PKEY GUID 与 AUMID（UTF-16LE），
-Shell 属性系统也能正确读出 `System.AppUserModel.ID = Devchievements.Companion`。
+因此 `scripts/e2e/toast.mjs` 用三种退出码区分：
 
-### 10.4 🔴 本机无法完成验证
-
-两个环境限制叠加：
-
-| 现象 | 证据 |
+| 码 | 含义 |
 | --- | --- |
-| 写开始菜单被拒 | `IPersistFile::Save: 拒绝访问 (0x80070005)`（PowerShell 写同一目录却可以） |
-| 手动装好快捷方式后仍被拒 | 属性读得到，Toast 仍报 `0x80073D54` |
+| `0` | 真的弹出且出现在通知中心 |
+| `1` | 实现坏了 |
+| `2` | 环境阻止了验证 |
 
-推测是安全软件对非系统进程写 Start Menu 的限制，但**这只是推测，未验证**。
+当前结果 `2`。**按 AGENTS.md §10，STATUS 中只能是 `Implemented`，不是 `Tested`。**
 
-所以 `scripts/e2e/toast.mjs` 用**三种退出码**区分：
+### 10.5 顺带修掉的环境坑
 
-`0` = 真的弹出且出现在通知中心；`1` = 实现坏了；`2` = 环境阻止了验证。
+加 Toast 依赖后**连 hello world 都链接失败**：`LNK1104 lnk{GUID}.tmp`。
 
-当前结果是 `2`。**按 AGENTS.md §10，这一项只能是 `Implemented`，不是 `Tested`。**
-
-### 10.5 顺带修掉的一个环境坑
-
-加了 Toast 依赖后，**连 hello world 都链接失败**：`LNK1104 lnk{GUID}.tmp`。
-
-根因不是依赖，是 **TMP 指向 `%LOCALAPPDATA%\Temp` 时，孙进程（cargo → link.exe）写不进去**。
-把 TMP/TEMP 指到工作区内即可。同样的坑也打了 `std::env::temp_dir()` 的测试。
+根因与依赖无关：**TMP 指向 `%LOCALAPPDATA%\Temp` 时，孙进程
+（cargo → link.exe）写不进去**。同一个坑也让 `std::env::temp_dir()` 的测试集体失败。
 
 已固化：
 
-- `scripts/dev/build-desktop.bat` 自己设 TEMP；
+- `scripts/dev/build-desktop.bat` 自己设 TEMP 到工作区内；
 - `scripts/verify.mjs` 给所有子进程设 `.verify/tmp`。

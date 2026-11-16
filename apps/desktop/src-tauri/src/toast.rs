@@ -73,60 +73,73 @@ pub fn is_registered() -> bool {
     shortcut_path().is_some_and(|p| p.exists())
 }
 
-/// Register the AppUserModelID, creating the shortcut on first use.
-pub fn ensure_registered() -> Result<(), ToastError> {
-    register_identity()
+/// Whether Windows will accept our toasts, as observed without changing anything.
+///
+/// The app only OBSERVES. Registration is an install-time action (see
+/// scripts/install-companion.ps1 and ADR-0015): an application that silently writes
+/// to the Start Menu and to HKCU on every launch is indistinguishable from something
+/// suspicious, and a normal user account may not be permitted to do it at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegistrationState {
+    /// Everything the notification platform needs is present.
+    Ready,
+    /// The registration shortcut is missing from the Start Menu.
+    ShortcutMissing {
+        /// Where it was expected.
+        path: std::path::PathBuf,
+    },
+    /// APPDATA is unavailable, so the shortcut location cannot even be computed.
+    NoAppData,
 }
 
-#[cfg(windows)]
-fn register_identity() -> Result<(), ToastError> {
-    use winreg::enums::HKEY_CURRENT_USER;
-    use winreg::RegKey;
+impl RegistrationState {
+    /// Whether toasts can be attempted.
+    pub fn is_ready(&self) -> bool {
+        matches!(self, RegistrationState::Ready)
+    }
 
-    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let path = format!("Software\\Classes\\AppUserModelId\\{APP_USER_MODEL_ID}");
-
-    // Best effort: the key supplies only the display name shown in Settings. If it is
-    // already correct we skip the write entirely, and a denied write must not stop the
-    // shortcut from being created -- the shortcut is what actually grants the identity.
-    let already_correct = hkcu
-        .open_subkey_with_flags(&path, winreg::enums::KEY_READ)
-        .ok()
-        .and_then(|k| k.get_value::<String, _>("DisplayName").ok())
-        .is_some_and(|v| v == DISPLAY_NAME);
-
-    if !already_correct {
-        match hkcu.create_subkey(&path) {
-            Ok((key, _)) => {
-                let _ = key.set_value("DisplayName", &DISPLAY_NAME);
+    /// A one-line explanation for logs and the diagnostics view.
+    pub fn describe(&self) -> String {
+        match self {
+            RegistrationState::Ready => "registered".to_string(),
+            RegistrationState::ShortcutMissing { path } => {
+                format!("shortcut missing: {} (run scripts/install-companion.ps1)", path.display())
             }
-            Err(e) => {
-                // Recorded, not fatal: see the comment above.
-                eprintln!("toast: cannot write AppUserModelId key: {e}");
-            }
+            RegistrationState::NoAppData => "APPDATA is not set; cannot locate the Start Menu".to_string(),
         }
     }
+}
 
-    set_process_identity();
-
-    let shortcut =
-        shortcut_path().ok_or_else(|| ToastError::Registration("APPDATA is not set".into()))?;
-    if shortcut.exists() {
-        // Already installed; rewriting it on every launch would churn the Start Menu.
-        return Ok(());
+/// Inspect registration without modifying anything.
+pub fn registration_state() -> RegistrationState {
+    match shortcut_path() {
+        Some(path) if path.exists() => RegistrationState::Ready,
+        Some(path) => RegistrationState::ShortcutMissing { path },
+        None => RegistrationState::NoAppData,
     }
+}
 
-    let target = std::env::current_exe()
-        .map_err(|e| ToastError::Registration(format!("locate own executable: {e}")))?;
-    create_shortcut(&shortcut, &target)
+/// Ask the shell to notice that a Start Menu shortcut appeared.
+///
+/// Without this, the notification platform can keep using its cached app list until
+/// the next sign-in, so a freshly installed shortcut appears to do nothing. The
+/// installer calls this immediately after placing the shortcut.
+#[cfg(windows)]
+pub fn notify_shell() {
+    use windows::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
+
+    unsafe {
+        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None);
+    }
 }
 
 #[cfg(not(windows))]
-fn register_identity() -> Result<(), ToastError> {
-    Err(ToastError::Registration("toast registration is Windows-only".into()))
-}
+pub fn notify_shell() {}
 
 /// Claim the AppUserModelID for this process.
+///
+/// The registry key supplies only display metadata; the process must also advertise
+/// the identity it is using, otherwise CreateToastNotifierWithId rejects it.
 #[cfg(windows)]
 fn set_process_identity() {
     use windows::core::HSTRING;
@@ -138,27 +151,26 @@ fn set_process_identity() {
 #[cfg(not(windows))]
 fn set_process_identity() {}
 
-/// Create the Start Menu shortcut and stamp it with our AppUserModelID.
+/// Create the registration shortcut at an explicit path.
 ///
-/// This needs ShellLink + IPropertyStore, both COM. The PROPVARIANT is built by hand
-/// because the AUMID must be VT_LPWSTR and storage allocated with CoTaskMemAlloc: the
-/// property store copies the value, and PropVariantClear frees the original.
-/// Create the registration shortcut at an arbitrary path.
+/// Install-time only. The installer places the result in the Start Menu; the app never
+/// does, because writing there is an installation concern (see ADR-0015).
 ///
-/// Public because installing the shortcut can legitimately happen outside the app
-/// (an installer, or a test that is not allowed to write to the Start Menu).
+/// Needs ShellLink + IPropertyStore, both COM. The PROPVARIANT is built by hand: the
+/// AUMID must be VT_LPWSTR backed by CoTaskMemAlloc, and PropVariantClear frees the
+/// original after the property store has copied it.
 #[cfg(windows)]
 pub fn create_shortcut(lnk: &std::path::Path, target: &std::path::Path) -> Result<(), ToastError> {
     use std::os::windows::ffi::OsStrExt;
 
     use windows::core::{Interface, PCWSTR};
+    use windows::Win32::Foundation::PROPERTYKEY;
     use windows::Win32::System::Com::StructuredStorage::{PropVariantClear, PROPVARIANT};
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoTaskMemAlloc, IPersistFile, CLSCTX_INPROC_SERVER,
         COINIT_APARTMENTTHREADED,
     };
     use windows::Win32::System::Variant::VT_LPWSTR;
-    use windows::Win32::Foundation::PROPERTYKEY;
     use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
@@ -229,7 +241,7 @@ pub fn create_shortcut(lnk: &std::path::Path, target: &std::path::Path) -> Resul
 }
 
 #[cfg(not(windows))]
-fn create_shortcut(_lnk: &std::path::Path, _target: &std::path::Path) -> Result<(), ToastError> {
+pub fn create_shortcut(_lnk: &std::path::Path, _target: &std::path::Path) -> Result<(), ToastError> {
     Err(ToastError::Registration("shortcuts are Windows-only".into()))
 }
 
@@ -238,7 +250,11 @@ fn create_shortcut(_lnk: &std::path::Path, _target: &std::path::Path) -> Result<
 /// tag is attached to the notification so it can be found again in the Action Center
 /// history; the delivery layer passes the notification id.
 pub fn show(title: &str, body: &str, tag: &str) -> Result<(), ToastError> {
-    ensure_registered()?;
+    match registration_state() {
+        RegistrationState::Ready => {}
+        other => return Err(ToastError::Registration(other.describe())),
+    }
+    set_process_identity();
     show_registered(title, body, tag)
 }
 

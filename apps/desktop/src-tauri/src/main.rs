@@ -192,8 +192,12 @@ fn main() {
     // A probe entry point, used by scripts/e2e/toast.mjs. It runs the SAME code path
     // as the app (register + show) instead of a separate implementation, so the test
     // cannot pass while the product path is broken.
-    // Install the registration shortcut at an explicit path. Used when the caller is
-    // not permitted to write to the Start Menu directly (installers, tests).
+    // ---- installer-facing commands -------------------------------------------------
+    // The app never registers itself at runtime: registration mutates the Start Menu
+    // and HKCU, which belongs to installation, not to a background launch (ADR-0015).
+
+    // Write the registration shortcut to an explicit path. The installer then moves
+    // it into the Start Menu, which may need permissions the app does not have.
     if let Some(i) = std::env::args().position(|a| a == "--register-shortcut") {
         let Some(target) = std::env::args().nth(i + 1) else {
             println!("REGISTER FAILED: --register-shortcut needs a path");
@@ -210,6 +214,27 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+
+    // Tell the shell a shortcut appeared, so the notification platform re-reads it
+    // instead of waiting for the next sign-in.
+    if std::env::args().any(|a| a == "--notify-shell") {
+        toast::notify_shell();
+        println!("SHELL NOTIFIED");
+        std::process::exit(0);
+    }
+
+    // Report registration state as JSON; used by the installer and by diagnostics.
+    if std::env::args().any(|a| a == "--toast-status") {
+        let state = toast::registration_state();
+        println!(
+            "{}",
+            serde_json::json!({
+                "ready": state.is_ready(),
+                "detail": state.describe(),
+            })
+        );
+        std::process::exit(if state.is_ready() { 0 } else { 3 });
     }
 
     if std::env::args().any(|a| a == "--toast-probe") {
@@ -250,6 +275,8 @@ fn main() {
                 })
                 .build(app)?;
 
+            let toast_state = toast::registration_state();
+            println!("TOAST {} ({})", if toast_state.is_ready() { "READY" } else { "UNAVAILABLE" }, toast_state.describe());
             println!("TRAY READY data={:?}", default_data_dir());
             spawn_drain_loop();
             Ok(())
