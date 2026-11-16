@@ -104,7 +104,9 @@ function write(file, content) {
 }
 
 // Where the compiled Rust probe lives.
-const recorderExe = path.join(__dirname, "hook-recorder-rs", "target", "release", "devch-hook-recorder.exe");
+// The recorder is a native binary, so its name depends on the platform.
+const recorderName = process.platform === "win32" ? "devch-hook-recorder.exe" : "devch-hook-recorder";
+const recorderExe = path.join(__dirname, "hook-recorder-rs", "target", "release", recorderName);
 
 function installHooks(repo) {
   const hooksDir = path.join(repo, ".git", "hooks");
