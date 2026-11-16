@@ -59,7 +59,11 @@ function main() {
   fs.mkdirSync(path.join(dataRoot, "devchievements"), { recursive: true });
   fs.writeFileSync(
     path.join(dataRoot, "devchievements", "settings.json"),
-    JSON.stringify({ schemaVersion: 1, emails: ["pages@devchievements.local"] }, null, 2)
+    JSON.stringify(
+      { schemaVersion: 1, emails: ["pages@devchievements.local"], onboardingCompleted: true },
+      null,
+      2,
+    )
   );
 
   for (const page of PAGES) {

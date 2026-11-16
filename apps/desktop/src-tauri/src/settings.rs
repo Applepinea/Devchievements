@@ -67,6 +67,9 @@ pub struct Settings {
     /// IANA timezone used for local_date (spec 12).
     #[serde(default)]
     pub timezone: Option<String>,
+    /// Whether the first-run wizard has been completed (spec 25).
+    #[serde(default, rename = "onboardingCompleted")]
+    pub onboarding_completed: bool,
 }
 
 fn default_schema_version() -> u32 {
@@ -80,6 +83,7 @@ impl Default for Settings {
             emails: Vec::new(),
             privacy: PrivacyMode::Normal,
             timezone: None,
+            onboarding_completed: false,
         }
     }
 }

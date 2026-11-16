@@ -103,3 +103,14 @@ button:disabled { opacity: .6; cursor: default; }
 
 .bar-track { flex: 1; height: 8px; background: #20242c; border-radius: 999px; overflow: hidden; }
 .bar { display: block; height: 100%; background: var(--accent); }
+
+.wizard {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 48px 28px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+.wizard h1 { margin: 0 0 6px; font-size: 22px; }
+.wizard h2 { margin: 8px 0 6px; font-size: 17px; }

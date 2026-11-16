@@ -161,4 +161,21 @@ export interface ImportReport {
 
 export const importHistory = (path: string) =>
   invoke<ImportReport>("import_history", { path });
+export interface OnboardingStatus {
+  completed: boolean;
+  suggestedEmails: string[];
+  gitHasIdentity: boolean;
+  helperAvailable: boolean;
+}
+
+export interface HookInstallResult {
+  hook: string;
+  outcome: string;
+}
+
+export const onboardingStatus = () =>
+  invoke<OnboardingStatus>("onboarding_status");
+export const installHooks = (repoPath: string) =>
+  invoke<HookInstallResult[]>("install_hooks", { repoPath });
+export const completeOnboarding = () => invoke<void>("complete_onboarding");
 export const uiReady = (view: string) => invoke<void>("ui_ready", { view });

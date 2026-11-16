@@ -681,6 +681,35 @@ fn main() {
         }
     }
 
+    // Print what the wizard would see, so its logic can be checked without a window.
+    // Install the managed hooks without the window, so the installer script and the
+    // tests drive exactly the same code the wizard does.
+    if let Some(i) = std::env::args().position(|a| a == "--install-hooks") {
+        let Some(repo) = std::env::args().nth(i + 1) else {
+            println!("HOOKS FAILED: --install-hooks needs a repository path");
+            std::process::exit(2);
+        };
+        match commands::install_hooks(repo) {
+            Ok(results) => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&results).unwrap_or_default()
+                );
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("HOOKS FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if std::env::args().any(|a| a == "--onboarding") {
+        let status = commands::onboarding_status();
+        println!("{}", serde_json::to_string_pretty(&status).unwrap_or_default());
+        std::process::exit(0);
+    }
+
     if std::env::args().any(|a| a == "--capabilities") {
         let caps = current_capabilities();
         let report = serde_json::json!({
@@ -803,6 +832,12 @@ fn main() {
             commands::get_about,
             commands::backup_database,
             commands::import_history,
+            commands::onboarding_status,
+            commands::install_hooks,
+            commands::complete_onboarding,
+            commands::onboarding_status,
+            commands::install_hooks,
+            commands::complete_onboarding,
             commands::restore_database,
             commands::open_window,
         ])

@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { uiReady } from "./ipc";
+import { onboardingStatus, uiReady } from "./ipc";
 import Dashboard from "./pages/Dashboard";
 import Gallery from "./pages/Gallery";
 import Activity from "./pages/Activity";
 import Repositories from "./pages/Repositories";
 import About from "./pages/About";
 import Settings from "./pages/Settings";
+import Welcome from "./pages/Welcome";
 
 const PAGES = [
   { id: "dashboard", label: "Dashboard", component: Dashboard },
@@ -18,22 +19,40 @@ const PAGES = [
 
 type PageId = (typeof PAGES)[number]["id"];
 
-export default function App() {
-  // The hash selects the initial page, so a smoke test can open any page directly
-  // instead of driving the nav with synthetic clicks.
-  const initial = (): PageId => {
-    const raw = window.location.hash.replace(/^#/, "");
-    const found = PAGES.find((p) => p.id === raw);
-    return found ? found.id : "dashboard";
-  };
-  const [current, setCurrent] = useState<PageId>(initial);
+// The hash selects the initial page, so a smoke test can open any page directly
+// instead of driving the nav with synthetic clicks.
+function initialPage(): PageId {
+  const raw = window.location.hash.replace(/^#/, "");
+  const found = PAGES.find((p) => p.id === raw);
+  return found ? found.id : "dashboard";
+}
 
-  // Tell the Rust side which page rendered. The window smoke test waits for this,
-  // because a window showing a blank page is otherwise indistinguishable from a
-  // working one.
+export default function App() {
+  const [onboarded, setOnboarded] = useState<boolean | null>(null);
+  const [current, setCurrent] = useState<PageId>(initialPage);
+
+  // Spec 25: the wizard runs before the pages, and only once.
   useEffect(() => {
-    void uiReady(current);
-  }, [current]);
+    onboardingStatus().then(
+      (s) => setOnboarded(s.completed),
+      // If the status cannot be read the app must still open; the wizard is
+      // helpful, not mandatory.
+      () => setOnboarded(true),
+    );
+  }, []);
+
+  // Tell the Rust side which view rendered. The window smoke test waits for this,
+  // because a window showing a blank page looks identical to a working one.
+  useEffect(() => {
+    // Wait for the status before reporting: while it is unknown the app does not
+    // yet know whether this is a first run, and reporting early would claim the
+    // dashboard rendered on a machine that is about to show the wizard.
+    if (onboarded === null) return;
+    void uiReady(onboarded === false ? "welcome" : current);
+  }, [onboarded, current]);
+
+  if (onboarded === null) return <p className="muted">Starting...</p>;
+  if (!onboarded) return <Welcome onFinish={() => setOnboarded(true)} />;
 
   const page = PAGES.find((p) => p.id === current) ?? PAGES[0];
   const Page = page.component;

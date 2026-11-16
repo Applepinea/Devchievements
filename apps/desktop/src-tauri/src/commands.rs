@@ -312,6 +312,112 @@ pub async fn import_history(path: String) -> Result<devchievements_storage::hist
     .map_err(|e| e.to_string())
 }
 
+// ------------------------------------------------------------- onboarding
+//
+// Spec 25: the first run must explain what the companion needs and why, rather
+// than starting silently and recording nothing.
+
+/// What the wizard needs to know.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnboardingStatus {
+    /// Whether the wizard has been completed before.
+    pub completed: bool,
+    /// Emails Git already knows about, offered as suggestions.
+    pub suggested_emails: Vec<String>,
+    /// Whether Git itself has a user.email configured.
+    pub git_has_identity: bool,
+    /// Whether the helper binary was found next to the app.
+    pub helper_available: bool,
+}
+
+#[tauri::command]
+pub fn onboarding_status() -> OnboardingStatus {
+    let stored = crate::settings::Settings::load(&settings_path());
+
+    // Global Git identity is what a new user most likely wants; reading it from the
+    // home directory picks up the global config without needing a repository.
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let identity = devchievements_git_hooks::gitread::config_read::suggest_identity(&home);
+    let suggested: Vec<String> = identity.emails.into_iter().map(|e| e.email).collect();
+
+    let helper_available = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.join("devch-helper.exe").is_file()))
+        .unwrap_or(false);
+
+    OnboardingStatus {
+        completed: stored.onboarding_completed,
+        suggested_emails: suggested,
+        git_has_identity: devchievements_git_hooks::gitread::config_read::git_has_identity(&home),
+        helper_available,
+    }
+}
+
+/// One hook the installer handled.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HookInstallResult {
+    /// Hook name.
+    pub hook: String,
+    /// What happened, as the installer reported it.
+    pub outcome: String,
+}
+
+/// Install the managed hooks into one repository.
+#[tauri::command]
+pub fn install_hooks(repo_path: String) -> Result<Vec<HookInstallResult>, String> {
+    let repo = std::path::PathBuf::from(&repo_path);
+    let git_dir = repo.join(".git");
+    if !git_dir.is_dir() {
+        return Err(format!("not a git repository: {repo_path}"));
+    }
+
+    let helper = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .map(|p| p.join("devch-helper.exe"))
+        .ok_or_else(|| "cannot locate the companion directory".to_string())?;
+    if !helper.is_file() {
+        return Err("devch-helper.exe is missing next to the app".to_string());
+    }
+
+    let site = devchievements_git_hooks::hooks::HookSite::resolve(&git_dir, None);
+    let mut results = Vec::new();
+    for name in ["post-commit", "post-rewrite", "post-merge"] {
+        match devchievements_git_hooks::hooks::install(&site, name, &helper) {
+            Ok(outcome) => results.push(HookInstallResult {
+                hook: name.to_string(),
+                outcome: format!("{outcome:?}"),
+            }),
+            Err(e) => return Err(format!("{name}: {e}")),
+        }
+    }
+
+    // The helper refuses to create the data directory (spec 34.1); the installer
+    // owns that, so do it here before any commit can happen.
+    let data_dir = default_data_dir();
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(data_dir.join("spool")).map_err(|e| e.to_string())?;
+
+    Ok(results)
+}
+
+/// Mark the wizard as done.
+#[tauri::command]
+pub fn complete_onboarding() -> Result<(), String> {
+    let path = settings_path();
+    let mut stored = crate::settings::Settings::load(&path);
+    stored.onboarding_completed = true;
+    stored.save(&path).map_err(|e| e.to_string())?;
+    println!("ONBOARDING completed");
+    Ok(())
+}
+
 /// Open the settings window (used by the dashboard shortcut).
 #[tauri::command]
 pub fn open_window(app: tauri::AppHandle) -> Result<(), String> {

@@ -53,4 +53,11 @@ if exist "%~dp0..\..\apps\desktop\assets\sounds" (
   xcopy /E /I /Y /Q "%~dp0..\..\apps\desktop\assets\sounds\*.wav" "target\debug\sounds\" >nul
 )
 
+REM The helper must sit next to the app: the wizard's install step looks for it
+REM there, and the installer places it there too. Without this the development
+REM build cannot install hooks, which is a packaging difference, not a feature gap.
+if exist "%~dp0..\..\target\debug\devch-helper.exe" (
+  copy /Y "%~dp0..\..\target\debug\devch-helper.exe" "target\debug\devch-helper.exe" >nul
+)
+
 exit /b %BUILD_EXIT%

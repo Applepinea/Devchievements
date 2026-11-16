@@ -354,3 +354,66 @@ helper 的新守卫让 3 个旧 e2e 失败：`hook-to-spool`、`full-loop`、`ip
 这不是 bug，是**行为变更**：装过的机器上目录本来就在。于是夹具改成「模拟已安装」。
 
 顺带修了 `window.mjs` 里写死 `view=settings` 的断言（默认页已变成 dashboard）。
+
+---
+
+## 7. 安装向导（§25）
+
+### 7.1 三步而不是一张长表单
+
+```text
+Welcome -> Identity -> Hooks -> Done
+```
+
+分步的理由是**每步都有前置条件**：没有身份就装钩子，会捕获到之后被拒绝的提交。
+
+身份页会读本机 Git 全局配置（`user.email`）并给出建议，
+用户点一下即可，不用手抄邮箱。
+
+### 7.2 三个 bug，都是「看起来对」的那种
+
+**bug 1：命令只注册到一个 builder。**
+
+应用有两处 `generate_handler!`（托盘主窗口、冒烟测试窗口）。
+我用 `String.replace` 只替换了第一处，于是冒烟窗口里命令不存在，
+前端调用失败 → 走兜底 → 直接显示 dashboard。
+
+同一个错我在这轮里犯了**第二次**（上一次是隐私模式读取）。
+
+**bug 2：初始状态就上报了视图名。**
+
+`onboarded === null` 时三元走 else 分支，立刻报了一次 `dashboard`。
+测试看到的是「向导没出现」，而实际是「报早了」。
+改为状态确定后再上报。
+
+**bug 3：设置字段名不一致。**
+
+Rust 字段 `onboarding_completed`，测试写的 JSON 是 `onboardingCompleted`。
+其他字段都是 camelCase，这个漏了 `rename`，于是标记读不到、向导反复出现。
+
+### 7.3 打包差异暴露成功能缺陷
+
+hook 安装报 `devch-helper.exe is missing next to the app`。
+
+不是逻辑错——桌面应用和 helper 构建到**两个不同目录**，
+而安装器会把它们放在一起。开发构建少做了这一步，
+于是「开发构建装不了钩子」。
+
+修法：构建脚本也把 helper 复制到应用旁边，和安装器行为一致。
+
+（顺带踩到路径层级：从 `scripts\dev` 到仓库根是两级 `..`，我写了三级。）
+
+### 7.4 验证
+
+`scripts/e2e/wizard.mjs` → **9 项全过**：
+
+```text
+ok  it shows the wizard instead of the dashboard
+ok  a configured machine skips the wizard
+ok  the wizard does not reappear
+ok  the onboarding flag is persisted
+ok  the wizard can install hooks
+ok  all three hooks were reported
+ok  the hook file exists
+ok  it points at the helper
+```
