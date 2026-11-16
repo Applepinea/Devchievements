@@ -14,6 +14,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod audio;
 mod toast;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -22,6 +23,7 @@ use devchievements_companion_core::delivery::{DeliverySink, DisplayOutcome, Outb
 use devchievements_companion_core::{Companion, CompanionConfig};
 use devchievements_events::{EmailOrigin, Identity};
 use devchievements_notifications::Presentation;
+use devchievements_sound::Rarity as SoundRarity;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 
@@ -40,13 +42,30 @@ impl DeliverySink for DesktopSink {
                     "POPUP {} [{:?}] {:?}",
                     popup.title, popup.rarity, popup.others
                 );
+
+                // Spec 16.6: the leading item's sound plays, exactly one per event.
+                let selection = audio::play_for(&audio::request_for(
+                    &popup.primary_id,
+                    to_sound_rarity(popup.rarity),
+                ));
+                println!("SOUND play id={} from={:?}", selection.sound, selection.source);
+
+                // Spec 16.6: a popup shows the leading reward plus up to three
+                // sub-lines; the toast body carries the same shape.
+                let body = if popup.others.is_empty() {
+                    format!("{:?} unlocked", popup.rarity)
+                } else {
+                    popup.others.join(", ")
+                };
+                report_toast(&popup.primary_id, &popup.title, &body);
                 SHOWN.fetch_add(1, Ordering::Relaxed);
             }
             Presentation::SoundOnly => {
                 // Spec 16.4: a plain commit is acknowledged by sound only. No toast,
                 // because interrupting for every commit is exactly what that rule
                 // exists to prevent.
-                println!("SOUND commit");
+                let selection = audio::play_for(&devchievements_sound::SoundRequest::Commit);
+                println!("SOUND play id={} from={:?}", selection.sound, selection.source);
                 SHOWN.fetch_add(1, Ordering::Relaxed);
             }
             Presentation::Nothing => {}
@@ -63,6 +82,21 @@ fn report_toast(tag: &str, title: &str, body: &str) {
     match toast::show(title, body, tag) {
         Ok(()) => println!("TOAST OK tag={tag}"),
         Err(e) => println!("TOAST FAILED tag={tag} error={e}"),
+    }
+}
+
+/// Map the notification rarity onto the sound crate's mirror type.
+///
+/// Separate enums on purpose: the sound crate must not depend on the notification
+/// crate's presentation model, and this bridge is cheaper than coupling them.
+fn to_sound_rarity(rarity: devchievements_notifications::Rarity) -> SoundRarity {
+    use devchievements_notifications::Rarity as R;
+    match rarity {
+        R::Common => SoundRarity::Common,
+        R::Uncommon => SoundRarity::Uncommon,
+        R::Rare => SoundRarity::Rare,
+        R::Epic => SoundRarity::Epic,
+        R::Legendary => SoundRarity::Legendary,
     }
 }
 

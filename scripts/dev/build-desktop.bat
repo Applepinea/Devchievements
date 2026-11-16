@@ -42,4 +42,13 @@ set CXX=
 
 cd /d "%~dp0..\..\apps\desktop\src-tauri"
 "%CARGO_HOME%\bin\cargo.exe" +stable-x86_64-pc-windows-msvc %*
-exit /b %errorlevel%
+set BUILD_EXIT=%errorlevel%
+
+REM Sound assets must sit next to the executable: the audio layer resolves
+REM them relative to current_exe(). Copying here means every build has them.
+if exist "%~dp0..\..\apps\desktop\assets\sounds" (
+  if not exist "target\debug\sounds" mkdir "target\debug\sounds"
+  xcopy /E /I /Y /Q "%~dp0..\..\apps\desktop\assets\sounds\*.wav" "target\debug\sounds\" >nul
+)
+
+exit /b %BUILD_EXIT%

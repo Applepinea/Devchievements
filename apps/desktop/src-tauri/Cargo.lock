@@ -892,6 +892,7 @@ dependencies = [
  "devchievements-events",
  "devchievements-git-hooks",
  "devchievements-notifications",
+ "devchievements-sound",
  "devchievements-storage",
  "serde",
  "serde_json",
@@ -923,6 +924,13 @@ name = "devchievements-notifications"
 version = "0.0.0"
 dependencies = [
  "devchievements-achievements",
+ "serde",
+]
+
+[[package]]
+name = "devchievements-sound"
+version = "0.0.0"
+dependencies = [
  "serde",
 ]
 

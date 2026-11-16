@@ -15,12 +15,13 @@ devchievements-companion-core = { path = "../../../crates/companion-core" }
 devchievements-storage = { path = "../../../crates/storage" }
 devchievements-events = { path = "../../../crates/events" }
 devchievements-notifications = { path = "../../../crates/notifications" }
+devchievements-sound = { path = "../../../crates/sound" }
 devchievements-git-hooks = { path = "../../../crates/git-hooks" }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-async-std", "sqlite", "migrate"] }
 async-std = { version = "1", features = ["attributes"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["UI_Notifications", "Data_Xml_Dom", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Foundation", "Win32_System_Variant"] }
+windows = { version = "0.62", features = ["UI_Notifications", "Data_Xml_Dom", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Foundation", "Win32_System_Variant", "Win32_Media_Audio"] }
 
 [profile.release]
 lto = true

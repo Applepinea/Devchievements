@@ -108,7 +108,7 @@ async function main() {
     const reacted = await waitFor(
       () => {
         const t = fs.readFileSync(appOut, "utf8");
-        return t.includes("POPUP First Commit") && t.includes("SOUND commit");
+        return t.includes("POPUP First Commit") && /SOUND play id=commit/.test(t);
       },
       30000
     );
@@ -117,7 +117,19 @@ async function main() {
 
     check("the desktop app reacted to real commits", reacted, log);
     check("it merged the first commit into one popup", /POPUP First Commit/.test(log), log);
-    check("it acknowledged a plain commit by sound", /SOUND commit/.test(log), log);
+    check("it acknowledged a plain commit by sound", /SOUND play id=commit/.test(log), log);
+    // Spec 19: the leading item decides the sound, and the built-in rarity sound is
+    // what an un-customised install plays.
+    check(
+      "the merged popup used the rarity sound",
+      /SOUND play id=rarity-common/.test(log),
+      log
+    );
+    check(
+      "the rank upgrade used the daily sound",
+      /SOUND play id=daily-uncommon/.test(log),
+      log
+    );
   }
 
   app.kill();

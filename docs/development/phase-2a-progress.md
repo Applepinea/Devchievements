@@ -487,3 +487,56 @@ install: done
 
 - `scripts/dev/build-desktop.bat` 自己设 TEMP 到工作区内；
 - `scripts/verify.mjs` 给所有子进程设 `.verify/tmp`。
+
+---
+
+## 11. 本轮：提示音（§19）
+
+### 11.1 分工
+
+| 层 | 职责 |
+| --- | --- |
+| `crates/sound` | **选择逻辑**：优先级与回退，纯逻辑，无 IO |
+| `apps/desktop/src-tauri/src/audio.rs` | 把 id 映射到文件并播放 |
+| `scripts/generate-sounds.mjs` | 生成内置音效（可复现） |
+
+选择逻辑做成纯函数，是为了**没有声卡也能测优先级规则**——
+而规则恰恰是最容易写错的部分。
+
+### 11.2 实现中的一个真实 bug
+
+第一版 `first_available` 把「稀有度内置音」当成了「成就专属槽的回退」，
+于是**没有成就专属音效时会立刻返回稀有度内置音**，
+后面的每日等级/稀有度/全局自定义音全都被跳过。
+
+3 个测试当场失败（期望 `custom-daily`，得到 `rarity-epic`）。
+修法：每个候选槽位区分「自定义音」和「该槽自己的内置音」，成就槽没有内置音，
+所以它不该拦截后续槽位。
+
+### 11.3 一处规范没写明的判断
+
+§19 只给了类别优先级，没说「稀有度内置音」与「全局自定义音」谁优先。
+
+我选了**保持类别顺序**：稀有度内置音优先于全局自定义音。
+理由：若任何自定义音都压过任何内置音，用户只设一个全局音，
+就会失去全部稀有度差异，那等于取消了稀有度音效。
+这一条写进了代码注释和测试名（`a_rarity_built_in_outranks_a_global_custom_sound`）。
+
+### 11.4 实测输出
+
+`node scripts/e2e/desktop-tray.mjs` → **PASSED**
+
+```text
+POPUP First Commit [Common] ["Common Day"]
+SOUND play id=rarity-common from=BuiltIn
+POPUP Uncommon Day [Uncommon] []
+SOUND play id=daily-uncommon from=BuiltIn
+SOUND play id=commit from=BuiltIn
+```
+
+对应 §19 的三条路径：成就弹窗用稀有度音、每日等级用每日音、普通提交用提交音。
+
+### 11.5 顺带修掉的回归
+
+重构安装器命令时，投递出口的 **Toast 调用被整段丢掉过一次**。
+这次重写出口时补回，并由 `TOAST READY` / `TOAST FAILED` 日志可见。
