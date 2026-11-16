@@ -53,9 +53,9 @@ ALL CHECKS PASSED
 | --- | --- | --- | --- |
 | 2b.1 | 平台能力探测与降级链（§29） | `Tested` | 13 个测试；运行时实测降级到 in-app-only |
 | 2b.2 | 兼容性矩阵更新（§29.6） | `Partially Implemented` | 本轮实测行已更新；其余平台未验证 |
-| 2b.3 | Dashboard / Gallery / Activity / Repository Manager / About | `Blocked` | 需要 WebView2；数据侧已由 `--diagnostics`/`--capabilities` 提供 |
+| 2b.3 | Dashboard / Gallery / Activity / Repository Manager / About | `Not Started` | **WebView2 已解阻塞**；数据侧已由 `--diagnostics`/`--capabilities` 提供 |
 | 2b.4 | 历史导入界面与完整流程 | `Partially Implemented` | **管线完成并实测**（静默、幂等、原始日期、跨路径去重）；界面需 WebView2 |
-| 2b.5 | 基础 Settings 界面 | `Blocked` | 需要 WebView2（设置文件已就绪） |
+| 2b.5 | 基础 Settings 界面 | `Not Started` | **WebView2 已解阻塞**（设置文件已就绪） |
 | 2b.6 | 安装向导 / 卸载机制 | `Partially Implemented` | 安装器与卸载脚本已完成并可运行 |
 | 2b.7 | 数据备份与恢复 | `Not Started` | 存储层可做，不依赖 UI |
 | 2b.8 | Outbox 可观测性（延迟分布与原因码） | `Tested` | 7 个测试（含真实数据库）；已并入 `--diagnostics` |
@@ -70,7 +70,7 @@ ALL CHECKS PASSED
 | 2a.3 | IPC 帧协议 | `Tested` | 9 个测试，含超限长度与截断 |
 | 2a.4 | Spool 回退 | `Tested` | 11 个测试，含并发与损坏恢复 |
 | 2a.5 | 实时 IPC 通道（客户端 + 服务端） | `Platform Unverified` | 已实现并编译；**本机沙箱拒绝命名管道**（os error 5）。回退路径已验证 |
-| 2a.6 | Tauri Companion 与托盘 | `Partially Implemented` | 编译/链接/托盘运行/真实提交驱动已验证；托盘菜单含隐私开关与手动 drain；内嵌 webview 被沙箱拒绝 |
+| 2a.6 | Tauri Companion 与托盘 | `Tested` | 编译/链接/托盘运行/真实提交驱动/窗口创建均已验证；托盘含隐私开关、打开窗口、手动 drain |
 | 2a.7 | SQLite 持久化接入 Helper | `Tested` | 完整闭环：commit→hook→helper→spool→companion→SQLite |
 | 2a.8 | Outbox Consumer（Desktop 子集） | `Tested` | 投递、重试、`delivery_unknown` 均有测试 |
 | 2a.9 | 桌面弹窗与提示音 | `Partially Implemented` | **提示音已完成并实测**；Toast 注册与调用已实现（安装器 exit 0），**端到端未通过** |

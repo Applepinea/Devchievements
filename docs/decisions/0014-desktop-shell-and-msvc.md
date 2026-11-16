@@ -106,3 +106,32 @@ if defined X (
 
 在不受限的 Windows 机器上运行 `devchievements-desktop.exe`，
 确认设置窗口能打开，并把结果补进兼容性矩阵。
+
+---
+
+## 🔴 更正（2026-11-17）：WebView2 其实可以运行
+
+**本文档此前断言「本机内嵌 WebView2 无法启动」，这个结论是错的。**
+
+真正的失败原因是：**WebView2 的用户数据目录不可写**，而
+`CreateCoreWebView2EnvironmentWithOptions` 只把结果报成 `E_ACCESSDENIED`（`os error 5`），
+看不出是哪一步被拒。
+
+修法是一行：给窗口显式指定数据目录。
+
+````rust`
+WebviewWindowBuilder::new(app, "main", url)
+    .data_directory(data_dir.join("webview"))   // <- 关键
+    .build()?;
+`````
+
+实测：`node scripts/e2e/window.mjs` → **4 项全过**，窗口正常创建。
+
+### 我为什么会判断错
+
+我用 `msedgewebview2.exe --version` 退出码 13 当作证据——
+但那个参数对 WebView2 运行时并不支持，**退出码 13 与「不能运行」无关**。
+而 Edge 浏览器本身在这个沙箱里是完全正常的（`--version` 与 headless 都成功），
+这条反证当时就在手边，我没有去测。
+
+教训：**用一个未经验证的失败信号去解释另一个失败**，会把两个不相干的事连起来。

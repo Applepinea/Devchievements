@@ -97,3 +97,10 @@ manifest 里 `wasm-unsafe-eval` 已确认存在、wasm 已确认打包，但「�
 | 2026-11-16 | Windows 11 | **TMP 在 %LOCALAPPDATA% 时链接** | `link.exe` 生成 `lnk{GUID}.tmp` | ❌ `LNK1104`；改到工作区内即正常 |
 | 2026-11-16 | Windows 11 | **命名管道（实时 IPC）** | 同进程绑定后连接 | ❌ **被沙箱拒绝**：`os error 5 (Access denied)` |
 | 2026-11-16 | Windows 11 | **IPC 失败时回退 Spool** | 真实提交 + 真实 Companion | ✅ 端到端通过，提交不受影响 |
+
+### 更正（2026-11-17）
+
+| 日期 | 能力 | 此前记录 | 实测结论 |
+| --- | --- | --- | --- |
+| 2026-11-17 | 内嵌 WebView2 | ❌ 沙箱拒绝 | ✅ **可用**：指定 `data_directory` 后窗口正常创建 |
+| 2026-11-17 | Chromium 进程 | ❌ 无法启动（依据 `--version` exit 13） | ✅ Edge `--version` 与 headless 均正常 |

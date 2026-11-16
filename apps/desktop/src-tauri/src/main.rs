@@ -225,6 +225,30 @@ impl devchievements_core::ConfigurationProvider for StaticConfig {
     }
 }
 
+/// Create (or focus) the main window.
+///
+/// The data_directory call is load-bearing: without it WebView2 falls back to a
+/// profile next to the executable, and when that location is not writable the only
+/// symptom is E_ACCESSDENIED. Measured here -- the window went from always failing
+/// to working with this one line.
+fn open_main_window(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+
+    if let Some(existing) = app.get_webview_window("main") {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+        .title("Devchievements")
+        .inner_size(720.0, 520.0)
+        .data_directory(default_data_dir().join("webview"))
+        .build()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 fn default_data_dir() -> std::path::PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(std::path::PathBuf::from)
@@ -608,6 +632,46 @@ fn main() {
         }
     }
 
+    // Window smoke test: create the real popup window, report whether the webview
+    // started, then exit. Exists because the tray-only build never creates a
+    // webview, so the failure this reproduces was invisible.
+    if std::env::args().any(|a| a == "--window-smoke") {
+        let result = tauri::Builder::default()
+            .setup(|app| {
+                use tauri::Manager;
+                let window = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "smoke",
+                    tauri::WebviewUrl::App("index.html".into()),
+                )
+                .title("Devchievements")
+                .inner_size(420.0, 320.0)
+                // WebView2 needs a writable profile directory. Passing it explicitly
+                // removes the failure mode where the default (next to the exe) is
+                // not writable and the environment reports only E_ACCESSDENIED.
+                .data_directory(default_data_dir().join("webview"))
+                .build();
+
+                match window {
+                    Ok(w) => {
+                        println!("WINDOW OK title={:?}", w.title().unwrap_or_default());
+                    }
+                    Err(e) => println!("WINDOW FAILED error={e}"),
+                }
+                std::process::exit(0);
+            })
+            .run(tauri::generate_context!());
+
+        match result {
+            Ok(()) => {}
+            Err(e) => {
+                println!("WINDOW FAILED error={e}");
+                std::process::exit(1);
+            }
+        }
+        std::process::exit(0);
+    }
+
     if std::env::args().any(|a| a == "--toast-probe") {
         let tag = std::env::args()
             .position(|a| a == "--tag")
@@ -638,9 +702,10 @@ fn main() {
                 current_privacy_mode() == devchievements_privacy::PrivacyMode::Privacy,
                 None::<&str>,
             )?;
+            let open = MenuItem::with_id(app, "open", "Open window", true, None::<&str>)?;
             let drain = MenuItem::with_id(app, "drain", "Run one drain", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&privacy, &drain, &quit])?;
+            let menu = Menu::with_items(app, &[&privacy, &open, &drain, &quit])?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(
@@ -652,6 +717,10 @@ fn main() {
                 .menu(&menu)
                 .on_menu_event(|_app, event| match event.id.as_ref() {
                     "quit" => std::process::exit(0),
+                    "open" => match open_main_window(_app) {
+                        Ok(()) => println!("WINDOW opened"),
+                        Err(e) => println!("WINDOW FAILED error={e}"),
+                    },
                     "drain" => {
                         DRAIN_NOW.store(true, Ordering::SeqCst);
                         println!("TRAY drain requested");
