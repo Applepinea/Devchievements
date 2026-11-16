@@ -402,3 +402,68 @@ Tauri 命令要求 `Send`，而 `drain_once` 跨 `await` 持有
 - **自定义通知弹窗**：需要 WebView2。
 - **Windows Toast**：非打包进程无包标识（`0x80073D54`），
   与本沙箱无关，但需要注册 AppUserModelID + 开始菜单快捷方式，尚未实现。
+
+---
+
+## 10. 本轮：Windows Toast 实现
+
+### 10.1 为什么不是「调用一下 Toast API」
+
+非打包 Win32 进程没有包标识，Toast API 直接拒绝，`0x80073D54`。
+这不是沙箱怪癖，是**所有非 MSIX 程序**的默认行为。
+
+微软给的方案是两条**必须同时满足**：
+
+1. 开始菜单里一个快捷方式，属性 `System.AppUserModel.ID` 指向我们的 AUMID；
+2. `HKCU\Software\Classes\AppUserModelId\<id>` 提供显示名。
+
+### 10.2 逐个排除的实测记录
+
+| 尝试 | 结果 |
+| --- | --- |
+| 只写注册表键 | ❌ `0x80073D54` |
+| 再加 `SetCurrentProcessExplicitAppUserModelID` | ❌ `0x80073D54` |
+| 用 PowerShell 调用（有自身身份） | ✅ 弹出成功，历史可查 |
+| 完整实现（键 + 快捷方式 + 进程 AUMID） | ✅ 代码路径全部走通，**但本机写开始菜单被拒** |
+
+注意第一条的教训：**PowerShell 那次「成功」不能证明注册表够用**，
+因为 powershell.exe 自己就有身份。我一开始据此下了错误结论。
+
+### 10.3 实现
+
+`apps/desktop/src-tauri/src/toast.rs`，COM 全流程：
+
+ShellLink → 设置 `PKEY_AppUserModel_ID`（手工构造 `PROPVARIANT`，VT_LPWSTR + CoTaskMemAlloc）
+→ IPropertyStore::Commit → IPersistFile::Save。
+
+实测这一步**是成功的**：生成的 `.lnk` 里能搜到 PKEY GUID 与 AUMID（UTF-16LE），
+Shell 属性系统也能正确读出 `System.AppUserModel.ID = Devchievements.Companion`。
+
+### 10.4 🔴 本机无法完成验证
+
+两个环境限制叠加：
+
+| 现象 | 证据 |
+| --- | --- |
+| 写开始菜单被拒 | `IPersistFile::Save: 拒绝访问 (0x80070005)`（PowerShell 写同一目录却可以） |
+| 手动装好快捷方式后仍被拒 | 属性读得到，Toast 仍报 `0x80073D54` |
+
+推测是安全软件对非系统进程写 Start Menu 的限制，但**这只是推测，未验证**。
+
+所以 `scripts/e2e/toast.mjs` 用**三种退出码**区分：
+
+`0` = 真的弹出且出现在通知中心；`1` = 实现坏了；`2` = 环境阻止了验证。
+
+当前结果是 `2`。**按 AGENTS.md §10，这一项只能是 `Implemented`，不是 `Tested`。**
+
+### 10.5 顺带修掉的一个环境坑
+
+加了 Toast 依赖后，**连 hello world 都链接失败**：`LNK1104 lnk{GUID}.tmp`。
+
+根因不是依赖，是 **TMP 指向 `%LOCALAPPDATA%\Temp` 时，孙进程（cargo → link.exe）写不进去**。
+把 TMP/TEMP 指到工作区内即可。同样的坑也打了 `std::env::temp_dir()` 的测试。
+
+已固化：
+
+- `scripts/dev/build-desktop.bat` 自己设 TEMP；
+- `scripts/verify.mjs` 给所有子进程设 `.verify/tmp`。

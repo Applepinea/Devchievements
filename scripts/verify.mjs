@@ -42,6 +42,16 @@ env.CARGO_HOME = path.join(toolchain, "cargo");
 env.PATH = [mingw, selfContained, path.join(toolchain, "cargo", "bin"), env.PATH ?? ""].join(";");
 if (fs.existsSync(path.join(mingw, "gcc.exe"))) env.CC = path.join(mingw, "gcc.exe");
 
+// Child processes get a TMP/TEMP inside the repository. Measured on this host:
+// writing to %LOCALAPPDATA%\Temp is denied to grandchildren (cargo -> test binary),
+// which makes every test that calls std::env::temp_dir() fail with os error 5, and
+// makes link.exe fail with LNK1104. Keeping temp inside the workspace fixes both and
+// also keeps the tests hermetic.
+const verifyTmp = path.join(outDir, "tmp");
+fs.mkdirSync(verifyTmp, { recursive: true });
+env.TMP = verifyTmp;
+env.TEMP = verifyTmp;
+
 const results = [];
 
 /** Run a step, capturing output to a file (pipes are unavailable in this sandbox). */

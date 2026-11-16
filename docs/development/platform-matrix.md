@@ -89,5 +89,10 @@ manifest 里 `wasm-unsafe-eval` 已确认存在、wasm 已确认打包，但「�
 | 2026-11-16 | Windows 11 | **普通 Win32 窗口** | WinForms 探针 | ✅ 允许（证明限制不是「不能有窗口」） |
 | 2026-11-16 | Windows 11 | **内嵌 WebView2** | Tauri 建窗 / `msedgewebview2.exe` | ❌ 被沙箱拒绝：`os error 5`，exit 13 |
 | 2026-11-16 | Windows 11 | **Windows Toast（非打包进程）** | WinRT ToastNotificationManager | ❌ `0x80073D54` 无包标识（与沙箱无关，需 AUMID） |
+| 2026-11-16 | Windows 11 | **Toast（有身份的进程）** | PowerShell 以自身 AUMID 调用 | ✅ 弹出并进入通知中心 |
+| 2026-11-16 | Windows 11 | **Toast（我们的 AUMID）** | 注册表键 + 进程 AUMID | ❌ `0x80073D54` |
+| 2026-11-16 | Windows 11 | **写开始菜单快捷方式** | Rust `IPersistFile::Save` | ❌ `0x80070005`（PowerShell 同目录可写） |
+| 2026-11-16 | Windows 11 | **快捷方式带 AUMID 属性** | Shell 属性系统读取 | ✅ 生成正确，读到 `Devchievements.Companion` |
+| 2026-11-16 | Windows 11 | **TMP 在 %LOCALAPPDATA% 时链接** | `link.exe` 生成 `lnk{GUID}.tmp` | ❌ `LNK1104`；改到工作区内即正常 |
 | 2026-11-16 | Windows 11 | **命名管道（实时 IPC）** | 同进程绑定后连接 | ❌ **被沙箱拒绝**：`os error 5 (Access denied)` |
 | 2026-11-16 | Windows 11 | **IPC 失败时回退 Spool** | 真实提交 + 真实 Companion | ✅ 端到端通过，提交不受影响 |

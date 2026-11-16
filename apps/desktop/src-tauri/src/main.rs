@@ -14,6 +14,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod toast;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use devchievements_companion_core::delivery::{DeliverySink, DisplayOutcome, OutboxProcessor};
@@ -41,12 +43,26 @@ impl DeliverySink for DesktopSink {
                 SHOWN.fetch_add(1, Ordering::Relaxed);
             }
             Presentation::SoundOnly => {
+                // Spec 16.4: a plain commit is acknowledged by sound only. No toast,
+                // because interrupting for every commit is exactly what that rule
+                // exists to prevent.
                 println!("SOUND commit");
                 SHOWN.fetch_add(1, Ordering::Relaxed);
             }
             Presentation::Nothing => {}
         }
         DisplayOutcome::Shown
+    }
+}
+
+/// Show a toast, logging rather than failing.
+///
+/// A notification is a side effect: the achievement is already committed, so a toast
+/// that cannot be shown must not take the ingestion loop down with it.
+fn report_toast(tag: &str, title: &str, body: &str) {
+    match toast::show(title, body, tag) {
+        Ok(()) => println!("TOAST OK tag={tag}"),
+        Err(e) => println!("TOAST FAILED tag={tag} error={e}"),
     }
 }
 
@@ -173,6 +189,46 @@ fn identity_from_settings(data_dir: &std::path::Path) -> Option<Identity> {
 }
 
 fn main() {
+    // A probe entry point, used by scripts/e2e/toast.mjs. It runs the SAME code path
+    // as the app (register + show) instead of a separate implementation, so the test
+    // cannot pass while the product path is broken.
+    // Install the registration shortcut at an explicit path. Used when the caller is
+    // not permitted to write to the Start Menu directly (installers, tests).
+    if let Some(i) = std::env::args().position(|a| a == "--register-shortcut") {
+        let Some(target) = std::env::args().nth(i + 1) else {
+            println!("REGISTER FAILED: --register-shortcut needs a path");
+            std::process::exit(2);
+        };
+        let exe = std::env::current_exe().unwrap_or_default();
+        match toast::create_shortcut(std::path::Path::new(&target), &exe) {
+            Ok(()) => {
+                println!("REGISTER OK {target}");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("REGISTER FAILED {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if std::env::args().any(|a| a == "--toast-probe") {
+        let tag = std::env::args()
+            .position(|a| a == "--tag")
+            .and_then(|i| std::env::args().nth(i + 1))
+            .unwrap_or_else(|| "probe".to_string());
+        match toast::show("First Commit", "Common unlocked", &tag) {
+            Ok(()) => {
+                println!("TOAST OK tag={tag}");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("TOAST FAILED error={e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     tauri::Builder::default()
         .setup(|app| {
             let drain = MenuItem::with_id(app, "drain", "Run one drain", true, None::<&str>)?;

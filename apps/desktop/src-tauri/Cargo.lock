@@ -898,6 +898,8 @@ dependencies = [
  "sqlx",
  "tauri",
  "tauri-build",
+ "windows",
+ "winreg",
 ]
 
 [[package]]

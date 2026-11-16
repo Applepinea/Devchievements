@@ -55,7 +55,7 @@ ALL CHECKS PASSED
 | 2a.6 | Tauri Companion 与托盘 | `Partially Implemented` | **MSVC 已装**：编译、链接、托盘运行、真实提交驱动均已验证；内嵌 webview 被沙箱拒绝 |
 | 2a.7 | SQLite 持久化接入 Helper | `Tested` | 完整闭环：commit→hook→helper→spool→companion→SQLite |
 | 2a.8 | Outbox Consumer（Desktop 子集） | `Tested` | 投递、重试、`delivery_unknown` 均有测试 |
-| 2a.9 | 桌面弹窗与提示音 | `Partially Implemented` | 合并与「普通提交只出声」已验证；自定义弹窗需 WebView2，本沙箱不可运行 |
+| 2a.9 | 桌面弹窗与提示音 | `Partially Implemented` | 合并与「普通提交只出声」已验证；**Toast 已实现但本机无法验证**（开始菜单写入被拒 + 仍报 0x80073D54） |
 | 2a.10 | Companion 启动消费 Spool | `Tested` | 无头 Companion 真实消费并计数 |
 | 2a.11 | 最小诊断视图 | `Partially Implemented` | 脱敏、别名、导出策略、配额已测试；UI 需 WebView2，本沙箱不可运行 |
 | 2a.14 | 通知队列与合并（§16.4、§16.6） | `Tested` | 一个事件一个弹窗；普通提交只出声不弹窗 |
