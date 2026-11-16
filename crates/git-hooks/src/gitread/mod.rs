@@ -12,7 +12,8 @@
 //! - SHA-256 repositories are not supported;
 //! - worktrees and submodules ARE supported via the \`gitdir:\` and \`commondir\` files.
 
-mod inflate;
+pub(crate) mod inflate;
+pub mod pack;
 
 use std::fmt;
 use std::fs;
@@ -36,6 +37,8 @@ pub enum GitReadError {
     Malformed(String),
     /// Decompression failed.
     Inflate(String),
+    /// The object lives in a packfile that could not be decoded.
+    Pack(String),
 }
 
 impl fmt::Display for GitReadError {
@@ -52,6 +55,7 @@ impl fmt::Display for GitReadError {
             ),
             GitReadError::Malformed(m) => write!(f, "malformed git data: {m}"),
             GitReadError::Inflate(m) => write!(f, "inflate failed: {m}"),
+            GitReadError::Pack(m) => write!(f, "packfile error: {m}"),
         }
     }
 }
@@ -195,7 +199,11 @@ impl Repository {
         roots
     }
 
-    /// Read a commit object from the loose object store.
+    /// Read a commit object, preferring the loose store and falling back to packs.
+    ///
+    /// The loose path is cheaper (one small file), so it is tried first. After
+    /// `git gc` every object is packed and the fallback is what keeps working; that
+    /// fallback is the whole point of ADR-0013.
     pub fn read_commit(&self, oid: &str) -> Result<CommitFacts, GitReadError> {
         if oid.len() < 3 {
             return Err(GitReadError::Malformed(format!(
@@ -209,13 +217,51 @@ impl Repository {
             .join(dir_part)
             .join(file_part);
 
-        if !obj_path.exists() {
-            // Distinguish "missing" from "packed" so callers never silently drop events.
-            return Err(GitReadError::PackedObjectNotSupported(oid.to_string()));
+        if obj_path.exists() {
+            let raw = fs::read(&obj_path).map_err(|e| io_err(&obj_path, e))?;
+            let inflated = inflate::zlib_inflate(&raw).map_err(GitReadError::Inflate)?;
+            let mut facts = parse_commit_object(&inflated)?;
+            facts.sha = oid.to_string();
+            return Ok(facts);
         }
-        let raw = fs::read(&obj_path).map_err(|e| io_err(&obj_path, e))?;
-        let inflated = inflate::zlib_inflate(&raw).map_err(GitReadError::Inflate)?;
-        parse_commit_object(&inflated)
+
+        // Not loose: look in the packs.
+        if let Some(object) = self.read_from_packs(oid)? {
+            if object.kind != pack::ObjectKind::Commit {
+                return Err(GitReadError::Malformed(format!(
+                    "object {oid} is a {:?}, not a commit",
+                    object.kind
+                )));
+            }
+            let mut facts = parse_commit_object(&object.data)?;
+            facts.sha = oid.to_string();
+            return Ok(facts);
+        }
+
+        Err(GitReadError::PackedObjectNotSupported(oid.to_string()))
+    }
+
+    /// Search every pack for an object.
+    ///
+    /// Returns `Ok(None)` when the object is genuinely absent (so the caller can
+    /// report a precise error), and `Err` when a pack exists but could not be
+    /// decoded -- those are different situations and must not be conflated.
+    fn read_from_packs(&self, oid: &str) -> Result<Option<pack::PackedObject>, GitReadError> {
+        let objects_dir = self.common_dir.join("objects");
+        for pack_path in pack::packs_in(&objects_dir) {
+            // A single unreadable pack must not hide an object stored elsewhere.
+            let Ok(pack) = pack::PackFile::open(&pack_path) else {
+                continue;
+            };
+            if !pack.contains(oid) {
+                continue;
+            }
+            return pack
+                .read(oid)
+                .map(Some)
+                .map_err(|e| GitReadError::Pack(e.to_string()));
+        }
+        Ok(None)
     }
 
     /// Read HEAD's commit facts.

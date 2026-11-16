@@ -33,15 +33,19 @@
 **应对**：主去重键用 `canonical_repository_id + commit_sha`；patch-id 仅作辅助；
 识别到 rewrite 时**关联**而非简单丢弃；明确记录误判风险。
 
-### A3 🔴 packfile 尚未支持（阻碍 Phase 1）
+### A3 🟢 packfile 已支持（本轮解除）
 
 **风险**：ADR-0002 选定直读 `.git`%，但 Phase 0 的实现**只读 loose object**。
 `git gc` / `git repack` 之后对象进入 packfile（且常带 delta 链），当前实现会失败。
 
 **影响**：真实的长期使用仓库**必然**被 gc，因此这不只是理论风险。
 
-**应对**：Phase 1 **必须**补齐 packfile + delta 解析，或在该场景回退到一次 `git` 调用（约 35 ms，仍在预算内）。
-**任何情况下都不得静默丢弃事件。**
+**已处理**：实现了 pack index v2、OFS_DELTA / REF_DELTA、delta 链、多 pack 搜索。
+在**真实执行过 `git gc --aggressive` 的仓库**上测试：10 个历史提交逐个可读，
+单个坏 pack 不影响其它对象。见 [ADR-0013](../decisions/0013-packfile-support.md)。
+
+**仍然存在的限制**（明确报错，不猜测）：index v1、thin pack、SHA-256 仓库。
+**新产生的待办**：每次读对象都重新打开 pack 文件；历史导入大量读取时需要优化，见 ADR-0013 复查计划。
 
 ### A4 🟡 Engine 纯度的可持续性
 

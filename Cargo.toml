@@ -14,6 +14,7 @@ members = [
     "crates/storage",
     "crates/git-hooks",
     "crates/golden-tests",
+    "crates/property-tests",
     "apps/native-host",
 ]
 

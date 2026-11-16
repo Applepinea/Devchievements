@@ -1,0 +1,20 @@
+[package]
+name = "devchievements-property-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Property tests for the invariants spec 12 and 9.6 demand (timezone replay stability, hook order independence)."
+
+[dev-dependencies]
+proptest = "1"
+devchievements-core = { path = "../core" }
+devchievements-events = { path = "../events" }
+devchievements-daily-rank = { path = "../daily-rank" }
+devchievements-achievements = { path = "../achievements" }
+devchievements-notifications = { path = "../notifications" }
+devchievements-filters = { path = "../filters" }
+
+[lints]
+workspace = true

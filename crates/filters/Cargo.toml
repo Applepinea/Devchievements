@@ -8,7 +8,9 @@ authors.workspace = true
 description = "User event filters and statistics scope."
 
 [dependencies]
-# Declared as the code arrives. Phase 0 scaffold has none.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+devchievements-events = { path = "../events" }
 
 [lints]
 workspace = true

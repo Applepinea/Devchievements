@@ -22,7 +22,7 @@ node scripts/verify.mjs
 ```text
 PASS  fmt                       174 ms
 PASS  clippy                    822 ms
-PASS  test                 ~4.5 s   157 tests passed, 0 failed
+PASS  test                 ~4.1 s   200 tests passed, 0 failed
 PASS  build                    3982 ms
 PASS  build-wasm                396 ms
 PASS  extension-build         10371 ms
@@ -50,11 +50,11 @@ ALL CHECKS PASSED
 | 1.2 | 来源可信度 | `Tested` | 含「unverified 不计入官方统计」断言 |
 | 1.3 | 仓库身份识别 | `Tested` | SSH/HTTPS/git 后缀/大小写/跨平台不合并 |
 | 1.4 | Commit 去重键 | `Tested` | `repo_id + sha`；patch id 仅辅助 |
-| 1.5 | 用户身份识别（多邮箱） | `Not Started` | 需 Git 配置读取 |
+| 1.5 | 用户身份识别（多邮箱） | `Partially Implemented` | 邮箱匹配已实现并测试；Git 配置读取未接 |
 | 1.6 | 时区系统 + 日界线 | `Tested` | 内置 TZDB；DST 与 04:00 边界已测 |
 | 1.7 | 每日等级与每日里程碑 | `Tested` | 14 个测试；用户阈值不影响官方口径 |
 | 1.8 | 永久成就（含 required_capabilities） | `Tested` | 13 个测试；能力由条件推导 |
-| 1.9 | 用户过滤器 | `Not Started` | 独立模块，尚未实现 |
+| 1.9 | 用户过滤器 | `Tested` | 18 个测试；官方口径与用户口径在类型上分离 |
 | 1.10 | 统计投影 | `Tested` | 读写 + 可重建性均已测（`rebuild_from_events` 复现同值） |
 | 1.11 | Engine（含读集） | `Tested` | 7 个测试；读集有断言守护 |
 | 1.12 | SQLite Storage Adapter 与 SQLx 迁移 | `Tested` | 版本化 schema + 12 个真实库测试 |
@@ -62,8 +62,8 @@ ALL CHECKS PASSED
 | 1.14 | Outbox 与通知所有权状态机（纯逻辑） | `Tested` | 18 个测试；合法转换表 + 防重复展示 |
 | 1.15 | 历史导入管线（引擎侧） | `Tested` | 用提交时间归档、幂等、可续传；跨日用例已测 |
 | 1.16 | Golden Tests | `Tested` | 16 个测试回放 15 份真机 trace |
-| 1.17 | 时区属性测试 | `Not Started` | 已有逐例测试，缺系统性属性测试 |
-| 1.18 | packfile 解析 | `Not Started` | **风险最高**，见 risk-analysis A3 |
+| 1.17 | 属性测试 | `Tested` | 11 个属性（时区 5 / Hook 顺序 6），各上千用例 |
+| 1.18 | packfile 解析 | `Tested` | **本轮解除风险 A3**：真实 gc 仓库上 10 个历史提交可读。见 [ADR-0013](docs/decisions/0013-packfile-support.md) |
 | 1.19 | IndexedDB Adapter 接口设计 | `Implemented` | 只有 trait 与对象存储名常量（§31.1 要求「不展开」） |
 | 1.20 | 初步性能基准 | `Tested` | 摄取 p95 **3.12 ms**，n=2000，release |
 
