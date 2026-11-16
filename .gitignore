@@ -73,3 +73,6 @@ Thumbs.db
 !.env.example
 *.pem
 *.pfx
+
+# Tauri desktop app builds into its own target dir (MSVC toolchain).
+/apps/desktop/src-tauri/target/

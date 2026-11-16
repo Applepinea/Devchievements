@@ -1,5 +1,9 @@
 [workspace]
 resolver = "2"
+# The Tauri desktop app is built with the MSVC toolchain into its own target dir.
+# Mixing MSVC and GNU in one target directory is not possible, and the rest of the
+# workspace builds with GNU on this host, so the app is a separate cargo project.
+exclude = ["apps/desktop/src-tauri"]
 members = [
     "crates/core",
     "crates/events",

@@ -1,0 +1,24 @@
+[package]
+name = "devchievements-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "Devchievements Companion: Tauri 2 desktop shell over the companion core."
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+devchievements-companion-core = { path = "../../../crates/companion-core" }
+devchievements-storage = { path = "../../../crates/storage" }
+devchievements-events = { path = "../../../crates/events" }
+devchievements-notifications = { path = "../../../crates/notifications" }
+devchievements-git-hooks = { path = "../../../crates/git-hooks" }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-async-std", "sqlite", "migrate"] }
+async-std = { version = "1", features = ["attributes"] }
+
+[profile.release]
+lto = true
+codegen-units = 1

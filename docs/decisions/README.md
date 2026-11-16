@@ -26,6 +26,7 @@
 | --- | --- | --- |
 | [0012](0012-isolated-dev-toolchain.md) | 本仓库隔离开发工具链（本仓库专属） | `Accepted` |
 | [0013](0013-packfile-support.md) | Packfile 与 delta 解析（解除风险 A3） | `Accepted` |
+| [0014](0014-desktop-shell-and-msvc.md) | 桌面外壳与 MSVC 工具链（解除 Phase 2a 构建阻塞） | `Accepted` |
 | [0007](0007-ipc-and-spool.md) | IPC 与 Spool 传输设计 | `Accepted` |
 | 0006 | 数据模型与投影设计 | 目标 Phase 1 |
 

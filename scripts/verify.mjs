@@ -45,14 +45,20 @@ if (fs.existsSync(path.join(mingw, "gcc.exe"))) env.CC = path.join(mingw, "gcc.e
 const results = [];
 
 /** Run a step, capturing output to a file (pipes are unavailable in this sandbox). */
-function step(name, cmd, args, cwd = repoRoot) {
+function step(name, cmd, args, cwd = repoRoot, stepEnv = env) {
   const logFile = path.join(outDir, name.replace(/[^a-z0-9]+/gi, "-") + ".log");
   const fd = fs.openSync(logFile, "w");
   const t0 = process.hrtime.bigint();
-  const r = spawnSync(cmd, args, { cwd, env, stdio: ["ignore", fd, fd], windowsHide: true });
+  const r = spawnSync(cmd, args, { cwd, env: stepEnv, stdio: ["ignore", fd, fd], windowsHide: true });
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   fs.closeSync(fd);
   const log = fs.readFileSync(logFile, "utf8");
+  if (r.error) {
+    fs.appendFileSync(logFile, "\n[spawn error] " + r.error.message + "\n");
+  }
+  if (r.signal) {
+    fs.appendFileSync(logFile, "\n[terminated by signal] " + r.signal + "\n");
+  }
   const ok = r.status === 0;
 
   // Extract the lines a human actually needs.
@@ -90,7 +96,30 @@ function main() {
   step("build", cargo, ["build", "--workspace"]);
   step("build-wasm", cargo, ["build", "-p", "devchievements-core", "--target", "wasm32-unknown-unknown", "--release"]);
 
-  // 2. Extension (optional: needs node_modules)
+  // 2. Desktop app (MSVC only; the rest of the workspace builds with GNU here).
+  //    It is a separate cargo project because one target directory cannot hold both
+  //    toolchains, so it needs its own build invocation.
+  //    The wrapper establishes the MSVC environment itself, so this step does not
+  //    depend on the caller having sourced env-msvc.ps1.
+  const desktopWrapper = path.join(repoRoot, "scripts", "dev", "build-desktop.bat");
+  const vcvarsall = "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Auxiliary\\Build\\vcvarsall.bat";
+  if (fs.existsSync(desktopWrapper) && fs.existsSync(vcvarsall)) {
+    // Absolute path: this script rebuilds PATH for the Rust steps, and a bare
+    // "cmd.exe" lookup fails once that PATH no longer contains System32 first.
+    const comspec = process.env.ComSpec || "C:\\Windows\\System32\\cmd.exe";
+    // process.env, not the curated Rust env: the wrapper brings its own MSVC setup
+    // and the GNU-oriented PATH only interferes with it.
+    step("desktop-build", comspec, ["/c", desktopWrapper, "build"], repoRoot, { ...process.env });
+  } else {
+    results.push({
+      name: "desktop-build",
+      ok: null,
+      skipped: "MSVC Build Tools not found; the desktop app cannot be built on this machine",
+    });
+    console.log("SKIP  desktop-build        (MSVC Build Tools not found)");
+  }
+
+  // 3. Extension (optional: needs node_modules)
   const extDir = path.join(repoRoot, "apps", "extension");
   const wxt = path.join(repoRoot, "node_modules", "wxt", "bin", "wxt.mjs");
   if (fs.existsSync(wxt)) {

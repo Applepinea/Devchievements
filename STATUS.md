@@ -52,12 +52,12 @@ ALL CHECKS PASSED
 | 2a.3 | IPC 帧协议 | `Tested` | 9 个测试，含超限长度与截断 |
 | 2a.4 | Spool 回退 | `Tested` | 11 个测试，含并发与损坏恢复 |
 | 2a.5 | 实时 IPC 通道（客户端 + 服务端） | `Platform Unverified` | 已实现并编译；**本机沙箱拒绝命名管道**（os error 5）。回退路径已验证 |
-| 2a.6 | Tauri Companion 与托盘 | `Blocked` | **无 MSVC**；数据回路已由无头 Companion 完成并验证 |
+| 2a.6 | Tauri Companion 与托盘 | `Partially Implemented` | **MSVC 已装**：编译、链接、托盘运行、真实提交驱动均已验证；内嵌 webview 被沙箱拒绝 |
 | 2a.7 | SQLite 持久化接入 Helper | `Tested` | 完整闭环：commit→hook→helper→spool→companion→SQLite |
 | 2a.8 | Outbox Consumer（Desktop 子集） | `Tested` | 投递、重试、`delivery_unknown` 均有测试 |
-| 2a.9 | 桌面弹窗与提示音 | `Blocked` | 需 Companion 窗口 |
+| 2a.9 | 桌面弹窗与提示音 | `Partially Implemented` | 合并与「普通提交只出声」已验证；自定义弹窗需 WebView2，本沙箱不可运行 |
 | 2a.10 | Companion 启动消费 Spool | `Tested` | 无头 Companion 真实消费并计数 |
-| 2a.11 | 最小诊断视图 | `Partially Implemented` | 脱敏、别名、导出策略、配额已实现并测试；**UI 仍被 MSVC 阻塞** |
+| 2a.11 | 最小诊断视图 | `Partially Implemented` | 脱敏、别名、导出策略、配额已测试；UI 需 WebView2，本沙箱不可运行 |
 | 2a.14 | 通知队列与合并（§16.4、§16.6） | `Tested` | 一个事件一个弹窗；普通提交只出声不弹窗 |
 | 2a.13 | Privacy Mode 基础行为（§26.2） | `Tested` | 26 个测试；通知文案、稳定别名、路径脱敏、导出警告、配额 |
 | 2a.12 | Crash Recovery 矩阵（§32.5） | `Partially Implemented` | 6 个场景中 4 个已真实通过；2 个需实时 IPC |

@@ -3,6 +3,10 @@
 //! Nothing in this crate may reach out to the real world. Everything the Engine
 //! needs comes through these traits, and every trait has a deterministic test
 //! implementation.
+//!
+//! Every provider is `Send + Sync`. They are stateless or internally synchronised, and
+//! requiring it keeps the Engine usable from any executor: without it the future
+//! produced by ingestion is not `Send`, and a Tauri command cannot await it.
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
@@ -12,7 +16,7 @@ use core::fmt;
 ///
 /// Unix epoch milliseconds, UTC. The Engine must never call `SystemTime::now()`
 /// directly: Golden Tests replay traces with a fixed clock.
-pub trait ClockProvider: fmt::Debug {
+pub trait ClockProvider: fmt::Debug + Send + Sync {
     /// Milliseconds since the Unix epoch, UTC.
     fn now_unix_millis(&self) -> i64;
 }
@@ -21,7 +25,7 @@ pub trait ClockProvider: fmt::Debug {
 ///
 /// The Engine asks for a local date and a time zone; it never computes one from
 /// an offset it guessed itself (spec 12).
-pub trait TimezoneProvider: fmt::Debug {
+pub trait TimezoneProvider: fmt::Debug + Send + Sync {
     /// Resolve an IANA time zone name, returning a canonical identifier.
     fn canonicalize(&self, iana_name: &str) -> Option<String>;
 
@@ -41,7 +45,7 @@ pub trait TimezoneProvider: fmt::Debug {
 /// Event IDs double as idempotency keys (spec 5.3), so tests need them to be
 /// reproducible. Production uses a seeded UUIDv7-style generator; tests use a
 /// counter.
-pub trait IdGenerator: fmt::Debug {
+pub trait IdGenerator: fmt::Debug + Send + Sync {
     /// Generate the next identifier. Stable given the same internal state.
     fn next_id(&mut self) -> String;
 }
@@ -50,7 +54,7 @@ pub trait IdGenerator: fmt::Debug {
 ///
 /// Rules record the configuration version they ran under, so changing a user
 /// filter or a daily-rank threshold never rewrites history (spec 13.3).
-pub trait ConfigurationProvider: fmt::Debug {
+pub trait ConfigurationProvider: fmt::Debug + Send + Sync {
     /// Monotonic configuration version.
     fn config_version(&self) -> u64;
 }

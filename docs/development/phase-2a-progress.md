@@ -319,3 +319,86 @@ DELIVER shown=3 unknown=0
 
 两处都是测试的错误，不是实现的错误 —— 但如果不写这两个测试，
 合并功能就会一直「看起来对」。
+
+---
+
+## 9. 本轮：MSVC 到位，桌面外壳跑起来了
+
+### 9.1 先确认「装好了」是什么意思
+
+MSVC 装好 ≠ 能用。实测：
+
+| 检查 | 结果 |
+| --- | --- |
+| `vswhere` | **不存在**（所以一开始看起来像没装） |
+| `cl.exe` | 在 VC Tools MSVC 14.51.36231 的 Hostx64/x64 |
+| Windows SDK | 10.0.26100.0 ✅ |
+| WebView2 运行时 | 157.0.4341.46 ✅ 已安装 |
+| Rust MSVC 工具链 | **需要单独装**（原来只有 GNU） |
+
+### 9.2 三个坑
+
+**坑 1：Git 的 link.exe 冒充链接器。**
+hermes 里 Git 自带的 `usr/bin/link.exe` 是 GNU 的 link 工具，
+它在 PATH 里排在 MSVC 前面，报错会指向完全错误的方向。
+
+**坑 2：批处理里 (x86) 提前闭合 if 块。**
+我自己写探针时踩到的，报错是 `Microsoft was unexpected at this time.`，
+和真实原因毫无关系。规则：含路径的东西不要放进括号块。
+
+**坑 3：verify.mjs 的环境把 vcvarsall 搞坏了。**
+为 GNU 步骤重制的 PATH（含 `CC=mingw gcc`）传给 .bat 后，
+vcvarsall 探测不到 SDK，表现为 windows.h / malloc.h 找不到，
+**但 MSVC 自己的头文件在**。修法：桌面构建步骤用原样 environment。
+
+### 9.3 一个真正的代码缺陷
+
+Tauri 命令要求 `Send`，而 `drain_once` 跨 `await` 持有
+`&dyn ClockProvider` 等 trait 对象，整个 future 不是 `Send`。
+
+无头二进制用单线程执行器，所以**从来没暴露**。
+给四个 provider trait 加 `Send + Sync` 后解决 —— 它们本来就该是这个约束。
+
+### 9.4 WebView2 起不来，但要区分清楚
+
+- Tauri 建窗口时 panic：`Failed to setup app: 拒绝访问。(os error 5)`
+- `msedgewebview2.exe --version` → 退出码 13，无输出
+
+**但普通 Win32 窗口是允许的**（WinForms 探针成功创建并显示）。
+所以限制是「不能有 WebView2」，不是「不能有窗口」。
+
+因此应用改成**默认只建托盘** —— 这正好也是 §32.1 要的形态。
+
+### 9.5 端到端实测
+
+`node scripts/e2e/desktop-tray.mjs` → **PASSED**
+
+```text
+  ok   the desktop app started and created its tray
+  ok   commit 0 / 1 / 2 succeeded
+  |  TRAY READY
+  |  IDENTITY from settings.json
+  |  INGESTED 2
+  |  POPUP First Commit [Common] ["Common Day"]
+  |  POPUP Uncommon Day [Uncommon] []
+  |  INGESTED 1
+  |  SOUND commit
+  ok   it merged the first commit into one popup
+  ok   it acknowledged a plain commit by sound
+```
+
+真实 Tauri 进程、真实提交、真实 helper、真实 SQLite。
+
+### 9.6 顺带补上的真实缺口
+
+第一版桌面端把身份硬编码成 `unknown@example.com`，
+于是所有真实提交都被身份门禁拒绝 —— **门禁是对的，应用是错的**。
+
+改成读 `settings.json`，缺失时回退到 Git 配置建议，
+两者都没有就拒绝统计并打印原因（§7）。
+
+### 9.7 仍未验证
+
+- **自定义通知弹窗**：需要 WebView2。
+- **Windows Toast**：非打包进程无包标识（`0x80073D54`），
+  与本沙箱无关，但需要注册 AppUserModelID + 开始菜单快捷方式，尚未实现。
