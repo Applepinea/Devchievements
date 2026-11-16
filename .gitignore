@@ -55,7 +55,7 @@ apps/extension/.wxt/
 /scripts/e2e/.dbg/
 /scripts/e2e/.ipc/
 /scripts/e2e/.ipc2/
-/scripts/e2e/.log-*
+scripts/e2e/.*
 
 # Verification output (regenerable)
 /.verify/
