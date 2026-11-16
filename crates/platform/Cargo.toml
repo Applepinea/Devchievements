@@ -5,10 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "Platform capability probing and the fallback chain."
+description = "Platform capability probing and the degradation chain (spec 29)."
 
 [dependencies]
-# Declared as the code arrives. Phase 0 scaffold has none.
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
 
 [lints]
 workspace = true

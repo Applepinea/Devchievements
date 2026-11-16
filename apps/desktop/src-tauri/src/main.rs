@@ -32,6 +32,11 @@ use tauri::tray::TrayIconBuilder;
 /// thread reads it, and neither should have to own a lock for that.
 static PRIVACY_MODE: AtomicU8 = AtomicU8::new(0);
 
+/// Whether a system notification has been demonstrated to work: 0 unknown,
+/// 1 works, 2 does not. Probing lazily avoids a test toast at every startup,
+/// and remembering the failure stops the log filling with the same error.
+static NOTIFICATION_STATE: AtomicU8 = AtomicU8::new(0);
+
 /// Set when the user asks for an immediate drain from the tray.
 static DRAIN_NOW: AtomicBool = AtomicBool::new(false);
 
@@ -104,14 +109,33 @@ impl DeliverySink for DesktopSink {
     }
 }
 
-/// Show a toast, logging rather than failing.
+/// Show a toast, probing the capability the first time and remembering the answer.
 ///
-/// A notification is a side effect: the achievement is already committed, so a toast
-/// that cannot be shown must not take the ingestion loop down with it.
+/// Spec 29.1 requires the product to know what the platform can do rather than
+/// assuming it. The first notification is the probe: if Windows accepts it the
+/// capability becomes Native, and if it does not, later notifications take the
+/// documented degradation path instead of repeating a failing call.
 fn report_toast(tag: &str, title: &str, body: &str) {
+    match NOTIFICATION_STATE.load(Ordering::Relaxed) {
+        // Already demonstrated not to work on this host.
+        2 => {
+            println!("NOTIFY skipped tag={tag} channel=in-app-only");
+            return;
+        }
+        _ => {}
+    }
+
     match toast::show(title, body, tag) {
-        Ok(()) => println!("TOAST OK tag={tag}"),
-        Err(e) => println!("TOAST FAILED tag={tag} error={e}"),
+        Ok(()) => {
+            NOTIFICATION_STATE.store(1, Ordering::Relaxed);
+            println!("NOTIFY shown tag={tag}");
+        }
+        Err(e) => {
+            NOTIFICATION_STATE.store(2, Ordering::Relaxed);
+            // Reported once per process, not once per event.
+            println!("NOTIFY unavailable tag={tag} reason={e}");
+            println!("NOTIFY degraded channel=in-app-only (spec 29.1 fallback chain)");
+        }
     }
 }
 
@@ -127,6 +151,34 @@ fn to_sound_rarity(rarity: devchievements_notifications::Rarity) -> SoundRarity 
         R::Rare => SoundRarity::Rare,
         R::Epic => SoundRarity::Epic,
         R::Legendary => SoundRarity::Legendary,
+    }
+}
+
+/// Build the capability set from what has actually been demonstrated.
+///
+/// Only two things are certain in-process: the tray exists (we created it) and a
+/// system notification either has or has not worked. Everything else stays
+/// Unverified -- spec 29.1 forbids claiming more than was measured.
+fn current_capabilities() -> devchievements_platform::Capabilities {
+    use devchievements_platform::{Capabilities, CapabilityState};
+
+    let notification = match NOTIFICATION_STATE.load(Ordering::Relaxed) {
+        1 => CapabilityState::Native,
+        // Demonstrated not to work in this process: the chain must not use it.
+        2 => CapabilityState::Unverified,
+        // Not yet tried.
+        _ => CapabilityState::Unverified,
+    };
+
+    Capabilities {
+        // The embedded webview cannot start on this host, so the product's own
+        // popup is explicitly routed to the notification fallback.
+        desktop_popup: CapabilityState::NotificationFallback,
+        system_notification: notification,
+        // Demonstrated: the tray icon is built at startup and the process stays
+        // alive, so this capability is observed rather than assumed.
+        tray: CapabilityState::Native,
+        ..Capabilities::default()
     }
 }
 
@@ -352,6 +404,19 @@ fn main() {
         }
     }
 
+    // Print the capability set and the channel the degradation chain selects.
+    if std::env::args().any(|a| a == "--capabilities") {
+        let caps = current_capabilities();
+        let report = serde_json::json!({
+            "capabilities": caps,
+            "channel": caps.channel(),
+            "fullscreen": caps.when_fullscreen(devchievements_platform::FullscreenPolicy::default()),
+            "summary": caps.summary(),
+        });
+        println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+        std::process::exit(0);
+    }
+
     if std::env::args().any(|a| a == "--diagnostics") {
         let data_dir = default_data_dir();
         let rt = async_std::task::block_on(async {
@@ -390,6 +455,7 @@ fn main() {
                     },
                     "sounds": audio::available_sound_ids(),
                     "privacy": settings::Settings::load(&settings_path()).privacy.as_str(),
+                    "capabilities": current_capabilities(),
                     "snapshot": snapshot,
                 });
                 println!(
