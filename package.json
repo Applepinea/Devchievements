@@ -1,0 +1,29 @@
+{
+  "name": "devchievements",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Achievements for Developers",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:desktop": "pnpm --filter @devchievements/desktop dev",
+    "dev:extension": "pnpm --filter @devchievements/extension dev",
+    "build": "pnpm -r --if-present build",
+    "build:extension": "pnpm --filter @devchievements/extension build",
+    "build:desktop": "pnpm --filter @devchievements/desktop build",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "pnpm -r --if-present lint",
+    "fmt": "pnpm -r --if-present fmt",
+    "cargo:fmt": "cargo fmt --all -- --check",
+    "cargo:clippy": "cargo clippy --workspace --all-targets -- -D warnings",
+    "cargo:test": "cargo test --workspace",
+    "cargo:build": "cargo build --workspace"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "pnpm@10.0.0"
+}

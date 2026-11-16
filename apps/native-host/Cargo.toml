@@ -1,0 +1,18 @@
+[package]
+name = "devchievements-native-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Native Messaging bridge between the browser extension and the desktop companion."
+
+[[bin]]
+name = "devchievements-native-host"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

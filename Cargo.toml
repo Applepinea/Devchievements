@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/events",
+    "crates/achievements",
+    "crates/daily-rank",
+    "crates/notifications",
+    "crates/sound",
+    "crates/assets",
+    "crates/filters",
+    "crates/themes",
+    "crates/platform",
+    "crates/storage",
+    "crates/git-hooks",
+    "apps/native-host",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.100"
+license = "UNLICENSED"
+authors = ["Devchievements contributors"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[workspace.lints.cargo]
+# Scaffold crates legitimately declare dependencies before use in later phases,
+# but we want the warning while the code is empty so nothing rots silently.
+unused_dependencies = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"

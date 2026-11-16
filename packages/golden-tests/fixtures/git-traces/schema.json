@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devchievements.local/schemas/git-trace.schema.json",
+  "title": "Git Hook Trace Fixture",
+  "description": "One recorded Git hook invocation, captured during Phase 0 for replay in Golden Tests (spec 9.7). Every field is exactly what the Hook Helper can observe at hook time; nothing is inferred.",
+  "type": "object",
+  "required": [
+    "hook",
+    "head_sha",
+    "reflog_gs",
+    "git_version"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "hook": {
+      "type": "string",
+      "enum": [
+        "post-commit",
+        "post-rewrite",
+        "post-merge"
+      ],
+      "description": "Which hook fired. Derived from the executable name because Git passes no hook name to these hooks."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Order of this invocation within the scenario."
+    },
+    "argv": {
+      "type": "string",
+      "description": "Hook argv as a single string. post-merge: '0' normal, '1' squash. post-rewrite: 'amend' or 'rebase'."
+    },
+    "stdin": {
+      "type": "string",
+      "description": "Raw stdin, newlines replaced by '|'. post-rewrite carries '<old-sha> <new-sha>' pairs here; other hooks receive nothing."
+    },
+    "head_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "parents": {
+      "type": "string",
+      "description": "Space separated '<commit> <parent>...' from `git rev-list --parents -n 1 HEAD`."
+    },
+    "tree": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "branch": {
+      "type": "string",
+      "description": "Short branch name; empty when detached."
+    },
+    "author_name": {
+      "type": "string"
+    },
+    "author_email": {
+      "type": "string"
+    },
+    "author_ts": {
+      "type": "string",
+      "pattern": "^[0-9]+$",
+      "description": "Author timestamp, seconds since epoch."
+    },
+    "committer_name": {
+      "type": "string"
+    },
+    "committer_email": {
+      "type": "string"
+    },
+    "committer_ts": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "reflog_gs": {
+      "type": "string",
+      "description": "HEAD reflog %gs of the newest entry, as written by THIS git version. Never treat as a cross-version contract (spec 9.6)."
+    },
+    "reflog_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "reflog_has_head": {
+      "type": "boolean",
+      "description": "Whether HEAD already appeared in the reflog when the hook ran. Measured true for every post-commit in Git 2.54.0."
+    },
+    "total_commits": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "git_dir": {
+      "type": "string",
+      "description": "`git rev-parse --absolute-git-dir`. Differs from <repo>/.git inside a worktree."
+    },
+    "common_dir": {
+      "type": "string",
+      "description": "`git rev-parse --git-common-dir`."
+    },
+    "cwd": {
+      "type": "string"
+    },
+    "git_version": {
+      "type": "string"
+    },
+    "self_micros": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Wall time the probe process spent collecting facts, microseconds. Diagnostic only."
+    }
+  }
+}

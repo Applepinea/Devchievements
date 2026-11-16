@@ -1,0 +1,10 @@
+[package]
+name = "devch-probe-native"
+version = "0.1.0"
+edition = "2021"
+description = "Native twin of the wasm probe, for byte-for-byte comparison (ADR-0001)."
+
+[workspace]
+
+[dependencies]
+devchievements-core = { path = "../../../crates/core" }

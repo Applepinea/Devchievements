@@ -1,0 +1,14 @@
+[package]
+name = "devch-helper-spike"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 0 spike: in-process repository read with gix, compared against shelling out to git (ADR-0002)."
+
+[workspace]
+
+[dependencies]
+# 'revision' gives rev-parse/reflog access; there is no separate 'reflog' feature.
+gix = { version = "0.74", default-features = false, features = ["revision"] }
+
+[profile.release]
+opt-level = 2

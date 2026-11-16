@@ -1,0 +1,10 @@
+[package]
+name = "devch-noop"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[profile.release]
+opt-level = "z"
+strip = true

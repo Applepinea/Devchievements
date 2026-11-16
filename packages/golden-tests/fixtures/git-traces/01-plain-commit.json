@@ -1,0 +1,74 @@
+{
+  "scenario": "01-plain-commit",
+  "description": "Two plain commits: baseline hook behavior",
+  "recorded_at": "2026-11-16T12:16:19.214Z",
+  "git_version": "git version 2.54.0.windows.1",
+  "host": {
+    "platform": "win32",
+    "arch": "x64",
+    "release": "10.0.26300"
+  },
+  "expected": {
+    "hook_order": [
+      "post-commit",
+      "post-commit"
+    ],
+    "rewrite_lag_ms": [],
+    "reflog_has_head_always": true,
+    "note": "These are the observable facts. Derived product decisions (counted / amended / merged) belong to the Phase 1 evaluator, not to the fixture."
+  },
+  "events": [
+    {
+      "hook": "post-commit",
+      "seq": 0,
+      "argv": "",
+      "stdin": "",
+      "head_sha": "735c7ff56f6604d6343f669790bdfbc5d336865c",
+      "parents": "735c7ff56f6604d6343f669790bdfbc5d336865c",
+      "tree": "201aaf909c9be66f2031c98ca6a322722d6bff66",
+      "branch": "main",
+      "author_name": "Devch Experi",
+      "author_email": "experiments@devchievements.local",
+      "author_ts": "1700000060",
+      "committer_name": "Devch Experi",
+      "committer_email": "experiments@devchievements.local",
+      "committer_ts": "1700000060",
+      "subject": "first",
+      "reflog_gs": "commit (initial): first",
+      "reflog_count": 1,
+      "reflog_has_head": true,
+      "total_commits": "1",
+      "git_dir": "C:/Users/csa/Documents/deepseek-harness/default-workspace/devchievements/scripts/git-experiments/.out/01-plain-commit/repo/.git",
+      "common_dir": ".git",
+      "cwd": "C:\\Users\\csa\\Documents\\deepseek-harness\\default-workspace\\devchievements\\scripts\\git-experiments\\.out\\01-plain-commit\\repo",
+      "git_version": "git version 2.54.0.windows.1",
+      "self_micros": 322646
+    },
+    {
+      "hook": "post-commit",
+      "seq": 1,
+      "argv": "",
+      "stdin": "",
+      "head_sha": "940f7398f4a9490ad0f0fd3df8012f0868774b72",
+      "parents": "940f7398f4a9490ad0f0fd3df8012f0868774b72 735c7ff56f6604d6343f669790bdfbc5d336865c",
+      "tree": "66a639863d36994b7c26a9a914052df4dc6fd3b7",
+      "branch": "main",
+      "author_name": "Devch Experi",
+      "author_email": "experiments@devchievements.local",
+      "author_ts": "1700000120",
+      "committer_name": "Devch Experi",
+      "committer_email": "experiments@devchievements.local",
+      "committer_ts": "1700000120",
+      "subject": "second",
+      "reflog_gs": "commit: second",
+      "reflog_count": 2,
+      "reflog_has_head": true,
+      "total_commits": "2",
+      "git_dir": "C:/Users/csa/Documents/deepseek-harness/default-workspace/devchievements/scripts/git-experiments/.out/01-plain-commit/repo/.git",
+      "common_dir": ".git",
+      "cwd": "C:\\Users\\csa\\Documents\\deepseek-harness\\default-workspace\\devchievements\\scripts\\git-experiments\\.out\\01-plain-commit\\repo",
+      "git_version": "git version 2.54.0.windows.1",
+      "self_micros": 318792
+    }
+  ]
+}

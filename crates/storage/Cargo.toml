@@ -1,0 +1,16 @@
+[package]
+name = "devchievements-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SQLite/SQLx adapter, migrations, projections. Never contains achievement judgement logic."
+
+[dependencies]
+# Intentionally empty: SQLx is the Phase 1 choice (AGENTS.md forbids mixing it
+# with rusqlite), but it cannot be built on this host -- see ADR-0012 and
+# crates/storage/README.md.
+
+[lints]
+workspace = true

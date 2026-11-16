@@ -1,0 +1,47 @@
+{
+  "scenario": "14-submodule",
+  "description": "Submodule: where do the submodule's hooks come from?",
+  "recorded_at": "2026-11-16T12:16:19.214Z",
+  "git_version": "git version 2.54.0.windows.1",
+  "host": {
+    "platform": "win32",
+    "arch": "x64",
+    "release": "10.0.26300"
+  },
+  "expected": {
+    "hook_order": [
+      "post-commit"
+    ],
+    "rewrite_lag_ms": [],
+    "reflog_has_head_always": true,
+    "note": "These are the observable facts. Derived product decisions (counted / amended / merged) belong to the Phase 1 evaluator, not to the fixture."
+  },
+  "events": [
+    {
+      "hook": "post-commit",
+      "seq": 0,
+      "argv": "",
+      "stdin": "",
+      "head_sha": "d23b870bf49c3e182a83586190f4c86a3b9390e3",
+      "parents": "d23b870bf49c3e182a83586190f4c86a3b9390e3",
+      "tree": "622ae6ca1c0ed428d7c9dd1961c09ee49232db2b",
+      "branch": "main",
+      "author_name": "Devch Experi",
+      "author_email": "experiments@devchievements.local",
+      "author_ts": "1700001620",
+      "committer_name": "Devch Experi",
+      "committer_email": "experiments@devchievements.local",
+      "committer_ts": "1700001620",
+      "subject": "base",
+      "reflog_gs": "commit (initial): base",
+      "reflog_count": 1,
+      "reflog_has_head": true,
+      "total_commits": "1",
+      "git_dir": "C:/Users/csa/Documents/deepseek-harness/default-workspace/devchievements/scripts/git-experiments/.out/14-submodule/repo/.git",
+      "common_dir": ".git",
+      "cwd": "C:\\Users\\csa\\Documents\\deepseek-harness\\default-workspace\\devchievements\\scripts\\git-experiments\\.out\\14-submodule\\repo",
+      "git_version": "git version 2.54.0.windows.1",
+      "self_micros": 342222
+    }
+  ]
+}

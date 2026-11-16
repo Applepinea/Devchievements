@@ -1,0 +1,74 @@
+{
+  "scenario": "08-empty-commit",
+  "description": "git commit --allow-empty: is it distinguishable?",
+  "recorded_at": "2026-11-16T12:16:19.214Z",
+  "git_version": "git version 2.54.0.windows.1",
+  "host": {
+    "platform": "win32",
+    "arch": "x64",
+    "release": "10.0.26300"
+  },
+  "expected": {
+    "hook_order": [
+      "post-commit",
+      "post-commit"
+    ],
+    "rewrite_lag_ms": [],
+    "reflog_has_head_always": true,
+    "note": "These are the observable facts. Derived product decisions (counted / amended / merged) belong to the Phase 1 evaluator, not to the fixture."
+  },
+  "events": [
+    {
+      "hook": "post-commit",
+      "seq": 0,
+      "argv": "",
+      "stdin": "",
+      "head_sha": "b3990a32c9cbd6be18d3bf3145d403fbf06f6fdf",
+      "parents": "b3990a32c9cbd6be18d3bf3145d403fbf06f6fdf",
+      "tree": "4e2715a73029e08d89eb84fe5831df20241e3c76",
+      "branch": "main",
+      "author_name": "Devch Experi",
+      "author_email": "experiments@devchievements.local",
+      "author_ts": "1700001200",
+      "committer_name": "Devch Experi",
+      "committer_email": "experiments@devchievements.local",
+      "committer_ts": "1700001200",
+      "subject": "normal",
+      "reflog_gs": "commit (initial): normal",
+      "reflog_count": 1,
+      "reflog_has_head": true,
+      "total_commits": "1",
+      "git_dir": "C:/Users/csa/Documents/deepseek-harness/default-workspace/devchievements/scripts/git-experiments/.out/08-empty-commit/repo/.git",
+      "common_dir": ".git",
+      "cwd": "C:\\Users\\csa\\Documents\\deepseek-harness\\default-workspace\\devchievements\\scripts\\git-experiments\\.out\\08-empty-commit\\repo",
+      "git_version": "git version 2.54.0.windows.1",
+      "self_micros": 340740
+    },
+    {
+      "hook": "post-commit",
+      "seq": 1,
+      "argv": "",
+      "stdin": "",
+      "head_sha": "909269fde5b9b29cf9d9c1842cf084f43f5b4d6c",
+      "parents": "909269fde5b9b29cf9d9c1842cf084f43f5b4d6c b3990a32c9cbd6be18d3bf3145d403fbf06f6fdf",
+      "tree": "4e2715a73029e08d89eb84fe5831df20241e3c76",
+      "branch": "main",
+      "author_name": "Devch Experi",
+      "author_email": "experiments@devchievements.local",
+      "author_ts": "1700000100",
+      "committer_name": "Devch Experi",
+      "committer_email": "experiments@devchievements.local",
+      "committer_ts": "1700000100",
+      "subject": "empty",
+      "reflog_gs": "commit: empty",
+      "reflog_count": 2,
+      "reflog_has_head": true,
+      "total_commits": "2",
+      "git_dir": "C:/Users/csa/Documents/deepseek-harness/default-workspace/devchievements/scripts/git-experiments/.out/08-empty-commit/repo/.git",
+      "common_dir": ".git",
+      "cwd": "C:\\Users\\csa\\Documents\\deepseek-harness\\default-workspace\\devchievements\\scripts\\git-experiments\\.out\\08-empty-commit\\repo",
+      "git_version": "git version 2.54.0.windows.1",
+      "self_micros": 324695
+    }
+  ]
+}

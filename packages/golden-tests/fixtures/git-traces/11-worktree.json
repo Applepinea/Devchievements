@@ -1,0 +1,74 @@
+{
+  "scenario": "11-worktree",
+  "description": "git worktree add: hook location and git dirs",
+  "recorded_at": "2026-11-16T12:16:19.214Z",
+  "git_version": "git version 2.54.0.windows.1",
+  "host": {
+    "platform": "win32",
+    "arch": "x64",
+    "release": "10.0.26300"
+  },
+  "expected": {
+    "hook_order": [
+      "post-commit",
+      "post-commit"
+    ],
+    "rewrite_lag_ms": [],
+    "reflog_has_head_always": true,
+    "note": "These are the observable facts. Derived product decisions (counted / amended / merged) belong to the Phase 1 evaluator, not to the fixture."
+  },
+  "events": [
+    {
+      "hook": "post-commit",
+      "seq": 0,
+      "argv": "",
+      "stdin": "",
+      "head_sha": "ce17c9f0a9cc2f0fa222f63d6b96a8e0c5098b53",
+      "parents": "ce17c9f0a9cc2f0fa222f63d6b96a8e0c5098b53",
+      "tree": "31172581b5509ad3acc796ef8311269a8190f30d",
+      "branch": "main",
+      "author_name": "Devch Experi",
+      "author_email": "experiments@devchievements.local",
+      "author_ts": "1700001500",
+      "committer_name": "Devch Experi",
+      "committer_email": "experiments@devchievements.local",
+      "committer_ts": "1700001500",
+      "subject": "base",
+      "reflog_gs": "commit (initial): base",
+      "reflog_count": 1,
+      "reflog_has_head": true,
+      "total_commits": "1",
+      "git_dir": "C:/Users/csa/Documents/deepseek-harness/default-workspace/devchievements/scripts/git-experiments/.out/11-worktree/repo/.git",
+      "common_dir": ".git",
+      "cwd": "C:\\Users\\csa\\Documents\\deepseek-harness\\default-workspace\\devchievements\\scripts\\git-experiments\\.out\\11-worktree\\repo",
+      "git_version": "git version 2.54.0.windows.1",
+      "self_micros": 321681
+    },
+    {
+      "hook": "post-commit",
+      "seq": 1,
+      "argv": "",
+      "stdin": "",
+      "head_sha": "c4b4c9b7a1af5031339c123e284a8fa83e95cb28",
+      "parents": "c4b4c9b7a1af5031339c123e284a8fa83e95cb28 ce17c9f0a9cc2f0fa222f63d6b96a8e0c5098b53",
+      "tree": "f4c24a346f725f37ac6a771237efaef2a4ee76ac",
+      "branch": "wtbranch",
+      "author_name": "Devch Experi",
+      "author_email": "experiments@devchievements.local",
+      "author_ts": "1700000200",
+      "committer_name": "Devch Experi",
+      "committer_email": "experiments@devchievements.local",
+      "committer_ts": "1700000200",
+      "subject": "worktree commit",
+      "reflog_gs": "commit: worktree commit",
+      "reflog_count": 3,
+      "reflog_has_head": true,
+      "total_commits": "2",
+      "git_dir": "C:/Users/csa/Documents/deepseek-harness/default-workspace/devchievements/scripts/git-experiments/.out/11-worktree/repo/.git/worktrees/wt",
+      "common_dir": "C:/Users/csa/Documents/deepseek-harness/default-workspace/devchievements/scripts/git-experiments/.out/11-worktree/repo/.git",
+      "cwd": "C:\\Users\\csa\\Documents\\deepseek-harness\\default-workspace\\devchievements\\scripts\\git-experiments\\.out\\11-worktree\\wt",
+      "git_version": "git version 2.54.0.windows.1",
+      "self_micros": 310913
+    }
+  ]
+}

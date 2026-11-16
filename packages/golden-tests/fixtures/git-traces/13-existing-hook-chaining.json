@@ -1,0 +1,18 @@
+{
+  "scenario": "13-existing-hook-chaining",
+  "description": "Pre-existing post-commit is preserved and chained",
+  "recorded_at": "2026-11-16T12:16:19.214Z",
+  "git_version": "git version 2.54.0.windows.1",
+  "host": {
+    "platform": "win32",
+    "arch": "x64",
+    "release": "10.0.26300"
+  },
+  "expected": {
+    "hook_order": [],
+    "rewrite_lag_ms": [],
+    "reflog_has_head_always": false,
+    "note": "These are the observable facts. Derived product decisions (counted / amended / merged) belong to the Phase 1 evaluator, not to the fixture."
+  },
+  "events": []
+}

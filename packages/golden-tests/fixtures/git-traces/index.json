@@ -1,0 +1,82 @@
+{
+  "generated_at": "2026-11-16T12:16:19.214Z",
+  "git_version": "git version 2.54.0.windows.1",
+  "note": "Recorded by scripts/git-experiments/run-experiments.mjs. Re-run that script to refresh. Do not hand-edit.",
+  "fixtures": [
+    {
+      "scenario": "01-plain-commit",
+      "description": "Two plain commits: baseline hook behavior",
+      "events": 2
+    },
+    {
+      "scenario": "02-amend",
+      "description": "git commit --amend: what reflog says and which hooks fire",
+      "events": 3
+    },
+    {
+      "scenario": "03-amend-then-commit",
+      "description": "Amend immediately followed by a normal commit",
+      "events": 4
+    },
+    {
+      "scenario": "04-rebase",
+      "description": "Plain rebase of a topic branch onto main",
+      "events": 7
+    },
+    {
+      "scenario": "05-interactive-rebase-reword",
+      "description": "Interactive rebase with reword: mapping shape",
+      "events": 3
+    },
+    {
+      "scenario": "06-merge-no-ff",
+      "description": "Local merge --no-ff: post-merge and post-commit order",
+      "events": 4
+    },
+    {
+      "scenario": "07-merge-ff",
+      "description": "Fast-forward merge: no commit is created, so no post-commit",
+      "events": 3
+    },
+    {
+      "scenario": "08-empty-commit",
+      "description": "git commit --allow-empty: is it distinguishable?",
+      "events": 2
+    },
+    {
+      "scenario": "09-cherry-pick",
+      "description": "Cherry-pick: new SHA, patch identical",
+      "events": 3
+    },
+    {
+      "scenario": "10-squash",
+      "description": "Squash merge: N commits collapse into 1",
+      "events": 5
+    },
+    {
+      "scenario": "11-worktree",
+      "description": "git worktree add: hook location and git dirs",
+      "events": 2
+    },
+    {
+      "scenario": "12-custom-hooks-path",
+      "description": "core.hooksPath redirect: does the hook still fire?",
+      "events": 1
+    },
+    {
+      "scenario": "13-existing-hook-chaining",
+      "description": "Pre-existing post-commit is preserved and chained",
+      "events": 0
+    },
+    {
+      "scenario": "14-submodule",
+      "description": "Submodule: where do the submodule's hooks come from?",
+      "events": 1
+    },
+    {
+      "scenario": "15-sparse-checkout",
+      "description": "Sparse checkout: hooks still fire normally",
+      "events": 3
+    }
+  ]
+}

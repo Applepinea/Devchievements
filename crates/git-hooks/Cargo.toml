@@ -1,0 +1,15 @@
+[package]
+name = "devchievements-git-hooks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Git hook helper capture, hook install/chaining/uninstall, IPC and Spool delivery."
+
+[dependencies]
+# Zero dependencies on purpose: the Helper must stay a small, predictable
+# native binary with no build-time surprises (ADR-0002).
+
+[lints]
+workspace = true

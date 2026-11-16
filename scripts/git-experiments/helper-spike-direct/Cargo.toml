@@ -1,0 +1,14 @@
+[package]
+name = "devch-helper-spike-direct"
+version = "0.1.0"
+edition = "2021"
+description = "Phase 0 spike, approach C: read .git files directly with zero dependencies."
+
+[workspace]
+
+[dependencies]
+# Deliberately none: approach C in ADR-0002 needs nothing but std.
+
+[profile.release]
+opt-level = 2
+strip = true

@@ -1,0 +1,103 @@
+{
+  "scenario": "02-amend",
+  "description": "git commit --amend: what reflog says and which hooks fire",
+  "recorded_at": "2026-11-16T12:16:19.214Z",
+  "git_version": "git version 2.54.0.windows.1",
+  "host": {
+    "platform": "win32",
+    "arch": "x64",
+    "release": "10.0.26300"
+  },
+  "expected": {
+    "hook_order": [
+      "post-commit",
+      "post-commit",
+      "post-rewrite"
+    ],
+    "rewrite_lag_ms": [
+      435.73
+    ],
+    "reflog_has_head_always": true,
+    "note": "These are the observable facts. Derived product decisions (counted / amended / merged) belong to the Phase 1 evaluator, not to the fixture."
+  },
+  "events": [
+    {
+      "hook": "post-commit",
+      "seq": 0,
+      "argv": "",
+      "stdin": "",
+      "head_sha": "c0339c00100b2d9c5c3a768fd76bf9e1bfc88c26",
+      "parents": "c0339c00100b2d9c5c3a768fd76bf9e1bfc88c26",
+      "tree": "db0bf2dab4ffe4ae56cbd962ba842226e64312b8",
+      "branch": "main",
+      "author_name": "Devch Experi",
+      "author_email": "experiments@devchievements.local",
+      "author_ts": "1700000180",
+      "committer_name": "Devch Experi",
+      "committer_email": "experiments@devchievements.local",
+      "committer_ts": "1700000180",
+      "subject": "original",
+      "reflog_gs": "commit (initial): original",
+      "reflog_count": 1,
+      "reflog_has_head": true,
+      "total_commits": "1",
+      "git_dir": "C:/Users/csa/Documents/deepseek-harness/default-workspace/devchievements/scripts/git-experiments/.out/02-amend/repo/.git",
+      "common_dir": ".git",
+      "cwd": "C:\\Users\\csa\\Documents\\deepseek-harness\\default-workspace\\devchievements\\scripts\\git-experiments\\.out\\02-amend\\repo",
+      "git_version": "git version 2.54.0.windows.1",
+      "self_micros": 317869
+    },
+    {
+      "hook": "post-commit",
+      "seq": 1,
+      "argv": "",
+      "stdin": "",
+      "head_sha": "2d1e70d4238f849bbf9ee5a8a070be9db6d8b94e",
+      "parents": "2d1e70d4238f849bbf9ee5a8a070be9db6d8b94e",
+      "tree": "2a75ef30714ab67c7414673de92a553e1e6c2ef1",
+      "branch": "main",
+      "author_name": "Devch Experi",
+      "author_email": "experiments@devchievements.local",
+      "author_ts": "1700000180",
+      "committer_name": "Devch Experi",
+      "committer_email": "experiments@devchievements.local",
+      "committer_ts": "1700000180",
+      "subject": "amended message",
+      "reflog_gs": "commit (amend): amended message",
+      "reflog_count": 2,
+      "reflog_has_head": true,
+      "total_commits": "1",
+      "git_dir": "C:/Users/csa/Documents/deepseek-harness/default-workspace/devchievements/scripts/git-experiments/.out/02-amend/repo/.git",
+      "common_dir": ".git",
+      "cwd": "C:\\Users\\csa\\Documents\\deepseek-harness\\default-workspace\\devchievements\\scripts\\git-experiments\\.out\\02-amend\\repo",
+      "git_version": "git version 2.54.0.windows.1",
+      "self_micros": 370089
+    },
+    {
+      "hook": "post-rewrite",
+      "seq": 2,
+      "argv": "amend",
+      "stdin": "c0339c00100b2d9c5c3a768fd76bf9e1bfc88c26 2d1e70d4238f849bbf9ee5a8a070be9db6d8b94e",
+      "head_sha": "2d1e70d4238f849bbf9ee5a8a070be9db6d8b94e",
+      "parents": "2d1e70d4238f849bbf9ee5a8a070be9db6d8b94e",
+      "tree": "2a75ef30714ab67c7414673de92a553e1e6c2ef1",
+      "branch": "main",
+      "author_name": "Devch Experi",
+      "author_email": "experiments@devchievements.local",
+      "author_ts": "1700000180",
+      "committer_name": "Devch Experi",
+      "committer_email": "experiments@devchievements.local",
+      "committer_ts": "1700000180",
+      "subject": "amended message",
+      "reflog_gs": "commit (amend): amended message",
+      "reflog_count": 2,
+      "reflog_has_head": true,
+      "total_commits": "1",
+      "git_dir": "C:/Users/csa/Documents/deepseek-harness/default-workspace/devchievements/scripts/git-experiments/.out/02-amend/repo/.git",
+      "common_dir": ".git",
+      "cwd": "C:\\Users\\csa\\Documents\\deepseek-harness\\default-workspace\\devchievements\\scripts\\git-experiments\\.out\\02-amend\\repo",
+      "git_version": "git version 2.54.0.windows.1",
+      "self_micros": 375065
+    }
+  ]
+}

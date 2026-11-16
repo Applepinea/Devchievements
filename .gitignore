@@ -1,0 +1,60 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Node
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+npm-debug.log*
+
+# Build artifacts
+dist/
+dist-extension/
+**/target/
+*.tsbuildinfo
+
+# WXT output (generated per build; never commit)
+apps/extension/.output/
+apps/extension/.wxt/
+
+# Experiment output directories (regenerable evidence, not source)
+**/.out/
+**/.crate-cache/
+**/.logs/
+
+# Local crates proxy cache + logs (host workaround artifacts)
+/.crate-cache/
+/.logs/
+/.cargo/config.toml
+
+# DSH / local toolchain (never commit)
+/_toolchain/
+/_toolprobe/
+
+# Git behavior experiment scratch
+/tests/.scratch/
+/scripts/git-experiments/.out/
+
+# SQLite (never commit real user data)
+*.db
+*.db-wal
+*.db-shm
+!packages/golden-tests/fixtures/**/*.db
+
+# Browser profiles created during automated verification attempts
+**/chrome-profile*/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx

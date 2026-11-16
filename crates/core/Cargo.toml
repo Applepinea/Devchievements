@@ -1,0 +1,31 @@
+[package]
+name = "devchievements-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Pure-logic achievement engine: state transitions and side-effect intents. No clock, no RNG, no IO."
+
+[lib]
+# rlib for normal use, cdylib so the same crate can be loaded as a wasm module.
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints.rust]
+# Mirrors the workspace set, except unsafe_code: the wasm32 C-ABI hand-off in
+# wasm_entry.rs needs exactly one documented block. Everything else stays denied.
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+
+[lints.cargo]
+unused_dependencies = "warn"

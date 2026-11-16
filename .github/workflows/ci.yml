@@ -1,0 +1,115 @@
+# .github/workflows/ci.yml
+#
+# 基础 CI（规范 §30.1）：格式检查、静态检查、单元测试、构建。
+# 完整的发布流水线（多平台、多 Git 版本矩阵、签名）属于 Phase 4b（§40.2）。
+#
+# NOTE: this file has never been executed. There is no GitHub repository yet
+# (see docs/development/external-accounts-and-secrets.md), so everything below is
+# untested configuration, NOT a verified pipeline. STATUS.md records it as such.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, test, build)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Phase 0 only ran on Windows/GNU. The other two entries are the intent,
+        # not evidence: they have never run.
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Build wasm core
+        run: cargo build -p devchievements-core --target wasm32-unknown-unknown --release
+
+  node:
+    name: Node (install, typecheck, build extension)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm -r --if-present typecheck
+
+      - name: Build extension
+        run: pnpm --filter @devchievements/extension build
+
+  git-version-matrix:
+    name: Git behavior experiments (multi-version)
+    # Spec 9.7 requires the Hook experiments to run across several Git versions.
+    # This job exists to do that, but it has NEVER run: no repository, no CI.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        git: ["2.54.0", "2.43.0", "2.39.0", "2.30.0"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # No official Git package per version exists on the runners, so this step
+      # is deliberately left as a point to implement rather than a fake build.
+      - name: Install specific git version
+        run: |
+          echo "::warning::Git version pinning is not implemented yet (ADR-0003 open)"
+          git --version
+
+      - name: Build hook recorder
+        run: cargo build --release --manifest-path scripts/git-experiments/hook-recorder-rs/Cargo.toml
+
+      - name: Run experiments
+        run: node scripts/git-experiments/run-experiments.mjs
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: git-traces-${{ matrix.git }}
+          path: scripts/git-experiments/.out/
