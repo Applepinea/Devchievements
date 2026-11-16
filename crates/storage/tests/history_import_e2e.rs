@@ -149,8 +149,8 @@ async fn scanning_a_real_repository_returns_its_commits() {
     assert!(
         scanned
             .iter()
-            .any(|c| c.committed_at_ms == 1_683_000_000_000),
-        "expected 2023-05-01T02:00:00Z, got {:?}",
+            .any(|c| c.committed_at_ms == 1_682_906_400_000),
+        "expected 2023-05-01T02:00:00Z (1682906400), got {:?}",
         scanned
             .iter()
             .map(|c| c.committed_at_ms)

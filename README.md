@@ -96,3 +96,10 @@ Tauri 2 · Rust · React · TypeScript · WXT · Manifest V3 · SQLite + SQLx ·
 ## 许可证
 
 尚未确定（`UNLICENSED`）。公开发布前需用户确认。
+
+---
+
+## Platform
+
+Windows 10/11 only. macOS and Linux are out of scope by decision
+([ADR-0017](docs/decisions/0017-windows-only.md)).

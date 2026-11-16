@@ -52,7 +52,7 @@ ALL CHECKS PASSED
 | # | 任务 | 状态 | 证据 |
 | --- | --- | --- | --- |
 | 2b.1 | 平台能力探测与降级链（§29） | `Tested` | 13 个测试；运行时实测降级到 in-app-only |
-| 2b.2 | 兼容性矩阵更新（§29.6） | `Partially Implemented` | 本轮实测行已更新；其余平台未验证 |
+| 2b.2 | 兼容性矩阵（§29.6） | `Tested` | Windows 行实测；macOS/Linux 标为「不支持（ADR-0017）」 |
 | 2b.3 | Dashboard / Gallery / Activity / Repository Manager / About | `Tested` | 5 个页面全部读真实数据库；`pages` e2e 18 项通过 |
 | 2b.4 | 历史导入界面与完整流程 | `Tested` | 管线 + Repository Manager + **向导导入步骤**；静默/幂等/跨路径去重/原始日期已测 |
 | 2b.5 | 基础 Settings | `Tested` | 身份/通知开关/音量与静音/隐私/运行模式/时区/数据管理（打开目录、备份、清除）；`notification-settings` e2e 12 项 |
@@ -251,6 +251,14 @@ ALL CHECKS PASSED
 | 2026-11-16（第二轮） | 补齐 §48.3 风险分析与 §48.5 实施计划；**解除 SQLite/SQLx 与 gix 两项阻塞**；ADR-0002 改为三方案实测；新增 `scripts/verify.mjs` 一键验证（42 测试全绿） |
 
 ---
+
+## 支持范围
+
+**只支持 Windows**（10/11）。macOS 与 Linux 不在支持范围内，
+这是产品决定（[ADR-0017](docs/decisions/0017-windows-only.md)），不是遗漏。
+
+CI 只跑 `windows-latest`。规范 §29 的多平台要求据此收敛，
+属经授权的偏离。
 
 ## 许可证
 

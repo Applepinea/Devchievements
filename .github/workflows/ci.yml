@@ -29,9 +29,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Phase 0 only ran on Windows/GNU. The other two entries are the intent,
-        # not evidence: they have never run.
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        # Windows only. This is a product decision (ADR-0017), not an accident: the
+        # companion is a Windows desktop app, so Linux and macOS builds were never
+        # shipped and every job spent on them was spent on untested targets.
+        os: [windows-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -94,36 +95,7 @@ jobs:
       - name: Build extension
         run: pnpm --filter @devchievements/extension build
 
-  git-version-matrix:
-    name: Git behavior experiments (multi-version)
-    # Spec 9.7 requires the Hook experiments to run across several Git versions.
-    # This job exists to do that, but it has NEVER run: no repository, no CI.
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        git: ["2.54.0", "2.43.0", "2.39.0", "2.30.0"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      # No official Git package per version exists on the runners, so this step
-      # is deliberately left as a point to implement rather than a fake build.
-      - name: Install specific git version
-        run: |
-          echo "::warning::Git version pinning is not implemented yet (ADR-0003 open)"
-          git --version
-
-      - name: Build hook recorder
-        run: cargo build --release --manifest-path scripts/git-experiments/hook-recorder-rs/Cargo.toml
-
-      - name: Run experiments
-        run: node scripts/git-experiments/run-experiments.mjs
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: git-traces-${{ matrix.git }}
-          path: scripts/git-experiments/.out/
+  # The git-version matrix job was removed with the Windows-only scope change
+  # (ADR-0017). It ran on ubuntu-latest, never pinned the versions it claimed to
+  # test, and printing a warning is not coverage. Multi-version hook experiments
+  # remain unimplemented and are tracked in STATUS.md rather than faked here.
