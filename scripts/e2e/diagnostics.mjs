@@ -109,6 +109,18 @@ function main() {
     check("it exposes the sound set", (parsed.sounds ?? []).includes("achievement"), JSON.stringify(parsed.sounds));
     check("it exposes the toast state", typeof parsed.toast?.ready === "boolean", JSON.stringify(parsed.toast));
     check("the data directory is redacted", !String(parsed.dataDir).includes("csa"), String(parsed.dataDir));
+
+    // Spec 34.1: the outbox picture must carry reasons and latencies, not just a
+    // count, or nothing in it is actionable.
+    const health = parsed.outboxHealth ?? {};
+    check("it reports outbox latency", typeof health.latency?.samples === "number", JSON.stringify(health.latency));
+    // Locally delivered notifications should land in the sub-second buckets; the
+    // exact bucket depends on how the drain happened to be scheduled.
+    const fast =
+      (health.latency?.buckets?.under_100ms ?? 0) + (health.latency?.buckets?.under_1s ?? 0);
+    check("the delivered notifications were fast", fast > 0, JSON.stringify(health.latency?.buckets));
+    check("nothing is left pending", health.pending === 0, String(health.pending));
+    check("no failure reasons were recorded", (health.reasons ?? []).length === 0, JSON.stringify(health.reasons));
   }
 
   console.log("");

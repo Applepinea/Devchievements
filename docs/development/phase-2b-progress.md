@@ -158,3 +158,61 @@ HISTORY IMPORT PASSED: silent, idempotent, counted once
 e2e 里原本有一条注释写着「验证原始提交日期」，但那一段其实只检查了计数。
 真正的日期断言在集成测试里（能读到 `committed_at_ms`）。
 注释已改成指向真实位置——**测试注释说的和做的不一致，比没有注释更糟**。
+
+---
+
+## 3. Outbox 可观测性（§34.1）
+
+### 3.1 为什么不能只给一个数字
+
+「3 条通知没送到」不是一个可行动的结论。是预约过期、是崩溃打断、还是投递一直失败？
+三种情况要修的地方完全不同。
+
+### 3.2 实现
+
+`crates/storage/src/observability.rs`，7 个测试。
+
+**原因码**（从状态 + `last_error` 归类）：
+
+| 码 | 含义 |
+| --- | --- |
+| `interrupted_after_display_attempt` | 展示尝试已持久化后崩溃（§17.9） |
+| `delivery_unknown` | 未命名的未知投递结果 |
+| `delivery_failed` | 重试耗尽 |
+| `suppressed_by_policy` | 按策略静默（过期/导入） |
+| `all_channels_declined` | 所有通道拒绝 |
+| `other` | 未识别状态**也会被统计**，不会静默消失 |
+
+**延迟**：p50/p90/p99/max + 五档粗桶（<100ms / <1s / <10s / <1min / ≥1min）。
+桶刻意粗——本地投递本来就是几十毫秒量级，细粒度只会制造虚假精度。
+
+**`oldest_pending_ms`**：最老未完成通知的年龄。这个数字增长说明消费跟不上，
+任何「每事件」指标都看不出来。
+
+### 3.3 实测输出
+
+```json
+"outboxHealth": {
+  "total": 6, "pending": 0, "oldest_pending_ms": null, "reasons": [],
+  "latency": {
+    "samples": 6, "p50_ms": 0, "p90_ms": 0, "p99_ms": 0, "max_ms": 0,
+    "buckets": { "under_100ms": 6, "under_1s": 0, "under_10s": 0, "under_1min": 0, "over_1min": 0 }
+  }
+}
+```
+
+6 条全部在 100 ms 内送达（同一事务时间戳，故为 0 ms）。
+
+### 3.4 测试
+
+6 个纯分类测试 + 1 个**真实数据库**测试：直接插入带已知时间戳的行，
+断言原因码分类与分位数计算（50/80/30000 → p50=80、max=30000）。
+
+写这个数据库测试时连撞两个约束：`outbox.kind` 非空、
+以及 `outbox.event_id` 有指向 `events` 的外键——都需要先建父行。
+**这两条如果只在纯逻辑测试里验证，永远不会被发现。**
+
+### 3.5 一处我自己写歪的断言
+
+e2e 里我先写成「延迟必须在 under_1s 桶里」，实际数据落在 `under_100ms`，测试失败。
+改成「亚秒桶合计 > 0」——断言应该描述**性质**，不是钉死某个桶。

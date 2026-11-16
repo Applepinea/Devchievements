@@ -20,6 +20,7 @@ pub mod history_import;
 pub mod history_scan;
 pub mod indexeddb;
 pub mod ingest;
+pub mod observability;
 pub mod projections;
 pub mod schema;
 

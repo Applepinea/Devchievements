@@ -533,19 +533,41 @@ fn main() {
 
     if std::env::args().any(|a| a == "--diagnostics") {
         let data_dir = default_data_dir();
-        let rt = async_std::task::block_on(async {
-            let pool = devchievements_storage::open(&data_dir.join("companion.db")).await?;
-            devchievements_storage::ingest::migrate(&pool).await?;
-            devchievements_storage::diagnostics::snapshot(&pool, |id| {
+
+        // One async block computes both halves: the snapshot and the outbox picture.
+        // They come from the same database, so splitting them could report them from
+        // different instants.
+        let rt: Result<_, String> = async_std::task::block_on(async {
+            let pool = devchievements_storage::open(&data_dir.join("companion.db"))
+                .await
+                .map_err(|e| e.to_string())?;
+            devchievements_storage::ingest::migrate(&pool)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let snapshot = devchievements_storage::diagnostics::snapshot(&pool, |id| {
                 // Spec 26.2: repository names are reduced to stable aliases before
                 // they appear anywhere the user might share.
                 devchievements_privacy::stable_alias(id)
             })
             .await
+            .map_err(|e| e.to_string())?;
+
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            // Spec 34.1: a failure count without reasons and latencies is not
+            // actionable, so the health picture travels with the snapshot.
+            let health = devchievements_storage::observability::outbox_health(&pool, now)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            Ok((snapshot, health))
         });
 
         match rt {
-            Ok(snapshot) => {
+            Ok((snapshot, health)) => {
                 let toast_state = toast::registration_state();
                 let spool =
                     devchievements_git_hooks::spool::Spool::open(data_dir.join("spool")).ok();
@@ -571,6 +593,7 @@ fn main() {
                     "privacy": settings::Settings::load(&settings_path()).privacy.as_str(),
                     "capabilities": current_capabilities(),
                     "snapshot": snapshot,
+                    "outboxHealth": health,
                 });
                 println!(
                     "{}",
