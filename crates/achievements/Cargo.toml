@@ -8,7 +8,7 @@ authors.workspace = true
 description = "Versioned permanent achievement rules: required capabilities, retroactive policy, hidden achievements."
 
 [dependencies]
-# Declared as the code arrives. Phase 0 scaffold has none.
+serde = { version = "1", features = ["derive"] }
 
 [lints]
 workspace = true

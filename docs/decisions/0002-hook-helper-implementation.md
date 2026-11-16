@@ -3,14 +3,14 @@
 - **状态**：**Accepted**
 - **日期**：2026-11-16（第二次修订：三种方案现在**全部有实测数据**）
 - **相关规范章节**：§9.5、§9.2、§44.1、§44.4、§30.2
-- **证据**：`scripts/git-experiments/.out/bench-three-approaches.json%%
+- **证据**：`scripts/git-experiments/.out/bench-three-approaches.json`
 
 ---
 
 ## 修订说明（重要）
 
 第一版本 ADR 声称「方案 B 无法构建，因此没有数据」。那是**环境缺陷**，不是产品结论。
-该缺陷（GNU 工具链缺 `as.exe%%）已修复，方案 B 现在可以构建并实测。
+该缺陷（GNU 工具链缺 `as.exe`）已修复，方案 B 现在可以构建并实测。
 本版用**三方案真实对比数据**重写了结论——结论没有变，但依据更硬了。
 
 ---
@@ -19,9 +19,9 @@
 
 规范 §9.5 要求以 **Phase 0 实测 Hook 耗时**为依据，在三种 Helper 实现方案中选择：
 
-- **A**：调用 `git%% 命令
-- **B**：链接 `gix%% / `git2%% 库
-- **C**：直接读取 `.git%% 文件
+- **A**：调用 `git` 命令
+- **B**：链接 `gix` / `git2` 库
+- **C**：直接读取 `.git` 文件
 
 硬预算：
 
@@ -54,8 +54,8 @@ C  直读 .git（1 个原生进程）    9.76    10.91    13.40    72.09    true
 
 ## 决策
 
-**采用方案 C：直接读取 `.git%% 的 Rust Helper（零外部 crate 依赖）。**
-仅在 C 无法覆盖的场景（对象已在 packfile 中）回退到一次 `git%% 调用。
+**采用方案 C：直接读取 `.git` 的 Rust Helper（零外部 crate 依赖）。**
+仅在 C 无法覆盖的场景（对象已在 packfile 中）回退到一次 `git` 调用。
 
 ---
 
@@ -65,7 +65,7 @@ C  直读 .git（1 个原生进程）    9.76    10.91    13.40    72.09    true
 | --- | --- | --- | --- |
 | A　调 git 命令 | 语义最权威 | 单次 ~35 ms；17 次即 ~600 ms，**必然违反 200 ms 硬超时** | 仅作回退 |
 | B　链接 gix | 语义权威 + 无子进程 | **实测 p95 66 ms，本身就超预算**；二进制显著变大 | 否 |
-| C　直读 `.git%% | 10.9 ms；零依赖；完全可控 | 需自行处理 packfile、SHA-256 | **采用** |
+| C　直读 `.git` | 10.9 ms；零依赖；完全可控 | 需自行处理 packfile、SHA-256 | **采用** |
 
 ---
 
@@ -81,17 +81,17 @@ C  直读 .git（1 个原生进程）    9.76    10.91    13.40    72.09    true
 
 - 需要自行实现并维护：zlib inflate、commit 解析、ref 解析、packed-refs。
   Phase 0 的 spike 已实现 loose object + 完整 inflate（stored / fixed / dynamic Huffman）。
-- **packfile 尚未支持**：spike 只读 loose object。`git gc%% / `git repack%% 后对象进入 packfile，
+- **packfile 尚未支持**：spike 只读 loose object。`git gc` / `git repack` 后对象进入 packfile，
   此时 C 会失败。**Phase 1 必须补齐 packfile + delta 解析，或在该场景回退到 A。**
 - **SHA-256 仓库未支持**（Git 2.29+ 可选特性）。
-- 自研解析的正确性风险高于调用 git，因此**必须有 Golden Tests 对照 `git%% 输出**。
+- 自研解析的正确性风险高于调用 git，因此**必须有 Golden Tests 对照 `git` 输出**。
 
 ### 回退策略
 
 | 场景 | 行为 |
 | --- | --- |
 | loose object 可读 | 走 C |
-| 对象在 packfile | 回退到 1 次 `git log -1 --pretty=...%%（约 35 ms，仍在预算内） |
+| 对象在 packfile | 回退到 1 次 `git log -1 --pretty=...`（约 35 ms，仍在预算内） |
 | 任何解析失败 | 记录诊断 + 回退到 A；**不得**静默丢弃事件 |
 | SHA-256 仓库 | 明确报错并降级，不得假装成功 |
 
@@ -99,12 +99,12 @@ C  直读 .git（1 个原生进程）    9.76    10.91    13.40    72.09    true
 
 ## 已完成的正确性交叉验证
 
-- `crates/git-hooks/tests/gitread_against_real_repo.rs%%：对 HEAD sha、tree、author/committer、subject、
-  时间戳、merge 父提交数、worktree、缺失对象，逐项与 `git%% 输出对照（5 个测试）。
-- `scripts/git-experiments/bench-three-approaches.mjs%%：三方案输出的 head sha 一致。
+- `crates/git-hooks/tests/gitread_against_real_repo.rs`：对 HEAD sha、tree、author/committer、subject、
+  时间戳、merge 父提交数、worktree、缺失对象，逐项与 `git` 输出对照（5 个测试）。
+- `scripts/git-experiments/bench-three-approaches.mjs`：三方案输出的 head sha 一致。
 
 ---
 
 ## 复查计划
 
-Phase 1 完成 packfile 支持后，用 Golden Tests 对照 `git%% 输出复测本 ADR 的性能结论。
+Phase 1 完成 packfile 支持后，用 Golden Tests 对照 `git` 输出复测本 ADR 的性能结论。

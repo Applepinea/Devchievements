@@ -23,6 +23,7 @@
 
 pub mod context;
 pub mod engine;
+pub mod timezone;
 pub mod wasm_entry;
 pub mod wasm_probe;
 
@@ -31,8 +32,49 @@ pub use context::{
     TimezoneProvider,
 };
 pub use engine::{
-    Engine, EngineOutput, SideEffectIntent, SideEffectKind, StateChange, StateSnapshot,
+    CommitFacts, Engine, EngineOutput, ReadSet, SideEffectIntent, SideEffectKind, StateChange,
+    StateSnapshot,
 };
+pub use timezone::{local_date_at, BundledTimezoneProvider, DayBoundary};
+
+/// The event kinds the Engine currently evaluates.
+///
+/// Deliberately narrow: adding a variant means adding a read-set and a rule, which
+/// is the point. Events that are only persisted (releases, stars, ...) do not need
+/// an Engine path yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventKind {
+    /// A commit, including ones that end up excluded.
+    Commit,
+    /// A local merge (distinct from a PR merge, spec 2.3).
+    LocalMerge,
+}
+
+/// Mirrors the unlock source so the Engine can label its intents without
+/// depending on the achievements crate's presentation types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnlockSourceTag {
+    /// Unlocked while the user was present.
+    Realtime,
+    /// Unlocked after a classification wait.
+    Delayed,
+    /// Unlocked by re-evaluating history.
+    Backfill,
+    /// Unlocked during an import.
+    Import,
+}
+
+impl UnlockSourceTag {
+    /// Whether the consumer should stay quiet about this unlock.
+    pub fn is_silent(self) -> bool {
+        matches!(self, UnlockSourceTag::Backfill | UnlockSourceTag::Import)
+    }
+}
+
+// Re-export the rule crates so callers of the Engine need one dependency, not three.
+pub use devchievements_achievements as achievements;
+pub use devchievements_daily_rank as daily_rank;
 
 /// Crate version, recorded alongside persisted data so that rule attribution and
 /// migrations can tell which code produced a result (spec 13.3 `rule_version`).

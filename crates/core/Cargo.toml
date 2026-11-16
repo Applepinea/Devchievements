@@ -12,8 +12,13 @@ description = "Pure-logic achievement engine: state transitions and side-effect 
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-serde = { workspace = true }
-serde_json = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Bundled TZDB: the OS database changes under us, which would silently rewrite
+# historical local_date values (ADR-0005).
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
+devchievements-achievements = { path = "../achievements" }
+devchievements-daily-rank = { path = "../daily-rank" }
 
 [lints.rust]
 # Mirrors the workspace set, except unsafe_code: the wasm32 C-ABI hand-off in

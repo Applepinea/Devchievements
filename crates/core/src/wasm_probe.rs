@@ -32,6 +32,7 @@ pub fn sample_output() -> EngineOutput {
             notification_id: "notif-0001".to_string(),
             kind: SideEffectKind::AchievementUnlocked {
                 achievement_id: "first_commit".to_string(),
+                source: crate::UnlockSourceTag::Realtime,
             },
         }],
     }

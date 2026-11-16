@@ -8,7 +8,8 @@ authors.workspace = true
 description = "Outbox state machine and notification ownership protocol (pure logic, no actual display)."
 
 [dependencies]
-# Declared as the code arrives. Phase 0 scaffold has none.
+serde = { version = "1", features = ["derive"] }
+devchievements-achievements = { path = "../achievements" }
 
 [lints]
 workspace = true

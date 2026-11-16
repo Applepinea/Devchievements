@@ -30,47 +30,47 @@
 
 **实测**：cherry-pick 后 patch 内容与源提交完全一致；empty commit 的 tree 与父提交相同。
 
-**应对**：主去重键用 `canonical_repository_id + commit_sha%%；patch-id 仅作辅助；
+**应对**：主去重键用 `canonical_repository_id + commit_sha`；patch-id 仅作辅助；
 识别到 rewrite 时**关联**而非简单丢弃；明确记录误判风险。
 
 ### A3 🔴 packfile 尚未支持（阻碍 Phase 1）
 
-**风险**：ADR-0002 选定直读 `.git%%%，但 Phase 0 的实现**只读 loose object**。
-`git gc%% / `git repack%% 之后对象进入 packfile（且常带 delta 链），当前实现会失败。
+**风险**：ADR-0002 选定直读 `.git`%，但 Phase 0 的实现**只读 loose object**。
+`git gc` / `git repack` 之后对象进入 packfile（且常带 delta 链），当前实现会失败。
 
 **影响**：真实的长期使用仓库**必然**被 gc，因此这不只是理论风险。
 
-**应对**：Phase 1 **必须**补齐 packfile + delta 解析，或在该场景回退到一次 `git%% 调用（约 35 ms，仍在预算内）。
+**应对**：Phase 1 **必须**补齐 packfile + delta 解析，或在该场景回退到一次 `git` 调用（约 35 ms，仍在预算内）。
 **任何情况下都不得静默丢弃事件。**
 
 ### A4 🟡 Engine 纯度的可持续性
 
-**风险**：一旦有人在 Engine 里调 `SystemTime::now()%% 或随机数，Golden Tests 立刻失去确定性且很难察觉。
+**风险**：一旦有人在 Engine 里调 `SystemTime::now()` 或随机数，Golden Tests 立刻失去确定性且很难察觉。
 
-**应对**：`crates/core%% 已通过注入的 `ClockProvider%% / `TimezoneProvider%% / `IdGenerator%% 隔离外部依赖；
-workspace lints 禁止 `unwrap/expect/panic%%；模块边界写进 AGENTS.md §6。
-**尚未有自动检查**（如禁止 `std::time%% 的 clippy 规则），Phase 1 补。
+**应对**：`crates/core` 已通过注入的 `ClockProvider` / `TimezoneProvider` / `IdGenerator` 隔离外部依赖；
+workspace lints 禁止 `unwrap/expect/panic`；模块边界写进 AGENTS.md §6。
+**尚未有自动检查**（如禁止 `std::time` 的 clippy 规则），Phase 1 补。
 
 ### A5 🟡 通知「最多展示一次」无法在分布式意义上保证
 
 **风险**：外部副作用（弹窗、声音）本质不可事务化，§16.1 也承认「不能保证严格 exactly-once」。
 
 **应对**：幂等 ID + 状态机 + Offer/Claim/ACK；规范给出的原则是**宁可少通知，不重复通知**，
-并用图鉴的新解锁标记兜底（`delivery_unknown%% 也可发现）。
+并用图鉴的新解锁标记兜底（`delivery_unknown` 也可发现）。
 Phase 0 未实现该状态机（Phase 1 纯逻辑部分）。
 
 ### A6 🟡 每日等级与永久成就的口径必须分离
 
 **风险**：内置成就用固定官方口径，用户过滤器只影响普通统计。混用会导致「用户改了阈值，内置成就判定跟着变」——规范明确禁止。
 
-**应对**：数据模型分开存（`unlocked_achievements%% / `daily_milestones%%）；
-成就规则带 `rule_version%% 与 `statistics_profile%%；UI 必须标注「固定官方口径」与「用户过滤口径」。
+**应对**：数据模型分开存（`unlocked_achievements` / `daily_milestones`）；
+成就规则带 `rule_version` 与 `statistics_profile`；UI 必须标注「固定官方口径」与「用户过滤口径」。
 
 ### A7 🟡 时区「重放不变」的实现难度
 
 **风险**：系统时区库会变，历史重算结果可能漂移。
 
-**应对**：TZDB 随应用打包（ADR-0005）；`local_date%% 入库即固定；改时区必须询问用户是否重算。
+**应对**：TZDB 随应用打包（ADR-0005）；`local_date` 入库即固定；改时区必须询问用户是否重算。
 **未做**：DST 边界与属性测试（Phase 1）。
 
 ---
@@ -80,7 +80,7 @@ Phase 0 未实现该状态机（Phase 1 纯逻辑部分）。
 ### B1 🟢 Hook 性能
 
 **曾担心**：外派 git 会拖慢提交。
-**实测**：朴素外派 p95 **428 ms**（违反硬超时）；直读 `.git%% p95 **13.4 ms**。
+**实测**：朴素外派 p95 **428 ms**（违反硬超时）；直读 `.git` p95 **13.4 ms**。
 **结论**：风险已被架构选择消除，且这个选择是**被数据推着做出来的**，不是拍脑袋。
 
 ### B2 🟢 gix 并不更快
@@ -98,8 +98,8 @@ Phase 0 未实现该状态机（Phase 1 纯逻辑部分）。
 
 ### B4 🟡 浏览器侧 WASM 未验证
 
-**风险**：MV3 的 CSP 可能拒绝 `WebAssembly.instantiate%%；未验证前不能声称可行。
-**现状**：manifest 已含 `wasm-unsafe-eval%% 且 wasm 已打包，但**从未在浏览器里跑过**。
+**风险**：MV3 的 CSP 可能拒绝 `WebAssembly.instantiate`；未验证前不能声称可行。
+**现状**：manifest 已含 `wasm-unsafe-eval` 且 wasm 已打包，但**从未在浏览器里跑过**。
 **应对**：ADR-0001 保持 Partially Accepted；提供一条可在沙箱外一键执行的验证脚本。
 
 ---
@@ -111,9 +111,9 @@ Phase 0 未实现该状态机（Phase 1 纯逻辑部分）。
 | schannel TLS 损坏 | 🟡 已绕过 | git 用 openssl 后端；cargo 用本地 sparse 代理。**不得进入产品代码** |
 | 无 MSVC | 🔴 未解决 | Tauri 无法构建；记为 Blocked，需用户提供环境 |
 | 沙箱禁止浏览器启动 | 🔴 未解决 | MV3 内 WASM 无法验证 |
-| 沙箱禁止 `sh.exe%% | 🔴 未解决 | shell 钩子链式执行、`git submodule add%% 无法验证 |
+| 沙箱禁止 `sh.exe` | 🔴 未解决 | shell 钩子链式执行、`git submodule add` 无法验证 |
 | 沙箱禁止管道 stdio | 🟡 已绕过 | 全部改用文件重定向。**曾导致依赖解析静默失败一次** |
-| PowerShell 5.1 + GBK | 🟡 已绕过 | `.ps1%% 只写 ASCII |
+| PowerShell 5.1 + GBK | 🟡 已绕过 | `.ps1` 只写 ASCII |
 | 无 GitHub 仓库 | 🔴 未解决 | CI 从未运行；最低 Git 版本无法定论 |
 
 ---
@@ -126,7 +126,7 @@ Phase 0 未实现该状态机（Phase 1 纯逻辑部分）。
 | D2 | 商标与名称检索 | §1.4「快速同名搜索不能代替正式商标检索」 | 发布前由用户完成 |
 | D3 | 最低 Git 版本 | 只有一个版本的数据；编造会违反 §44.2 | 需 CI 多版本矩阵 |
 | D4 | 是否接受 GNU 目标的 Tauri 限制 | 影响整个桌面端可行性 | 见 Phase 0 报告「需要你决定的三件事」 |
-| D5 | 许可证 | 当前 `UNLICENSED%% | 公开发布前确认 |
+| D5 | 许可证 | 当前 `UNLICENSED` | 公开发布前确认 |
 
 ---
 

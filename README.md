@@ -40,7 +40,7 @@ PASS  fmt / clippy / test / build / build-wasm / extension-build
 ALL CHECKS PASSED
 ```
 
-> ⚠️ Rust 工具链装在**仓库外**的 `../_toolchain%%%%，未写入系统环境变量。
+> ⚠️ Rust 工具链装在**仓库外**的 `../_toolchain```，未写入系统环境变量。
 > 原因（无管理员权限、无 MSVC、schannel 损坏）见 [ADR-0012](docs/decisions/0012-isolated-dev-toolchain.md)。
 
 ---
@@ -95,4 +95,4 @@ Tauri 2 · Rust · React · TypeScript · WXT · Manifest V3 · SQLite + SQLx ·
 
 ## 许可证
 
-尚未确定（`UNLICENSED%%）。公开发布前需用户确认。
+尚未确定（`UNLICENSED`）。公开发布前需用户确认。

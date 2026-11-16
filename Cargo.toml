@@ -13,6 +13,7 @@ members = [
     "crates/platform",
     "crates/storage",
     "crates/git-hooks",
+    "crates/golden-tests",
     "apps/native-host",
 ]
 
@@ -23,8 +24,10 @@ rust-version = "1.100"
 license = "UNLICENSED"
 authors = ["Devchievements contributors"]
 
+
 [workspace.dependencies]
-serde = { version = "1", features = ["derive"] }
+# Shared pins. Only list crates that a workspace member actually consumes via
+# `workspace = true`; otherwise cargo warns about an unused workspace dependency.
 serde_json = "1"
 
 [workspace.lints.rust]

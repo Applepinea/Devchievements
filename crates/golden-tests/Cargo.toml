@@ -1,0 +1,20 @@
+[package]
+name = "devchievements-golden-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Golden Tests: replay recorded Git hook traces and assert deterministic outcomes (spec 9.7, 31.2)."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+devchievements-core = { path = "../core" }
+devchievements-daily-rank = { path = "../daily-rank" }
+devchievements-achievements = { path = "../achievements" }
+
+[lints]
+workspace = true
