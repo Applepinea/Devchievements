@@ -412,6 +412,9 @@ version = "0.0.0"
 name = "devchievements-storage"
 version = "0.0.0"
 dependencies = [
+ "devchievements-core",
+ "devchievements-daily-rank",
+ "devchievements-events",
  "sqlx",
  "tokio",
 ]

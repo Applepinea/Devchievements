@@ -9,7 +9,10 @@ description = "SQLite/SQLx adapter, migrations, projections. Never contains achi
 
 [dependencies]
 # SQLx only -- AGENTS.md forbids mixing SQLx with rusqlite.
-sqlx = { version = "0.8", default-features = false, features = ["runtime-async-std", "sqlite", "macros", "migrate"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-async-std", "sqlite", "migrate"] }
+devchievements-core = { path = "../core" }
+devchievements-events = { path = "../events" }
+devchievements-daily-rank = { path = "../daily-rank" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

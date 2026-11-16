@@ -17,7 +17,7 @@
 | `crates/achievements` | 永久成就、版本化规则、回填策略、能力声明 | 13 |
 | `crates/notifications` | Outbox 状态机、通知合并、新鲜度 | 18 |
 | `crates/golden-tests` | 回放 Phase 0 的 15 份 Git trace | 16 |
-| `crates/storage` | SQLite + SQLx 适配器（已可用） | 5 |
+| `crates/storage` | SQLite + SQLx：schema、事务化摄取、投影、历史导入、IndexedDB 接口 | 14 |
 | `crates/git-hooks` | 直读 .git 的 Helper | 22 |
 | 其他 crate | 版本常量占位 | 9 |
 
@@ -87,6 +87,7 @@ BrowserGithub。这样 `required_capabilities` 不可能与规则实际需求脱
 | 用户过滤器 | 独立模块，尚未实现 |
 | packfile 解析 | **风险最高**的一项（见 risk-analysis A3），建议优先 |
 | 属性测试（时区、乱序 Hook） | 已有个例测试，缺系统性属性测试 |
+| 用户过滤器 | 独立模块，未实现 |
 
 ---
 
@@ -103,3 +104,54 @@ BrowserGithub。这样 `required_capabilities` 不可能与规则实际需求脱
 - 桌面端到端闭环（无 Tauri，无 MSVC）；
 - 浏览器内 WASM（沙箱禁止启动浏览器）；
 - 真实 Git 仓库上的长期运行（只有单次 commit 路径）。
+
+---
+
+## 6. 本轮补完的部分（投影持久化 → 历史导入）
+
+### 6.1 一个事务里做完三件事
+
+规范 §4.3 / §16.1 要求：原始事件、投影更新、Outbox 意图**同一事务提交**。
+`ingest::ingest_commit` 把这三步包在一个 SQLite 事务里，任何一步失败整体回滚。
+
+有一条测试盯着这个：`ingesting_a_commit_writes_event_projection_and_outbox_together`
+断言事件行、投影行、成就解锁行、Outbox 行**同时**存在。
+
+### 6.2 幂等是数据库主键保证的，不是靠调用方小心
+
+`event_id` 是主键。重复投递返回 `IngestOutcome::Duplicate` 且**什么都不改**。
+测试 `re_ingesting_the_same_event_is_a_no_op` 同时断言「不新增事件」和「投影不重复计数」。
+
+### 6.3 投影是可重建的
+
+`rebuild_from_events` 从事件日志重算所有投影。有测试断言重建后数字与实时累积**完全一致**。
+这条性质是「将来改口径」的前提——否则历史统计一旦算错就永远错了。
+
+### 6.4 历史导入用提交时间，不用导入时间
+
+§11.2 的核心要求。测试里特意选了一个跨日时刻：
+`1700000000000` = `2023-11-14T22:13:20Z`，在 `Asia/Taipei` 是 **2023-11-15**。
+
+**写这个测试时我自己先写错了**（断言成 11-14），跑失败才纠正。
+这个错误恰好演示了 §12 存在的理由：用 UTC 日期归档会错一天。
+
+### 6.5 初步性能基准（§31.3 要求）
+
+`cargo test -p devchievements-storage --release --test perf -- --ignored --nocapture`，
+n = 2000 次真实摄取（含校验、去重、写事件、更新投影、跑 Engine、写 Outbox、提交）：
+
+```text
+min   1.376 ms
+p50   3.045 ms
+p95   3.117 ms
+max  13.982 ms
+throughput 323 events/sec
+```
+
+**这不能用来声称「Commit → 通知 p95 < 500 ms 达标」**：它只覆盖存储 + Engine 这一段，
+没有 Companion、没有 IPC、没有弹窗渲染。基准里也写明了这一点。
+
+### 6.6 IndexedDB 只做接口，不做实现
+
+§31.1 明确「接口设计（不展开浏览器协作）」。所以 `indexeddb.rs` 只有 trait 和
+对象存储名常量——**刻意把对象存储名固定下来**，让桌面 schema 与浏览器 schema 不能悄悄分裂。

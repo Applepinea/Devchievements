@@ -22,7 +22,7 @@ node scripts/verify.mjs
 ```text
 PASS  fmt                       174 ms
 PASS  clippy                    822 ms
-PASS  test                  4467 ms   147 tests passed, 0 failed
+PASS  test                 ~4.5 s   157 tests passed, 0 failed
 PASS  build                    3982 ms
 PASS  build-wasm                396 ms
 PASS  extension-build         10371 ms
@@ -55,15 +55,17 @@ ALL CHECKS PASSED
 | 1.7 | 每日等级与每日里程碑 | `Tested` | 14 个测试；用户阈值不影响官方口径 |
 | 1.8 | 永久成就（含 required_capabilities） | `Tested` | 13 个测试；能力由条件推导 |
 | 1.9 | 用户过滤器 | `Not Started` | 独立模块，尚未实现 |
-| 1.10 | 统计投影 | `Partially Implemented` | 类型与读集已定；持久化读写待接 |
+| 1.10 | 统计投影 | `Tested` | 读写 + 可重建性均已测（`rebuild_from_events` 复现同值） |
 | 1.11 | Engine（含读集） | `Tested` | 7 个测试；读集有断言守护 |
-| 1.12 | SQLite Storage Adapter 与 SQLx 迁移 | `Partially Implemented` | 建表/往返/回滚/级联/重开已测；迁移版本化待做 |
-| 1.13 | 事件持久化 | `Partially Implemented` | 表结构可用；Engine 输出尚未接入事务 |
+| 1.12 | SQLite Storage Adapter 与 SQLx 迁移 | `Tested` | 版本化 schema + 12 个真实库测试 |
+| 1.13 | 事件持久化 | `Tested` | 事件+投影+解锁+Outbox **同一事务**，有测试守护 |
 | 1.14 | Outbox 与通知所有权状态机（纯逻辑） | `Tested` | 18 个测试；合法转换表 + 防重复展示 |
-| 1.15 | 历史导入管线（引擎侧） | `Not Started` | 依赖投影落地 |
+| 1.15 | 历史导入管线（引擎侧） | `Tested` | 用提交时间归档、幂等、可续传；跨日用例已测 |
 | 1.16 | Golden Tests | `Tested` | 16 个测试回放 15 份真机 trace |
 | 1.17 | 时区属性测试 | `Not Started` | 已有逐例测试，缺系统性属性测试 |
 | 1.18 | packfile 解析 | `Not Started` | **风险最高**，见 risk-analysis A3 |
+| 1.19 | IndexedDB Adapter 接口设计 | `Implemented` | 只有 trait 与对象存储名常量（§31.1 要求「不展开」） |
+| 1.20 | 初步性能基准 | `Tested` | 摄取 p95 **3.12 ms**，n=2000，release |
 
 > 详见 [phase-1-progress.md](docs/development/phase-1-progress.md)。
 
