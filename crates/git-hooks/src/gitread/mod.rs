@@ -294,11 +294,22 @@ pub fn parse_commit_object(bytes: &[u8]) -> Result<CommitFacts, GitReadError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| GitReadError::Malformed("commit object is not valid UTF-8".into()))?;
 
+    // Two shapes arrive here: a loose object, which carries "commit <size>\0" in
+    // front of the payload, and a packed object, which is the bare payload. Requiring
+    // the header rejected every packed commit, which is why the pack path looked
+    // healthy until a CI runner happened to pack the object first.
     let body = match text.find('\0') {
-        Some(i) => &text[i + 1..],
-        None => return Err(GitReadError::Malformed("missing object header".into())),
+        Some(i) => {
+            if !text.starts_with("commit ") {
+                return Err(GitReadError::Malformed("object is not a commit".into()));
+            }
+            &text[i + 1..]
+        }
+        None => text,
     };
-    if !text.starts_with("commit ") {
+
+    // A commit always begins with its tree line; anything else is not one.
+    if !body.starts_with("tree ") {
         return Err(GitReadError::Malformed("object is not a commit".into()));
     }
 

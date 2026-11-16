@@ -249,3 +249,11 @@ ALL CHECKS PASSED
 | --- | --- |
 | 2026-11-16（第一轮） | Phase 0 主体：环境勘察、隔离工具链、Monorepo、AGENTS/STATUS/spec 拆分/ADR、15 场景 Git 实验 + fixtures、WASM 验证、扩展构建 |
 | 2026-11-16（第二轮） | 补齐 §48.3 风险分析与 §48.5 实施计划；**解除 SQLite/SQLx 与 gix 两项阻塞**；ADR-0002 改为三方案实测；新增 `scripts/verify.mjs` 一键验证（42 测试全绿） |
+
+---
+
+## 许可证
+
+本项目以 **GPL-3.0-or-later** 发布，全文见 [LICENSE](LICENSE)。
+
+`Cargo.toml` 与 `package.json` 的 `license` 字段与之一致。

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Achievements for Developers",
-  "license": "UNLICENSED",
+  "license": "GPL-3.0-or-later",
   "engines": {
     "node": ">=22"
   },
