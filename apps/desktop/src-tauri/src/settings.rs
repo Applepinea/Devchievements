@@ -64,6 +64,9 @@ pub struct Settings {
     /// Privacy mode (spec 26.2).
     #[serde(default)]
     pub privacy: PrivacyMode,
+    /// IANA timezone used for local_date (spec 12).
+    #[serde(default)]
+    pub timezone: Option<String>,
 }
 
 fn default_schema_version() -> u32 {
@@ -76,6 +79,7 @@ impl Default for Settings {
             schema_version: SETTINGS_SCHEMA_VERSION,
             emails: Vec::new(),
             privacy: PrivacyMode::Normal,
+            timezone: None,
         }
     }
 }

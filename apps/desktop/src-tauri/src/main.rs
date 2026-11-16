@@ -196,6 +196,35 @@ fn settings_path() -> std::path::PathBuf {
     default_data_dir().join("settings.json")
 }
 
+/// A clock frozen at process start, for one-shot CLI commands.
+#[derive(Debug)]
+struct FixedClock;
+impl devchievements_core::ClockProvider for FixedClock {
+    fn now_unix_millis(&self) -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    }
+}
+
+#[derive(Debug, Default)]
+struct PlainIds(u64);
+impl devchievements_core::IdGenerator for PlainIds {
+    fn next_id(&mut self) -> String {
+        self.0 += 1;
+        format!("cli-{}", self.0)
+    }
+}
+
+#[derive(Debug)]
+struct StaticConfig;
+impl devchievements_core::ConfigurationProvider for StaticConfig {
+    fn config_version(&self) -> u64 {
+        1
+    }
+}
+
 fn default_data_dir() -> std::path::PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(std::path::PathBuf::from)
@@ -405,6 +434,91 @@ fn main() {
     }
 
     // Print the capability set and the channel the degradation chain selects.
+    // Import one repository's history (spec 11). Print a JSON report so the caller
+    // (installer, wizard, tests) can show progress and failures.
+    if let Some(i) = std::env::args().position(|a| a == "--import") {
+        let Some(repo_arg) = std::env::args().nth(i + 1) else {
+            println!("{{\"error\":\"--import needs a repository path\"}}");
+            std::process::exit(2);
+        };
+
+        let repo_dir = std::path::PathBuf::from(&repo_arg);
+        if !repo_dir.is_dir() {
+            println!("{{\"error\":\"not a directory: {repo_arg}\"}}");
+            std::process::exit(2);
+        }
+
+        let data_dir = default_data_dir();
+        let stored = settings::Settings::load(&settings_path());
+        let mut identity = Identity::default();
+        for email in &stored.emails {
+            identity.add_email(email.clone(), EmailOrigin::UserConfigured);
+        }
+
+        // Spec 11.2: an import requires a configured identity. Refusing here is
+        // better than importing nothing and reporting success.
+        if !identity.is_configured() {
+            println!("{{\"error\":\"no email configured: import requires an identity (spec 11.2)\"}}");
+            std::process::exit(3);
+        }
+
+        // The companion identifies hook-captured repositories the same way, so the
+        // two paths land on one repository row.
+        let repository_id = format!("local:{}", repo_dir.to_string_lossy().replace('\\', "/"));
+
+        let result = async_std::task::block_on(async {
+            let pool = devchievements_storage::open(&data_dir.join("companion.db"))
+                .await
+                .map_err(|e| e.to_string())?;
+            devchievements_storage::ingest::migrate(&pool)
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let clock = FixedClock;
+            let tz = devchievements_core::BundledTimezoneProvider::new();
+            let mut ids = PlainIds::default();
+            let cfg = StaticConfig;
+            let ctx = devchievements_core::InjectedContext {
+                clock: &clock,
+                timezone: &tz,
+                ids: &mut ids,
+                config: &cfg,
+            };
+
+            let options = devchievements_storage::history_scan::ImportOptions {
+                batch_size: 200,
+                timezone: stored
+                    .timezone
+                    .clone()
+                    .unwrap_or_else(|| "UTC".to_string()),
+                day_start_minutes: 0,
+            };
+            let cancel = AtomicBool::new(false);
+
+            devchievements_storage::history_scan::import_repository(
+                &pool,
+                &repository_id,
+                &repo_dir,
+                &identity,
+                &options,
+                &cancel,
+                &ctx,
+            )
+            .await
+        });
+
+        match result {
+            Ok(report) => {
+                println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("{{\"error\":\"{e}\"}}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     if std::env::args().any(|a| a == "--capabilities") {
         let caps = current_capabilities();
         let report = serde_json::json!({

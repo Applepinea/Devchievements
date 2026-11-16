@@ -889,6 +889,7 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "devchievements-companion-core",
+ "devchievements-core",
  "devchievements-events",
  "devchievements-git-hooks",
  "devchievements-notifications",

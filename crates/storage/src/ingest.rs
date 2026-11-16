@@ -127,6 +127,18 @@ pub async fn load_snapshot(
 ///
 /// The whole operation runs inside one SQLite transaction; any failure rolls back
 /// to exactly the state before the call.
+/// Whether the event may produce user-visible notifications.
+///
+/// Spec 11.2: a history import is silent. The achievements still unlock and are still
+/// recorded with their source and rule version; only the outbox rows are suppressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationPolicy {
+    /// Queue notifications as usual.
+    Inform,
+    /// Record everything but queue nothing (history import).
+    Silent,
+}
+
 pub async fn ingest_commit(
     pool: &SqlitePool,
     event: &Event,
@@ -134,6 +146,49 @@ pub async fn ingest_commit(
     now_ms: i64,
     identity: &Identity,
     ctx: &InjectedContext<'_>,
+) -> StorageResult<IngestOutcome> {
+    ingest_commit_inner(
+        pool,
+        event,
+        facts,
+        now_ms,
+        identity,
+        ctx,
+        NotificationPolicy::Inform,
+    )
+    .await
+}
+
+/// Ingest a history-imported event silently (spec 11.2).
+pub async fn ingest_import(
+    pool: &SqlitePool,
+    event: &Event,
+    facts: &CommitFacts,
+    now_ms: i64,
+    identity: &Identity,
+    ctx: &InjectedContext<'_>,
+) -> StorageResult<IngestOutcome> {
+    ingest_commit_inner(
+        pool,
+        event,
+        facts,
+        now_ms,
+        identity,
+        ctx,
+        NotificationPolicy::Silent,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn ingest_commit_inner(
+    pool: &SqlitePool,
+    event: &Event,
+    facts: &CommitFacts,
+    now_ms: i64,
+    identity: &Identity,
+    ctx: &InjectedContext<'_>,
+    policy: NotificationPolicy,
 ) -> StorageResult<IngestOutcome> {
     // Spec 7 precondition, checked FIRST and before any write: with no configured
     // email there is no way to decide whether this commit is the user's, and
@@ -158,6 +213,27 @@ pub async fn ingest_commit(
     if existing.is_some() {
         tx.rollback().await?;
         return Ok(IngestOutcome::Duplicate);
+    }
+
+    // Spec 11.2 requires a unified dedup rule. Event ids differ between live capture
+    // and history import ("post-commit:<sha>:<ms>" vs "import:<repo>:<sha>"), so the
+    // identity of a commit is (repository, sha, event type). Without this, importing
+    // history for a repository that was already watched would double count every
+    // commit the user made since installing.
+    if let Some(sha) = event.commit_sha.as_deref() {
+        let same_commit: Option<(String,)> = sqlx::query_as(
+            "SELECT event_id FROM events
+             WHERE canonical_repository_id = ? AND commit_sha = ? AND event_type = ?",
+        )
+        .bind(event.canonical_repository_id.0.as_str())
+        .bind(sha)
+        .bind(event.event_type.as_str())
+        .fetch_optional(&mut *tx)
+        .await?;
+        if same_commit.is_some() {
+            tx.rollback().await?;
+            return Ok(IngestOutcome::Duplicate);
+        }
     }
 
     // ---- persist the raw event ----
@@ -240,6 +316,12 @@ pub async fn ingest_commit(
                 )
             }
         };
+
+        // Spec 11.2: a history import must not queue per-event notifications. The
+        // unlock itself is still recorded above, with its source and rule version.
+        if policy == NotificationPolicy::Silent {
+            continue;
+        }
 
         sqlx::query(
             "INSERT OR IGNORE INTO outbox

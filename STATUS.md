@@ -54,7 +54,7 @@ ALL CHECKS PASSED
 | 2b.1 | 平台能力探测与降级链（§29） | `Tested` | 13 个测试；运行时实测降级到 in-app-only |
 | 2b.2 | 兼容性矩阵更新（§29.6） | `Partially Implemented` | 本轮实测行已更新；其余平台未验证 |
 | 2b.3 | Dashboard / Gallery / Activity / Repository Manager / About | `Blocked` | 需要 WebView2 |
-| 2b.4 | 历史导入界面与完整流程 | `Not Started` | 管线可做，界面阻塞 |
+| 2b.4 | 历史导入界面与完整流程 | `Partially Implemented` | **管线完成并实测**（静默、幂等、原始日期、跨路径去重）；界面需 WebView2 |
 | 2b.5 | 基础 Settings 界面 | `Blocked` | 需要 WebView2（设置文件已就绪） |
 | 2b.6 | 安装向导 / 卸载机制 | `Partially Implemented` | 安装器与卸载脚本已完成并可运行 |
 | 2b.7 | 数据备份与恢复 | `Not Started` | 存储层可做，不依赖 UI |

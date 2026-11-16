@@ -13,6 +13,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 devchievements-companion-core = { path = "../../../crates/companion-core" }
 devchievements-storage = { path = "../../../crates/storage" }
+devchievements-core = { path = "../../../crates/core" }
 devchievements-events = { path = "../../../crates/events" }
 devchievements-notifications = { path = "../../../crates/notifications" }
 devchievements-sound = { path = "../../../crates/sound" }
