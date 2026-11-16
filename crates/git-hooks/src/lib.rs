@@ -8,6 +8,8 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod gitread;
+pub mod hooks;
+pub mod spool;
 
 /// Crate version, recorded alongside persisted data so migrations and
 /// diagnostics can attribute results to the code that produced them.

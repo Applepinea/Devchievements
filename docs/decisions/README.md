@@ -26,8 +26,9 @@
 | --- | --- | --- |
 | [0012](0012-isolated-dev-toolchain.md) | 本仓库隔离开发工具链（本仓库专属） | `Accepted` |
 | [0013](0013-packfile-support.md) | Packfile 与 delta 解析（解除风险 A3） | `Accepted` |
+| [0007](0007-ipc-and-spool.md) | IPC 与 Spool 传输设计 | `Accepted` |
 | 0006 | 数据模型与投影设计 | 目标 Phase 1 |
-| 0007 | IPC 与 Spool 设计 | 目标 Phase 2a |
+
 | 0008 | Outbox 与通知所有权状态机 | 目标 Phase 1 |
 | 0009 | Native Messaging 协议与版本协商 | 目标 Phase 3b |
 | 0010 | 事件去重与 Rewrite 关联 | 目标 Phase 1 |

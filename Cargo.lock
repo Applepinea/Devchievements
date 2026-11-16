@@ -456,6 +456,7 @@ name = "devchievements-git-hooks"
 version = "0.0.0"
 dependencies = [
  "devchievements-events",
+ "serde_json",
 ]
 
 [[package]]
