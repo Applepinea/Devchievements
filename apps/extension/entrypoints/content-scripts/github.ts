@@ -9,7 +9,7 @@
 
 export default defineContentScript({
   matches: ["https://github.com/*"],
-  run_at: "document_idle",
+  runAt: "document_idle",
   main() {
     console.info("[devchievements] content script active on", location.pathname);
   },

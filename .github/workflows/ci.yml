@@ -82,6 +82,12 @@ jobs:
         # --frozen-lockfile is tracked as a follow-up, not silently dropped.
         run: pnpm install --no-frozen-lockfile
 
+      - name: Prepare WXT types
+        # tsconfig extends .wxt/tsconfig.json, which is generated. The package has a
+        # postinstall hook for this, but relying on it left CI without the file and
+        # every JSX expression failed with "--jsx flag is provided".
+        run: pnpm --filter @devchievements/extension exec wxt prepare
+
       - name: Typecheck
         run: pnpm -r --if-present typecheck
 

@@ -235,7 +235,9 @@ fn the_repository_still_works_when_one_pack_is_corrupt() {
     // git marks pack files read-only, so the truncation has to clear that first.
     // Without this the test only passed on a filesystem that ignores the flag.
     let original = std::fs::read(&packs[0]).expect("read pack");
-    let mut permissions = std::fs::metadata(&packs[0]).expect("pack metadata").permissions();
+    let mut permissions = std::fs::metadata(&packs[0])
+        .expect("pack metadata")
+        .permissions();
     #[allow(clippy::permissions_set_readonly_false)]
     permissions.set_readonly(false);
     std::fs::set_permissions(&packs[0], permissions).expect("make pack writable");
