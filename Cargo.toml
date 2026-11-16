@@ -6,6 +6,7 @@ members = [
     "crates/achievements",
     "crates/daily-rank",
     "crates/notifications",
+    "crates/privacy",
     "crates/sound",
     "crates/assets",
     "crates/filters",

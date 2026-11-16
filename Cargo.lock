@@ -538,6 +538,13 @@ name = "devchievements-platform"
 version = "0.0.0"
 
 [[package]]
+name = "devchievements-privacy"
+version = "0.0.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "devchievements-property-tests"
 version = "0.0.0"
 dependencies = [

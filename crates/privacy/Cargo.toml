@@ -1,0 +1,14 @@
+[package]
+name = "devchievements-privacy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Privacy mode redaction, stable repository aliases, diagnostics export policy and storage quotas (spec 26)."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true
