@@ -9,6 +9,7 @@
 
 pub mod gitread;
 pub mod hooks;
+pub mod ipc;
 pub mod spool;
 
 /// Crate version, recorded alongside persisted data so migrations and

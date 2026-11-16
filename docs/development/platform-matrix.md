@@ -81,3 +81,6 @@ manifest 里 `wasm-unsafe-eval` 已确认存在、wasm 已确认打包，但「�
 | 2026-11-16 | Node 24 | WASM 实例化 + 与 native 一致性 | `scripts/wasm-spike/run-wasm-spike.mjs` | ✅ 零导入、逐字节相同 |
 | 2026-11-16 | Windows 11 / SQLite (bundled) | 持久化往返 | `cargo test -p devchievements-storage` | ✅ 5 tests |
 | 2026-11-16 | Chrome 157 | MV3 加载扩展 | 4 种启动参数组合 | ❌ **无法验证**：mojo 通道创建被拒（0x5） |
+| 2026-11-16 | Windows 11 / Git 2.54.0 | **原生 .exe hook 被执行** | 真实 `git commit`，hook 为 `post-commit.exe` | ✅ Git 直接执行，helper 收到仓库事实并写入 Spool |
+| 2026-11-16 | Windows 11 / Git 2.54.0 | **POSIX shell hook** | 真实 `git commit`，hook 为 `#!/bin/sh` | ❌ **无法验证**：`sh.exe` 启动即崩（signal pipe 被拒，0xC0000142） |
+| 2026-11-16 | Windows 11 | **shell 钩子链式执行** | 需要 sh 才能跑链式脚本 | ❌ **未验证**：依赖上一条 |

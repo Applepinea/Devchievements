@@ -1,0 +1,10 @@
+21:30:37.479458 exec-cmd.c:266          trace: resolved executable dir: C:/Users/csa/AppData/Local/hermes/git/mingw64/bin
+21:30:37.485462 git.c:502               trace: built-in: git commit -q -m first
+21:30:37.521025 run-command.c:673       trace: run_command: git maintenance run --auto --quiet --detach
+21:30:37.521025 run-command.c:934       trace: start_command: git maintenance run --auto --quiet --detach
+21:30:37.535271 exec-cmd.c:266          trace: resolved executable dir: C:/Users/csa/AppData/Local/hermes/git/mingw64/libexec/git-core
+21:30:37.538293 git.c:502               trace: built-in: git maintenance run --auto --quiet --detach
+21:30:37.555884 run-command.c:1565      run_processes_parallel: preparing to run up to 1 tasks
+21:30:37.557903 run-command.c:673       trace: run_command: GIT_EDITOR=: GIT_INDEX_FILE=.git/index .git/hooks/post-commit.exe
+21:30:37.557903 run-command.c:934       trace: start_command: .git/hooks/post-commit.exe
+21:30:37.761927 run-command.c:1593      run_processes_parallel: done

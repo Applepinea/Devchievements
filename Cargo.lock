@@ -471,6 +471,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "devchievements-helper"
+version = "0.0.0"
+dependencies = [
+ "devchievements-git-hooks",
+ "serde_json",
+]
+
+[[package]]
 name = "devchievements-native-host"
 version = "0.0.0"
 dependencies = [

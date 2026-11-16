@@ -36,13 +36,36 @@ ALL CHECKS PASSED
 ## 当前阶段
 
 **Phase 0：项目基础与技术验证** —— `Partially Implemented`（已完成，见下）
-**Phase 1：Core Engine 与数据层** —— `In Progress`
+**Phase 1：Core Engine 与数据层** —— `Tested`（完成）
+**Phase 2a：本地 Git 到通知的真实闭环** —— `In Progress`
 
 **下一个门禁：检查点 A**（需 Phase 2a 完成）。当前**没有任何检查点被跨越。**
 
 ---
 
-## Phase 1 任务表
+## Phase 2a 任务表
+
+| # | 任务 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| 2a.1 | Rust Helper（post-commit / post-rewrite / post-merge） | `Tested` | 真实 `git commit` 触发，端到端通过 |
+| 2a.2 | Hook 安装 / 备份 / 链式 / 卸载 | `Tested` | 12 个测试；**shell 链式未真实验证**（见 §32 文档） |
+| 2a.3 | IPC 帧协议 | `Tested` | 9 个测试，含超限长度与截断 |
+| 2a.4 | Spool 回退 | `Tested` | 11 个测试，含并发与损坏恢复 |
+| 2a.5 | 实时 IPC 服务端 | `Not Started` | 需要 Companion 进程 |
+| 2a.6 | Tauri Companion 与托盘 | `Blocked` | **无 MSVC** |
+| 2a.7 | SQLite 持久化接入 Helper | `Not Started` | 需 Companion |
+| 2a.8 | Outbox Consumer（Desktop 子集） | `Not Started` | 需 Companion |
+| 2a.9 | 桌面弹窗与提示音 | `Blocked` | 需 Companion 窗口 |
+| 2a.10 | Companion 启动消费 Spool | `Not Started` | 需 Companion |
+| 2a.11 | 最小诊断视图 | `Blocked` | 需 UI |
+| 2a.12 | Crash Recovery 矩阵（§32.5） | `Not Started` | 需可强杀的 Companion |
+
+> 详见 [phase-2a-progress.md](docs/development/phase-2a-progress.md)。
+> 端到端：`node scripts/e2e/hook-to-spool.mjs`
+
+---
+
+## Phase 1 任务表（已完成）
 
 | # | 任务 | 状态 | 证据 |
 | --- | --- | --- | --- |
