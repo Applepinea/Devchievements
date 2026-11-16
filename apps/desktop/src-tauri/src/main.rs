@@ -17,6 +17,7 @@
 pub(crate) mod audio;
 mod commands;
 mod settings;
+pub(crate) mod popup;
 pub(crate) mod toast;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
@@ -50,7 +51,9 @@ static SHOWN: AtomicU64 = AtomicU64::new(0);
 
 /// Prints presentations and records them. A real build swaps this for the toast and
 /// sound layer; keeping it a sink means that swap does not touch the loop.
-struct DesktopSink;
+struct DesktopSink {
+    app: tauri::AppHandle,
+}
 
 impl DeliverySink for DesktopSink {
     fn present(&mut self, presentation: &Presentation) -> DisplayOutcome {
@@ -94,8 +97,24 @@ impl DeliverySink for DesktopSink {
                     copy.title,
                     copy.body
                 );
-                report_toast(&popup.primary_id, &copy.title, &copy.body);
-                SHOWN.fetch_add(1, Ordering::Relaxed);
+                // The popup IS the notification channel: the system toast is not used
+                // at all, because it could not be demonstrated on this platform
+                // (ADR-0015) and a channel nobody verified is not a channel.
+                let count = SHOWN.fetch_add(1, Ordering::Relaxed) + 1;
+                let payload = popup::PopupPayload {
+                    title: copy.title.clone(),
+                    body: copy.body.clone(),
+                    rarity: format!("{:?}", popup.rarity),
+                    others: popup.others.clone(),
+                };
+                let app = self.app.clone();
+                // Window creation has to happen on the main thread on Windows.
+                let _ = app.clone().run_on_main_thread(move || {
+                    match popup::show(&app, &payload, count) {
+                        Ok(()) => println!("POPUP shown seq={count}"),
+                        Err(e) => println!("POPUP FAILED seq={count} error={e}"),
+                    }
+                });
             }
             Presentation::SoundOnly => {
                 // Spec 16.4: a plain commit is acknowledged by sound only. No toast,
@@ -176,9 +195,9 @@ pub(crate) fn current_capabilities() -> devchievements_platform::Capabilities {
     };
 
     Capabilities {
-        // The embedded webview cannot start on this host, so the product's own
-        // popup is explicitly routed to the notification fallback.
-        desktop_popup: CapabilityState::NotificationFallback,
+        // Demonstrated: the drain loop opens a real popup window on every unlock
+        // (scripts/e2e/popup.mjs).
+        desktop_popup: CapabilityState::Native,
         system_notification: notification,
         // Demonstrated: the tray icon is built at startup and the process stays
         // alive, so this capability is observed rather than assumed.
@@ -270,7 +289,7 @@ pub(crate) fn default_data_dir() -> std::path::PathBuf {
 }
 
 /// Own thread, own runtime: ingestion must never block the UI thread.
-fn spawn_drain_loop() {
+fn spawn_drain_loop(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         async_std::task::block_on(async {
             let data_dir = default_data_dir();
@@ -306,7 +325,7 @@ fn spawn_drain_loop() {
                 CompanionConfig::new(data_dir.join("spool"), "Asia/Taipei"),
             );
             let processor = OutboxProcessor::new(pool);
-            let mut sink = DesktopSink;
+            let mut sink = DesktopSink { app: app.clone() };
 
             // Resolve anything a previous crash left mid-flight (spec 17.9).
             let _ = processor.recover_after_crash().await;
@@ -1001,7 +1020,7 @@ fn main() {
                 toast_state.describe()
             );
             println!("TRAY READY data={:?}", default_data_dir());
-            spawn_drain_loop();
+            spawn_drain_loop(app.handle().clone());
             Ok(())
         })
         .build(tauri::generate_context!())

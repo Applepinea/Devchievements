@@ -60,6 +60,7 @@ ALL CHECKS PASSED
 | 2b.7 | 数据备份与恢复 | `Tested` | `VACUUM INTO` 备份 + 头校验恢复；About 页有入口 |
 | 2b.8 | Outbox 可观测性（延迟分布与原因码） | `Tested` | 7 个测试（含真实数据库）；已并入 `--diagnostics` |
 | 2b.9 | 空状态与引导（§34.1 补充） | `Tested` | 每页有空状态；无身份时给出引导；卸载后目录不被复活 |
+| 2b.10 | 通知弹窗窗口（§28） | `Tested` | 不抢焦点/不进任务栏/置顶/自动关闭；数据随片段传入 |
 
 ---
 ## Phase 2a 任务表
@@ -75,7 +76,7 @@ ALL CHECKS PASSED
 | 2a.7 | SQLite 持久化接入 Helper | `Tested` | 完整闭环：commit→hook→helper→spool→companion→SQLite |
 | 2a.8 | Outbox Consumer（Desktop 子集） | `Tested` | 投递、重试、`delivery_unknown` 均有测试 |
 | 2a.9 | 桌面弹窗与提示音 | `Partially Implemented` | **提示音已完成并实测**；Toast 注册与调用已实现（安装器 exit 0），**端到端未通过** |
-| 2a.15 | Toast 端到端 | `Platform Unverified` | 注册已实测正确（快捷方式/注册表/进程 AUMID），但 `CreateToastNotifierWithId` 对**任何** AUMID 均返回 `0x80073D54`；PowerShell 同 AUMID 成功 → 失败在进程层 |
+| 2a.15 | 通知呈现 | `Tested` | **改用自有弹窗**（ADR-0015）：真实提交触发真实窗口，`popup` e2e 8 项通过；系统通知通道已移除 |
 | 2a.16 | AppNotificationManager 替代路线 | `Not Started` | 见 [ADR-0016](docs/decisions/0016-notification-api-choice.md) |
 | 2a.17 | Sparse Packaging（若确需 Package Identity） | `Not Started` | 见 ADR-0016 |
 | 2a.10 | Companion 启动消费 Spool | `Tested` | 无头 Companion 真实消费并计数 |

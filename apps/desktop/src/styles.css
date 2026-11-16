@@ -114,3 +114,35 @@ button:disabled { opacity: .6; cursor: default; }
 }
 .wizard h1 { margin: 0 0 6px; font-size: 22px; }
 .wizard h2 { margin: 8px 0 6px; font-size: 17px; }
+
+/* Notification popup: its own window, so it fills the viewport edge to edge. */
+html, body { margin: 0; height: 100%; }
+
+.popup {
+  height: 100vh;
+  padding: 14px 16px;
+  background: #1b1e24;
+  border: 1px solid #2b3240;
+  border-left: 4px solid #3d7bfd;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: center;
+}
+
+.popup-badge {
+  font-size: 10px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.popup-title { font-size: 15px; font-weight: 600; }
+.popup-body { color: var(--muted); }
+.popup-others { color: var(--muted); font-size: 12px; }
+
+.rarity-uncommon { border-left-color: #2fbf71; }
+.rarity-rare { border-left-color: #3d7bfd; }
+.rarity-epic { border-left-color: #a855f7; }
+.rarity-legendary { border-left-color: #e0b341; }

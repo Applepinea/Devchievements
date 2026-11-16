@@ -124,15 +124,16 @@ impl Default for Capabilities {
 }
 
 impl Capabilities {
-    /// Pick a presentation channel using the documented chain (spec 29.1).
+    /// Pick a presentation channel.
     ///
-    /// Desktop popup, else system notification, else the in-app marker. The order is
-    /// fixed; a capability that is unusable is skipped rather than attempted.
+    /// Desktop popup, else the in-app marker. System notifications are deliberately
+    /// not part of the chain any more: Windows could not be made to accept them from
+    /// this product (ADR-0015), and a channel that depends on the OS accepting an
+    /// identity we cannot establish is not a channel. The step is still modelled in
+    /// the enum so the compatibility matrix can record where it fails.
     pub fn channel(&self) -> Channel {
         if self.desktop_popup.is_usable() {
             Channel::DesktopPopup
-        } else if self.system_notification.is_usable() {
-            Channel::SystemNotification
         } else {
             Channel::InAppOnly
         }
@@ -140,17 +141,13 @@ impl Capabilities {
 
     /// Apply the fullscreen policy (spec 29.5).
     ///
-    /// The default degrades to a system notification, and degrades further to the
-    /// in-app marker when even that is unavailable -- spec 29.5 says a platform that
-    /// cannot show anything falls back to the badge, not to a promise.
+    /// The spec's first option is a system notification, and that route is not used
+    /// here (ADR-0015). Spec 29.5 already defines the next step for a platform that
+    /// cannot show anything: stay silent and let the badge carry it.
     pub fn when_fullscreen(&self, policy: FullscreenPolicy) -> FullscreenOutcome {
         match policy {
             FullscreenPolicy::DegradeToSystemNotification => {
-                FullscreenOutcome::Present(if self.system_notification.is_usable() {
-                    Channel::SystemNotification
-                } else {
-                    Channel::InAppOnly
-                })
+                FullscreenOutcome::Present(Channel::InAppOnly)
             }
             FullscreenPolicy::Defer => FullscreenOutcome::Defer,
             FullscreenPolicy::Silent => FullscreenOutcome::Present(Channel::InAppOnly),
@@ -210,18 +207,21 @@ mod tests {
     }
 
     #[test]
-    fn the_chain_falls_back_to_system_notifications() {
+    fn the_chain_skips_system_notifications_entirely() {
+        // ADR-0015: Windows will not accept toasts from this product, so a capability
+        // set that could only notify through the OS must fall straight to the marker
+        // rather than promise a channel that does not exist.
         assert_eq!(
             caps(
                 CapabilityState::NotificationFallback,
                 CapabilityState::Native
             )
             .channel(),
-            Channel::SystemNotification
+            Channel::InAppOnly
         );
         assert_eq!(
             caps(CapabilityState::Unverified, CapabilityState::Partial).channel(),
-            Channel::SystemNotification
+            Channel::InAppOnly
         );
     }
 
@@ -234,12 +234,13 @@ mod tests {
     }
 
     #[test]
-    fn fullscreen_defaults_to_system_notification() {
-        // Spec 29.5: the default when a fullscreen app is running.
+    fn fullscreen_degrades_to_the_in_app_marker() {
+        // Spec 29.5's first option is a system notification, and that route does not
+        // exist here, so the documented further fallback applies.
         let c = caps(CapabilityState::Native, CapabilityState::Native);
         assert_eq!(
             c.when_fullscreen(FullscreenPolicy::DegradeToSystemNotification),
-            FullscreenOutcome::Present(Channel::SystemNotification)
+            FullscreenOutcome::Present(Channel::InAppOnly)
         );
     }
 
