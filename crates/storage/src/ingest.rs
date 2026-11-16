@@ -18,8 +18,26 @@ use crate::projections;
 use crate::schema;
 use crate::StorageResult;
 use devchievements_core::{CommitFacts, Engine, InjectedContext, SideEffectKind, StateSnapshot};
-use devchievements_events::{validation, Event};
+use devchievements_events::{validation, Event, Identity};
 use sqlx::{Row, SqlitePool};
+
+/// Why ingestion was refused before any statistics began.
+///
+/// Distinct from a validation failure: the event itself may be perfectly valid, but
+/// the product is not allowed to start counting yet (spec 7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IngestRefusal {
+    /// No user email is configured, so attribution is impossible.
+    ///
+    /// Spec 7 is explicit that statistics and history import must NOT begin in this
+    /// state; starting anyway would attribute other people's commits to the user.
+    IdentityNotConfigured,
+    /// The event's author is not one of the configured identities.
+    NotTheUser {
+        /// The author email that was found.
+        author_email: String,
+    },
+}
 
 /// What happened when an event was submitted.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +53,33 @@ pub enum IngestOutcome {
     IngestedSilently,
     /// Rejected by validation; nothing was written.
     Rejected(String),
+    /// Refused before statistics could begin; nothing was written.
+    Refused(IngestRefusal),
+}
+
+/// The spec 7 gate: no email configured means no statistics.
+///
+/// When an identity IS configured, the event's author must be one of its addresses.
+/// Imported history is the only source where a mismatch is expected and handled by
+/// the import pipeline (which filters before building events), so it is treated the
+/// same here: refusal, not silent acceptance.
+pub fn check_identity(identity: &Identity, event: &Event) -> Result<(), IngestRefusal> {
+    if !identity.is_configured() {
+        return Err(IngestRefusal::IdentityNotConfigured);
+    }
+
+    // Events without an author in the payload (non-commit GitHub events) cannot be
+    // attributed by email; they are attributed by the account that produced them,
+    // which the browser path verifies. Do not block those here.
+    let Some(author_email) = author_email_of(event) else {
+        return Ok(());
+    };
+
+    if identity.owns_email(&author_email) {
+        Ok(())
+    } else {
+        Err(IngestRefusal::NotTheUser { author_email })
+    }
 }
 
 /// Classify a commit for the counting rules (spec 8.1).
@@ -87,8 +132,16 @@ pub async fn ingest_commit(
     event: &Event,
     facts: &CommitFacts,
     now_ms: i64,
+    identity: &Identity,
     ctx: &InjectedContext<'_>,
 ) -> StorageResult<IngestOutcome> {
+    // Spec 7 precondition, checked FIRST and before any write: with no configured
+    // email there is no way to decide whether this commit is the user's, and
+    // counting it would attribute someone else's work to them.
+    if let Err(refusal) = check_identity(identity, event) {
+        return Ok(IngestOutcome::Refused(refusal));
+    }
+
     // Validate before touching the database so a rejected event writes nothing.
     if let Err(e) = validation::validate(event) {
         return Ok(IngestOutcome::Rejected(e.to_string()));
@@ -214,6 +267,12 @@ pub async fn ingest_commit(
             queued_notifications: queued,
         })
     }
+}
+
+/// Pull `author_email` out of an event payload, if present.
+pub(crate) fn author_email_of(event: &Event) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(&event.payload).ok()?;
+    value.get("author_email")?.as_str().map(|s| s.to_string())
 }
 
 /// Count outbox rows by status. Used by diagnostics and by tests that assert the

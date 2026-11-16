@@ -19,8 +19,8 @@
 
 use devchievements_core::{FixedClock, IdGenerator, InjectedContext, TimezoneProvider};
 use devchievements_events::{
-    CanonicalRepositoryId, Event, EventId, EventSource, EventType, LocalDate, SchemaVersion,
-    SourceConfidence,
+    CanonicalRepositoryId, EmailOrigin, Event, EventId, EventSource, EventType, Identity,
+    LocalDate, SchemaVersion, SourceConfidence,
 };
 use devchievements_storage::ingest::{self, IngestOutcome};
 
@@ -87,6 +87,10 @@ async fn ingest_throughput() {
         config: &cfg,
     };
 
+    // The identity gate is part of the measured path now, so the benchmark includes it.
+    let mut identity = Identity::default();
+    identity.add_email("perf@devchievements.local", EmailOrigin::UserConfigured);
+
     let facts = ingest::commit_facts(1, false);
     let mut samples = Vec::with_capacity(N);
 
@@ -114,12 +118,12 @@ async fn ingest_throughput() {
             local_date: LocalDate::new(date).expect("date"),
             timezone: "UTC".to_string(),
             date_policy: 0,
-            payload: "{}".to_string(),
+            payload: format!("{{\"author_email\":\"{}\"}}", "perf@devchievements.local"),
             schema_version: SchemaVersion(1),
         };
 
         let t0 = std::time::Instant::now();
-        let outcome = ingest::ingest_commit(&pool, &event, &facts, occurred, &ctx)
+        let outcome = ingest::ingest_commit(&pool, &event, &facts, occurred, &identity, &ctx)
             .await
             .expect("ingest");
         samples.push(t0.elapsed().as_secs_f64() * 1000.0);

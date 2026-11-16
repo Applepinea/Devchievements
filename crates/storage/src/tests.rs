@@ -9,8 +9,8 @@ use crate::ingest::{self, IngestOutcome};
 use crate::projections;
 use devchievements_core::{FixedClock, IdGenerator, InjectedContext, TimezoneProvider};
 use devchievements_events::{
-    CanonicalRepositoryId, Event, EventId, EventSource, EventType, LocalDate, SchemaVersion,
-    SourceConfidence,
+    CanonicalRepositoryId, EmailOrigin, Event, EventId, EventSource, EventType, Identity,
+    LocalDate, SchemaVersion, SourceConfidence,
 };
 use sqlx::SqlitePool;
 
@@ -45,6 +45,13 @@ impl devchievements_core::ConfigurationProvider for Cfg {
     fn config_version(&self) -> u64 {
         1
     }
+}
+
+/// An identity matching the sample events' author payloads.
+fn configured_identity() -> Identity {
+    let mut identity = Identity::default();
+    identity.add_email("me@example.com", EmailOrigin::UserConfigured);
+    identity
 }
 
 /// Build the deterministic context pieces.
@@ -107,6 +114,84 @@ fn commit_event(sha: &str, occurred_at: i64, local_date: &str) -> Event {
 }
 
 #[tokio::test]
+async fn no_configured_email_blocks_all_statistics() {
+    // Spec 7: statistics and history import must NOT begin without an email.
+    // This must hold at the storage layer, which cannot be bypassed.
+    let pool = temp_pool("no-identity").await;
+    let facts = ingest::commit_facts(1, false);
+    let event = commit_event(&"9".repeat(40), 1_794_787_200_000, "2026-11-16");
+
+    let mut fx = fixture();
+    let ctx = fx.ctx();
+    let empty = Identity::default();
+    let outcome = ingest::ingest_commit(&pool, &event, &facts, 0, &empty, &ctx)
+        .await
+        .expect("ingest");
+
+    assert_eq!(
+        outcome,
+        IngestOutcome::Refused(ingest::IngestRefusal::IdentityNotConfigured)
+    );
+    assert_eq!(
+        ingest::event_count(&pool).await.expect("count"),
+        0,
+        "nothing written"
+    );
+    assert_eq!(
+        projections::repository_commit_count(&pool, "github:o/r")
+            .await
+            .expect("count"),
+        0,
+        "no projection may move either"
+    );
+}
+
+#[tokio::test]
+async fn a_commit_by_someone_else_is_refused_not_attributed() {
+    // The whole reason the gate exists: an author email that is not the user's must
+    // not become "their" commit.
+    let pool = temp_pool("not-mine").await;
+    let facts = ingest::commit_facts(1, false);
+    let mut event = commit_event(&"8".repeat(40), 1_794_787_200_000, "2026-11-16");
+    event.payload = "{\"author_email\":\"stranger@else.com\"}".to_string();
+
+    let mut fx = fixture();
+    let ctx = fx.ctx();
+    let outcome = ingest::ingest_commit(&pool, &event, &facts, 0, &configured_identity(), &ctx)
+        .await
+        .expect("ingest");
+
+    match outcome {
+        IngestOutcome::Refused(ingest::IngestRefusal::NotTheUser { author_email }) => {
+            assert_eq!(author_email, "stranger@else.com");
+        }
+        other => panic!("expected NotTheUser, got {other:?}"),
+    }
+    assert_eq!(ingest::event_count(&pool).await.expect("count"), 0);
+}
+
+#[tokio::test]
+async fn an_event_without_an_author_is_not_blocked_by_the_gate() {
+    // GitHub release/PR events carry no author email; they are attributed by the
+    // verified browser account, so the email gate must not reject them.
+    let pool = temp_pool("no-author").await;
+    let facts = ingest::commit_facts(1, false);
+    let mut event = commit_event(&"7".repeat(40), 1_794_787_200_000, "2026-11-16");
+    event.payload = "{}".to_string();
+
+    let mut fx = fixture();
+    let ctx = fx.ctx();
+    let outcome = ingest::ingest_commit(&pool, &event, &facts, 0, &configured_identity(), &ctx)
+        .await
+        .expect("ingest");
+
+    assert!(
+        matches!(outcome, IngestOutcome::Ingested { .. }),
+        "an authorless event must still be recorded, got {outcome:?}"
+    );
+}
+
+#[tokio::test]
 async fn schema_records_its_version() {
     let pool = temp_pool("version").await;
     let v = ingest::recorded_schema_version(&pool)
@@ -123,7 +208,15 @@ async fn ingesting_a_commit_writes_event_projection_and_outbox_together() {
 
     let mut fx = fixture();
     let ctx = fx.ctx();
-    let outcome = ingest::ingest_commit(&pool, &event, &facts, 1_794_787_200_000, &ctx).await;
+    let outcome = ingest::ingest_commit(
+        &pool,
+        &event,
+        &facts,
+        1_794_787_200_000,
+        &configured_identity(),
+        &ctx,
+    )
+    .await;
 
     match outcome.expect("ingest") {
         IngestOutcome::Ingested {
@@ -168,7 +261,7 @@ async fn re_ingesting_the_same_event_is_a_no_op() {
     {
         let mut fx = fixture();
         let ctx = fx.ctx();
-        ingest::ingest_commit(&pool, &event, &facts, 0, &ctx).await
+        ingest::ingest_commit(&pool, &event, &facts, 0, &configured_identity(), &ctx).await
     }
     .expect("first");
     let before = ingest::event_count(&pool).await.expect("count");
@@ -176,7 +269,7 @@ async fn re_ingesting_the_same_event_is_a_no_op() {
     let second = {
         let mut fx = fixture();
         let ctx = fx.ctx();
-        ingest::ingest_commit(&pool, &event, &facts, 0, &ctx).await
+        ingest::ingest_commit(&pool, &event, &facts, 0, &configured_identity(), &ctx).await
     }
     .expect("second");
 
@@ -205,7 +298,7 @@ async fn an_empty_commit_is_stored_but_not_counted() {
     let outcome = {
         let mut fx = fixture();
         let ctx = fx.ctx();
-        ingest::ingest_commit(&pool, &event, &facts, 0, &ctx).await
+        ingest::ingest_commit(&pool, &event, &facts, 0, &configured_identity(), &ctx).await
     }
     .expect("ingest");
 
@@ -232,7 +325,7 @@ async fn a_merge_commit_is_stored_but_not_counted() {
     let outcome = {
         let mut fx = fixture();
         let ctx = fx.ctx();
-        ingest::ingest_commit(&pool, &event, &facts, 0, &ctx).await
+        ingest::ingest_commit(&pool, &event, &facts, 0, &configured_identity(), &ctx).await
     }
     .expect("ingest");
     assert_eq!(outcome, IngestOutcome::IngestedSilently);
@@ -254,7 +347,7 @@ async fn an_invalid_event_is_rejected_without_writing_anything() {
     let outcome = {
         let mut fx = fixture();
         let ctx = fx.ctx();
-        ingest::ingest_commit(&pool, &event, &facts, 0, &ctx).await
+        ingest::ingest_commit(&pool, &event, &facts, 0, &configured_identity(), &ctx).await
     }
     .expect("ingest");
 
@@ -274,7 +367,7 @@ async fn achievements_are_unlocked_inside_the_same_transaction() {
     {
         let mut fx = fixture();
         let ctx = fx.ctx();
-        ingest::ingest_commit(&pool, &event, &facts, 0, &ctx).await
+        ingest::ingest_commit(&pool, &event, &facts, 0, &configured_identity(), &ctx).await
     }
     .expect("ingest");
 
@@ -302,7 +395,7 @@ async fn projections_can_be_rebuilt_from_the_event_log() {
         {
             let mut fx = fixture();
             let ctx = fx.ctx();
-            ingest::ingest_commit(&pool, &event, &facts, 0, &ctx).await
+            ingest::ingest_commit(&pool, &event, &facts, 0, &configured_identity(), &ctx).await
         }
         .expect("ingest");
     }
@@ -422,7 +515,7 @@ async fn data_survives_closing_and_reopening_the_database() {
         {
             let mut fx = fixture();
             let ctx = fx.ctx();
-            ingest::ingest_commit(&pool, &event, &facts, 0, &ctx).await
+            ingest::ingest_commit(&pool, &event, &facts, 0, &configured_identity(), &ctx).await
         }
         .expect("ingest");
         pool.close().await;

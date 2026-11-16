@@ -409,6 +409,7 @@ name = "devchievements-achievements"
 version = "0.0.0"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -453,6 +454,9 @@ dependencies = [
 [[package]]
 name = "devchievements-git-hooks"
 version = "0.0.0"
+dependencies = [
+ "devchievements-events",
+]
 
 [[package]]
 name = "devchievements-golden-tests"
@@ -508,6 +512,7 @@ dependencies = [
  "devchievements-core",
  "devchievements-daily-rank",
  "devchievements-events",
+ "serde_json",
  "sqlx",
  "tokio",
 ]

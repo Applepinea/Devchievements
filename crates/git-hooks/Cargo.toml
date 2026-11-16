@@ -8,8 +8,10 @@ authors.workspace = true
 description = "Git hook helper capture, hook install/chaining/uninstall, IPC and Spool delivery."
 
 [dependencies]
-# Zero dependencies on purpose: the Helper must stay a small, predictable
-# native binary with no build-time surprises (ADR-0002).
+# Deliberately minimal: the Helper must stay a small, predictable native binary
+# with no build-time surprises (ADR-0002). The events crate is the only one,
+# because the identity model lives there.
+devchievements-events = { path = "../events" }
 
 [lints]
 workspace = true

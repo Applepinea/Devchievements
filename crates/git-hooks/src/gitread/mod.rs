@@ -12,6 +12,7 @@
 //! - SHA-256 repositories are not supported;
 //! - worktrees and submodules ARE supported via the \`gitdir:\` and \`commondir\` files.
 
+pub mod config_read;
 pub(crate) mod inflate;
 pub mod pack;
 

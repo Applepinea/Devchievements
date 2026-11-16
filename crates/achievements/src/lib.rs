@@ -19,6 +19,8 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
+pub mod builder;
+
 use serde::{Deserialize, Serialize};
 
 /// Rarity, used for notification styling and merge ordering (spec 16.6).

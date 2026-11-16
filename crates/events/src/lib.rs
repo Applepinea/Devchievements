@@ -22,6 +22,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 pub mod event;
+pub mod identity;
 pub mod repository;
 pub mod validation;
 
@@ -29,6 +30,7 @@ pub use event::{
     CanonicalRepositoryId, Event, EventId, EventSource, EventType, LocalDate, SchemaVersion,
     SourceConfidence,
 };
+pub use identity::{EmailOrigin, GitHubLoginMapping, Identity, IdentityError, KnownEmail};
 pub use repository::{RepositoryIdentity, RepositoryIdentityError};
 pub use validation::{EventValidationError, RequiredField};
 
