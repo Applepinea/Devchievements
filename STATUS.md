@@ -51,7 +51,7 @@ ALL CHECKS PASSED
 | 2a.2 | Hook 安装 / 备份 / 链式 / 卸载 | `Tested` | 12 个测试；**shell 链式未真实验证**（见 §32 文档） |
 | 2a.3 | IPC 帧协议 | `Tested` | 9 个测试，含超限长度与截断 |
 | 2a.4 | Spool 回退 | `Tested` | 11 个测试，含并发与损坏恢复 |
-| 2a.5 | 实时 IPC 服务端 | `Not Started` | 需要 Companion 进程 |
+| 2a.5 | 实时 IPC 通道（客户端 + 服务端） | `Platform Unverified` | 已实现并编译；**本机沙箱拒绝命名管道**（os error 5）。回退路径已验证 |
 | 2a.6 | Tauri Companion 与托盘 | `Blocked` | **无 MSVC**；数据回路已由无头 Companion 完成并验证 |
 | 2a.7 | SQLite 持久化接入 Helper | `Tested` | 完整闭环：commit→hook→helper→spool→companion→SQLite |
 | 2a.8 | Outbox Consumer（Desktop 子集） | `Tested` | 投递、重试、`delivery_unknown` 均有测试 |
@@ -61,7 +61,8 @@ ALL CHECKS PASSED
 | 2a.12 | Crash Recovery 矩阵（§32.5） | `Partially Implemented` | 6 个场景中 4 个已真实通过；2 个需实时 IPC |
 
 > 详见 [phase-2a-progress.md](docs/development/phase-2a-progress.md)。
-> 端到端：`node scripts/e2e/hook-to-spool.mjs`
+> 端到端：`node scripts/e2e/hook-to-spool.mjs`、`node scripts/e2e/full-loop.mjs`、
+> `node scripts/e2e/ipc-fallback.mjs`、`node scripts/e2e/crash-recovery.mjs`
 
 ---
 

@@ -328,6 +328,56 @@ impl devchievements_core::ConfigurationProvider for StaticConfig {
     }
 }
 
+/// Serve the live IPC channel forever, on a background thread.
+///
+/// Each accepted record is appended to the Spool BEFORE the acknowledgement is sent,
+/// so an ack always means "durable". Ingestion then happens through the ordinary
+/// drain path, which keeps exactly one place responsible for ordering and
+/// idempotency.
+///
+/// Returns an error only if the channel could not be bound. That is reported rather
+/// than silently disabling the fast path: a Companion nobody can reach makes every
+/// commit take the Spool fallback.
+pub fn serve_ipc_blocking(
+    user_discriminator: String,
+    spool_dir: PathBuf,
+    on_record: impl Fn() + Send + 'static,
+) -> Result<(), String> {
+    use devchievements_git_hooks::ipc::Server;
+
+    let server = Server::bind(&user_discriminator).map_err(|e| e.to_string())?;
+    let spool = Spool::open(&spool_dir).map_err(|e| e.to_string())?;
+
+    std::thread::spawn(move || loop {
+        let mut accepted = false;
+        let served = server.serve_one(|payload| {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+                return false;
+            };
+            let Some(event_id) = value.get("event_id").and_then(|v| v.as_str()) else {
+                return false;
+            };
+            match spool.append(event_id, payload) {
+                Ok(()) => {
+                    accepted = true;
+                    true
+                }
+                Err(_) => false,
+            }
+        });
+
+        if accepted {
+            on_record();
+        }
+        if served.is_err() {
+            // One bad connection must not stop the channel.
+            continue;
+        }
+    });
+
+    Ok(())
+}
+
 /// Whether a Spool directory exists yet.
 pub fn spool_exists(dir: &Path) -> bool {
     dir.join("consumed").exists()

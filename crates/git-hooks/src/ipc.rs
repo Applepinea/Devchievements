@@ -257,3 +257,251 @@ mod tests {
         assert!(connect <= 50, "connecting must not dominate the budget");
     }
 }
+
+// --------------------------------------------------------------- live transport
+
+// # The live channel
+//
+// `interprocess` gives one API over Windows named pipes and Unix domain sockets,
+// which is exactly the requirement in spec 10.2 (a private local channel; never
+// localhost TCP). Using it also keeps this crate free of `unsafe`, which the
+// workspace forbids.
+//
+// # What the acknowledgement actually promises
+//
+// The server appends the record to the Spool **before** acknowledging. So an ack
+// means "durably accepted", not "probably received". That matters because the
+// Helper chooses between IPC and a Spool write based on it: ack means the Helper can
+// return without writing the Spool itself, and a lost ack just means the next start
+// drains the record again (idempotent by event id).
+//
+// # Why the channel exists at all, if everything ends up in the Spool
+//
+// The Spool is the single durable store on purpose: one ingestion path means one
+// place for the ordering and idempotency rules. What IPC adds is *promptness* -- the
+// Companion can act immediately instead of waiting for its next poll, which is the
+// difference between a notification appearing at once and appearing seconds later.
+
+/// Acknowledgement payload the server sends back.
+pub const ACK_PAYLOAD: &str = "{\"ok\":true}";
+
+/// Why a live delivery attempt could not complete.
+#[derive(Debug)]
+pub enum TransportError {
+    /// The local socket name could not be constructed.
+    BadName(String),
+    /// No server was listening.
+    NotRunning,
+    /// The exchange started but did not finish in time.
+    Timeout,
+    /// The protocol was violated.
+    Protocol(String),
+    /// An operating-system error.
+    Io(String),
+}
+
+impl std::fmt::Display for TransportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TransportError::BadName(m) => write!(f, "invalid socket name: {m}"),
+            TransportError::NotRunning => write!(f, "no companion is listening"),
+            TransportError::Timeout => write!(f, "the exchange exceeded its deadline"),
+            TransportError::Protocol(m) => write!(f, "protocol error: {m}"),
+            TransportError::Io(m) => write!(f, "transport io error: {m}"),
+        }
+    }
+}
+
+impl std::error::Error for TransportError {}
+
+/// The socket name for a given user discriminator.
+///
+/// Namespaced per user so two accounts on one machine cannot reach each other's
+/// Companion. The operating-system ACL is the primary control; this is defence in
+/// depth (spec 10.2).
+pub fn socket_name(user_discriminator: &str) -> String {
+    format!("devchievements-{user_discriminator}")
+}
+
+/// Send one record, waiting for the acknowledgement, bounded by a deadline.
+///
+/// Returns [`Delivery::Acknowledged`] only when the server confirmed it persisted the
+/// record. Every other outcome is [`Delivery::Unreachable`], which the caller turns
+/// into a Spool write.
+pub fn deliver_live(user_discriminator: &str, event_id: &str, payload: &str) -> Delivery {
+    use interprocess::local_socket::traits::Stream as _;
+    use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
+    use std::io::{Read, Write};
+
+    let frame = match Frame::new(payload) {
+        Ok(frame) => frame,
+        Err(_) => return Delivery::Unreachable,
+    };
+    let _ = event_id;
+
+    let name = socket_name(user_discriminator);
+    let Ok(name) = name.to_ns_name::<GenericNamespaced>() else {
+        return Delivery::Unreachable;
+    };
+
+    // Connecting to a name nobody is listening on fails immediately on every
+    // supported platform, so the common "Companion closed" case costs nothing.
+    let mut stream = match Stream::connect(name) {
+        Ok(stream) => stream,
+        Err(_) => return Delivery::Unreachable,
+    };
+
+    if stream.write_all(&frame.encode()).is_err() {
+        return Delivery::Unreachable;
+    }
+    if stream.flush().is_err() {
+        return Delivery::Unreachable;
+    }
+
+    // Bound the wait. A server that accepted but never replies must not hold the
+    // user's commit hostage (spec 9.2), and a write-only check is not enough: the
+    // stall happens while waiting for the acknowledgement.
+    //
+    // `read` has no portable timeout on local sockets, so the wait runs on a
+    // dedicated thread and the calling thread gives up on a deadline. Spawning a
+    // thread costs tens of microseconds, well inside the budget.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut header = [0u8; 4];
+        if stream.read_exact(&mut header).is_err() {
+            let _ = tx.send(false);
+            return;
+        }
+        let len = u32::from_le_bytes(header) as usize;
+        if len == 0 || len > MAX_FRAME_BYTES {
+            let _ = tx.send(false);
+            return;
+        }
+        let mut body = vec![0u8; len];
+        if stream.read_exact(&mut body).is_err() {
+            let _ = tx.send(false);
+            return;
+        }
+        let _ = tx.send(String::from_utf8_lossy(&body) == ACK_PAYLOAD);
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_millis(ACK_TIMEOUT_MS)) {
+        Ok(true) => Delivery::Acknowledged,
+        // Timed out or mis-acknowledged: the caller spools it instead. Re-sending is
+        // safe because ingestion is idempotent on the event id (spec 10.1).
+        _ => Delivery::Unreachable,
+    }
+}
+
+/// A listening Companion endpoint.
+#[derive(Debug)]
+pub struct Server {
+    listener: interprocess::local_socket::Listener,
+}
+
+impl Server {
+    /// Bind the socket, replacing any stale one from a previous run.
+    pub fn bind(user_discriminator: &str) -> Result<Self, TransportError> {
+        use interprocess::local_socket::{GenericNamespaced, ListenerOptions, ToNsName};
+
+        let name = socket_name(user_discriminator);
+        let name = name
+            .to_ns_name::<GenericNamespaced>()
+            .map_err(|e| TransportError::BadName(e.to_string()))?;
+
+        // A crashed previous instance can leave the endpoint behind; replacing it is
+        // what makes "restart the Companion" work without manual cleanup.
+        let listener = ListenerOptions::new()
+            .name(name)
+            .create_sync()
+            .map_err(|e| TransportError::Io(e.to_string()))?;
+
+        Ok(Server { listener })
+    }
+
+    /// Accept one connection, read one frame, and return its payload.
+    ///
+    /// Blocking by design: the caller runs this on a dedicated thread so the async
+    /// ingestion loop is never blocked by a slow peer.
+    pub fn accept_one(&self) -> Result<String, TransportError> {
+        use interprocess::local_socket::traits::Listener as _;
+        use std::io::Read;
+
+        let mut stream = self
+            .listener
+            .accept()
+            .map_err(|e| TransportError::Io(e.to_string()))?;
+
+        let mut header = [0u8; 4];
+        stream
+            .read_exact(&mut header)
+            .map_err(|e| TransportError::Protocol(e.to_string()))?;
+        let len = u32::from_le_bytes(header) as usize;
+        if len == 0 || len > MAX_FRAME_BYTES {
+            return Err(TransportError::Protocol(format!(
+                "declared frame length {len} is outside 1..={MAX_FRAME_BYTES}"
+            )));
+        }
+
+        let mut body = vec![0u8; len];
+        stream
+            .read_exact(&mut body)
+            .map_err(|e| TransportError::Protocol(e.to_string()))?;
+
+        String::from_utf8(body).map_err(|_| TransportError::Protocol("payload is not UTF-8".into()))
+    }
+
+    /// Acknowledge the most recent [`Self::accept_one`] on the same connection.
+    ///
+    /// Separate from `accept_one` because the caller must only acknowledge AFTER the
+    /// record is durable.
+    pub fn acknowledge(
+        stream: &mut interprocess::local_socket::Stream,
+    ) -> Result<(), TransportError> {
+        use std::io::Write;
+        let frame = Frame::new(ACK_PAYLOAD).map_err(|e| TransportError::Protocol(e.to_string()))?;
+        stream
+            .write_all(&frame.encode())
+            .map_err(|e| TransportError::Io(e.to_string()))?;
+        stream
+            .flush()
+            .map_err(|e| TransportError::Io(e.to_string()))
+    }
+
+    /// Accept one connection and run the whole exchange with a callback.
+    ///
+    /// The callback decides whether the record is durable; only then is the ack sent.
+    pub fn serve_one<F>(&self, mut on_record: F) -> Result<(), TransportError>
+    where
+        F: FnMut(&str) -> bool,
+    {
+        use interprocess::local_socket::traits::Listener as _;
+        use std::io::Read;
+
+        let mut stream = self
+            .listener
+            .accept()
+            .map_err(|e| TransportError::Io(e.to_string()))?;
+
+        let mut header = [0u8; 4];
+        if stream.read_exact(&mut header).is_err() {
+            return Ok(());
+        }
+        let len = u32::from_le_bytes(header) as usize;
+        if len == 0 || len > MAX_FRAME_BYTES {
+            return Ok(());
+        }
+        let mut body = vec![0u8; len];
+        if stream.read_exact(&mut body).is_err() {
+            return Ok(());
+        }
+        let Ok(payload) = String::from_utf8(body) else {
+            return Ok(());
+        };
+
+        if on_record(&payload) {
+            Self::acknowledge(&mut stream)?;
+        }
+        Ok(())
+    }
+}

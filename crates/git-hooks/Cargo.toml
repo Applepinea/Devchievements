@@ -12,6 +12,9 @@ description = "Git hook helper capture, hook install/chaining/uninstall, IPC and
 # with no build-time surprises (ADR-0002). The events crate is the only one,
 # because the identity model lives there.
 devchievements-events = { path = "../events" }
+# Local IPC: named pipes on Windows, domain sockets on Unix, one API, no unsafe
+# in our own code (the workspace forbids it). See ADR-0007.
+interprocess = { version = "2", features = ["tokio"] }
 serde_json = "1"
 
 [lints]

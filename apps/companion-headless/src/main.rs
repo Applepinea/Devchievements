@@ -18,7 +18,7 @@ use std::process::ExitCode;
 use devchievements_companion_core::delivery::{
     DeliverySink, DisplayOutcome, OutboxProcessor, PendingNotification,
 };
-use devchievements_companion_core::{Companion, CompanionConfig};
+use devchievements_companion_core::{serve_ipc_blocking, Companion, CompanionConfig};
 use devchievements_events::{EmailOrigin, Identity};
 
 /// Prints notifications instead of rendering them.
@@ -87,6 +87,22 @@ async fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         println!("RECOVERED {recovered}");
     }
 
+    // Bring up the live channel before the first drain so a Helper that fires during
+    // startup is accepted rather than falling back to the Spool (spec 10.1).
+    let nudge = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let nudge_writer = nudge.clone();
+    match serve_ipc_blocking(user_discriminator(), data_dir.join("spool"), move || {
+        nudge_writer.store(true, std::sync::atomic::Ordering::SeqCst)
+    }) {
+        Ok(()) => println!(
+            "IPC LISTENING {}",
+            devchievements_git_hooks::ipc::socket_name(&user_discriminator())
+        ),
+        // Not fatal: without the channel everything still works via the Spool, just
+        // with the polling delay instead of an immediate nudge.
+        Err(e) => println!("IPC UNAVAILABLE {e}"),
+    }
+
     let mut sink = StdoutSink { shown: 0 };
 
     loop {
@@ -111,10 +127,41 @@ async fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
         if once || loop_ms == 0 {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(loop_ms));
+
+        // Sleep, but wake immediately when the live channel delivered something.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(loop_ms);
+        while std::time::Instant::now() < deadline {
+            if nudge.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+/// Same derivation as the Helper, so both sides agree on the socket name.
+fn user_discriminator() -> String {
+    let raw = std::env::var_os("USERNAME")
+        .or_else(|| std::env::var_os("USER"))
+        .map(|v| v.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let cleaned: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if cleaned.is_empty() {
+        "default".to_string()
+    } else {
+        cleaned
+    }
 }
 
 fn default_data_dir() -> PathBuf {

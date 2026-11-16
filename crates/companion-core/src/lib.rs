@@ -26,7 +26,7 @@ pub mod delivery;
 pub mod spool_consumer;
 
 pub use delivery::{DeliveredNotification, DeliverySink, OutboxError, OutboxProcessor};
-pub use spool_consumer::{Companion, CompanionConfig, DrainReport};
+pub use spool_consumer::{serve_ipc_blocking, Companion, CompanionConfig, DrainReport};
 
 /// Crate version.
 pub const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");

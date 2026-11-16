@@ -109,14 +109,43 @@ fn handle_hook(hook_name: &str, hook_args: &[String]) -> Option<()> {
     }
 }
 
-/// Attempt IPC delivery.
+/// Attempt live delivery over IPC (spec 10.1: IPC first, Spool on failure).
 ///
-/// On Windows the Named Pipe path is not yet wired into this binary (the Companion
-/// does not exist yet), so this reports Unreachable and the Spool is used. That is
-/// the honest state: the transport fallback is real and tested, the live channel is
-/// the next step.
-fn deliver(_event_id: &str, _payload: &str) -> ipc::Delivery {
-    ipc::Delivery::Unreachable
+/// Returns Acknowledged only when the Companion confirmed the record is durable.
+/// Anything else -- no Companion, refused, timed out -- falls back to the Spool.
+fn deliver(event_id: &str, payload: &str) -> ipc::Delivery {
+    ipc::deliver_live(&user_discriminator(), event_id, payload)
+}
+
+/// A stable, per-user discriminator for the socket name.
+///
+/// Derived from the login name so the Helper and the Companion agree without a
+/// shared config file, and so two accounts on one machine never collide (spec 10.2).
+///
+/// SECURITY NOTE: this is only a NAME, not a permission. The operating system's
+/// ACL on the pipe is what actually prevents another user connecting; see ADR-0007.
+fn user_discriminator() -> String {
+    let raw = std::env::var_os("USERNAME")
+        .or_else(|| std::env::var_os("USER"))
+        .map(|v| v.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let cleaned: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+
+    if cleaned.is_empty() {
+        "default".to_string()
+    } else {
+        cleaned
+    }
 }
 
 fn spool_dir() -> Option<PathBuf> {

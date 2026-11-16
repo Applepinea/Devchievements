@@ -15,6 +15,7 @@ path = "src/main.rs"
 devchievements-companion-core = { path = "../../crates/companion-core" }
 devchievements-storage = { path = "../../crates/storage" }
 devchievements-events = { path = "../../crates/events" }
+devchievements-git-hooks = { path = "../../crates/git-hooks" }
 serde_json = "1"
 async-std = { version = "1", features = ["attributes"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-async-std", "sqlite", "migrate"] }

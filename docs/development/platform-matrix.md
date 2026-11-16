@@ -84,3 +84,5 @@ manifest 里 `wasm-unsafe-eval` 已确认存在、wasm 已确认打包，但「�
 | 2026-11-16 | Windows 11 / Git 2.54.0 | **原生 .exe hook 被执行** | 真实 `git commit`，hook 为 `post-commit.exe` | ✅ Git 直接执行，helper 收到仓库事实并写入 Spool |
 | 2026-11-16 | Windows 11 / Git 2.54.0 | **POSIX shell hook** | 真实 `git commit`，hook 为 `#!/bin/sh` | ❌ **无法验证**：`sh.exe` 启动即崩（signal pipe 被拒，0xC0000142） |
 | 2026-11-16 | Windows 11 | **shell 钩子链式执行** | 需要 sh 才能跑链式脚本 | ❌ **未验证**：依赖上一条 |
+| 2026-11-16 | Windows 11 | **命名管道（实时 IPC）** | 同进程绑定后连接 | ❌ **被沙箱拒绝**：`os error 5 (Access denied)` |
+| 2026-11-16 | Windows 11 | **IPC 失败时回退 Spool** | 真实提交 + 真实 Companion | ✅ 端到端通过，提交不受影响 |
