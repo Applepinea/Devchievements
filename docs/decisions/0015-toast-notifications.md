@@ -116,3 +116,24 @@ ADR-0015 的结论「注册齐了就成功」不再成立。
 
 Toast 端到端仍为 **未验证**。`node scripts/e2e/toast.mjs` 退出码 2（环境阻止验证）。
 降级链中间档在本机不可用，产品侧已按 §29.1 降级为仅应用内提示。
+
+---
+
+## 附：`maxversiontested` 尝试（未成功，已停止）
+
+写了 `app.manifest` 并通过 `RUSTFLAGS` 传 `/MANIFESTINPUT`，
+链接失败：
+
+```text
+LINK : fatal error LNK1123: 转换到 COFF 期间失败
+```
+
+原因：rustc 的 MSVC 链接行**本身已带 `/MANIFEST:EMBED`**，
+再叠一个 `/MANIFESTINPUT` 会产生重复的清单资源。
+
+正规做法是用 `embed-resource` 在 `build.rs` 里生成资源文件覆盖默认清单。
+本次没有继续，原因是前面每一项猜想都花了完整构建周期且全部否证，
+继续投入的收益不确定。
+
+**这里停下来是判断，不是借口**：如果之后要再试，起点就是这条——
+用 `embed-resource` 换掉 rustc 的默认清单，而不是叠加。
