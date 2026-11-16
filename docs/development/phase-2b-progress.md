@@ -232,3 +232,50 @@ API 只返回 `E_ACCESSDENIED`（`os error 5`），无法定位。
 
 **对产品的影响**：降级链的第一档（桌面浮窗）现在可用，
 Toast 不再是唯一路径。
+
+---
+
+## 5. Settings 页面（第一个真实 UI）
+
+### 5.1 技术栈按规范落地
+
+§3 冻结的是 React + TypeScript，所以没有走纯 HTML 捷径：
+
+| 项 | 值 |
+| --- | --- |
+| 构建 | Vite 8 |
+| UI | React 19 + TS（strict，含 `noUncheckedIndexedAccess`） |
+| 产物 | `dist/index.html` + 224 KB JS + 1.4 KB CSS |
+
+Vite 的 `base: './'` 是必须的：Tauri 用 asset 协议加载页面，
+绝对路径会解析到协议根，页面直接白屏。
+
+### 5.2 页面内容
+
+- **Identity**：邮箱增删改（§7 前置条件）
+- **Privacy**：开关 + 明确说明「不加密、不检测屏幕共享」（§26.2 要求不得误导）
+- **Timezone**：本地日期口径（§12）
+- **Status**：事件数、仓库数、成就数、待处理通知、从未展示数、当前呈现通道、音效数量
+
+所有数值来自 `get_status` → SQLite，**没有一处硬编码**。
+
+### 5.3 关键设计：页面必须自报家门
+
+窗口冒烟测试不满足于「窗口建出来了」，而是等页面调用 `ui_ready`。
+
+```text
+WINDOW created
+UI READY view=settings
+WINDOW OK ui=ready
+```
+
+理由很直接：**一个打开后白屏的窗口，和一个正常工作的窗口，从外面看完全一样**。
+之前 WebView2 的问题能藏那么久，就是因为只验证了「进程没崩」。
+
+### 5.4 前端依赖为什么不用 pnpm 装
+
+pnpm 在这台机器上卡在 `Scope: all 3 workspace projects`，
+而 react/vite/@vitejs 早已 hoist 在根 `node_modules` 里。
+
+所以 `verify.mjs` 直接调 vite，并声明依赖缺失时 SKIP 而不是失败——
+**CI 里 pnpm 可用时会自动走正常路径**。

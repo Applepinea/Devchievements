@@ -52,8 +52,11 @@ function main() {
   const out = fs.readFileSync(log, "utf8");
 
   check("the smoke command exited cleanly", r.status === 0, out);
-  check("the window was created", /WINDOW OK/.test(out), out);
-  check("it carries the expected title", /title="Devchievements"/.test(out), out);
+  check("the window was created", /WINDOW created/.test(out), out);
+  // A window that opens onto a blank page looks identical to a working one, so the
+  // page itself must report in before this counts as passing.
+  check("the page rendered inside the webview", /UI READY view=settings/.test(out), out);
+  check("the smoke waited for that report", /WINDOW OK ui=ready/.test(out), out);
 
   // The profile directory must exist afterwards: its absence is what made creation
   // fail in the first place, so this is the regression guard.

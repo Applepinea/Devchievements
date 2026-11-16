@@ -111,6 +111,22 @@ function main() {
   //    toolchains, so it needs its own build invocation.
   //    The wrapper establishes the MSVC environment itself, so this step does not
   //    depend on the caller having sourced env-msvc.ps1.
+  // The Tauri build embeds the UI at compile time, so the UI has to be built
+  // first. pnpm is avoided here on purpose: it stalls resolving the workspace on
+  // this host, and every dependency the UI needs is already hoisted.
+  const desktopUi = path.join(repoRoot, "apps", "desktop");
+  const viteBin = path.join(repoRoot, "node_modules", "vite", "bin", "vite.js");
+  if (fs.existsSync(viteBin) && fs.existsSync(desktopUi)) {
+    step("desktop-ui-build", process.execPath, [viteBin, "build"], desktopUi);
+  } else {
+    results.push({
+      name: "desktop-ui-build",
+      ok: null,
+      skipped: "vite not installed (run: pnpm install --ignore-scripts)",
+    });
+    console.log("SKIP  desktop-ui-build    (vite not installed)");
+  }
+
   const desktopWrapper = path.join(repoRoot, "scripts", "dev", "build-desktop.bat");
   const vcvarsall = "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Auxiliary\\Build\\vcvarsall.bat";
   if (fs.existsSync(desktopWrapper) && fs.existsSync(vcvarsall)) {

@@ -1,0 +1,60 @@
+/* Dark, low-chrome styling: this is a settings window, not a dashboard. */
+:root {
+  color-scheme: dark;
+  --bg: #14161a;
+  --panel: #1b1e24;
+  --text: #e6e8ea;
+  --muted: #9aa3ad;
+  --accent: #2a6df4;
+  --danger: #f05252;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+}
+
+.shell { padding: 20px 24px 32px; max-width: 720px; }
+.head h1 { margin: 0; font-size: 20px; }
+
+section { margin-top: 22px; }
+section h2 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+
+.muted { color: var(--muted); margin: 4px 0 10px; }
+.error { color: var(--danger); }
+
+input[type="text"], input:not([type]) {
+  background: var(--panel);
+  border: 1px solid #2a2f38;
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 10px;
+  min-width: 260px;
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font: inherit;
+}
+button.ghost { background: transparent; color: var(--muted); }
+button:disabled { opacity: .6; cursor: default; }
+
+.list { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 8px; }
+.row { display: flex; align-items: center; gap: 10px; }
+
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 20px; margin: 0; }
+.stats div { display: flex; justify-content: space-between; border-bottom: 1px solid #23272f; padding-bottom: 4px; }
+.stats dt { color: var(--muted); }
+.stats dd { margin: 0; }
+
+.foot { margin-top: 26px; display: flex; align-items: center; gap: 12px; }
+.notice { color: var(--muted); }

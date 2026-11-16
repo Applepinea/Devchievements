@@ -37,6 +37,10 @@ static PRIVACY_MODE: AtomicU8 = AtomicU8::new(0);
 /// and remembering the failure stops the log filling with the same error.
 static NOTIFICATION_STATE: AtomicU8 = AtomicU8::new(0);
 
+/// Set by the page once it has rendered, so a smoke test can wait for real
+/// evidence instead of a fixed sleep.
+static UI_READY: AtomicBool = AtomicBool::new(false);
+
 /// Set when the user asks for an immediate drain from the tray.
 static DRAIN_NOW: AtomicBool = AtomicBool::new(false);
 
@@ -379,6 +383,131 @@ fn identity_from_settings(data_dir: &std::path::Path) -> Option<Identity> {
     Some(identity)
 }
 
+// ---------------------------------------------------------------- UI commands
+//
+// These are the only way the window reaches the database. Keeping them narrow means
+// the UI cannot invent state: every field it shows comes from here, and every write
+// goes through the same settings file the tray menu uses.
+
+/// What the settings page needs to render.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsView {
+    emails: Vec<String>,
+    privacy: String,
+    timezone: Option<String>,
+    data_dir: String,
+}
+
+/// A read-only summary for the status section.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StatusView {
+    events: i64,
+    repositories: usize,
+    unlocked_achievements: usize,
+    notifications_never_shown: i64,
+    pending_notifications: i64,
+    channel: String,
+    toast_ready: bool,
+    sounds: Vec<String>,
+}
+
+#[tauri::command]
+fn get_settings() -> SettingsView {
+    let stored = settings::Settings::load(&settings_path());
+    let data_dir = default_data_dir();
+    SettingsView {
+        emails: stored.emails,
+        privacy: stored.privacy.as_str().to_string(),
+        timezone: stored.timezone,
+        // Spec 26.2: the page shows where data lives, so it is redacted the same way
+        // a diagnostic export would be.
+        data_dir: devchievements_privacy::redact_path(
+            &data_dir.to_string_lossy(),
+            std::env::var("USERPROFILE").ok().as_deref(),
+        ),
+    }
+}
+
+#[tauri::command]
+fn save_settings(settings: SettingsView) -> Result<(), String> {
+    let path = settings_path();
+    let mut stored = settings::Settings::load(&path);
+
+    // Empty rows are a UI artefact of the add/remove flow, not identities.
+    stored.emails = settings
+        .emails
+        .into_iter()
+        .map(|e| e.trim().to_string())
+        .filter(|e| !e.is_empty())
+        .collect();
+    stored.privacy = match settings.privacy.as_str() {
+        "privacy" => settings::PrivacyMode::Privacy,
+        _ => settings::PrivacyMode::Normal,
+    };
+    stored.timezone = settings.timezone.filter(|t| !t.trim().is_empty());
+
+    stored.save(&path).map_err(|e| e.to_string())?;
+
+    // Keep the running process in step with what was just written.
+    PRIVACY_MODE.store(
+        if matches!(stored.privacy, settings::PrivacyMode::Privacy) { 1 } else { 0 },
+        Ordering::SeqCst,
+    );
+    println!("SETTINGS saved privacy={}", stored.privacy.as_str());
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_status() -> Result<StatusView, String> {
+    let data_dir = default_data_dir();
+    let pool = devchievements_storage::open(&data_dir.join("companion.db"))
+        .await
+        .map_err(|e| e.to_string())?;
+    devchievements_storage::ingest::migrate(&pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let snapshot = devchievements_storage::diagnostics::snapshot(&pool, |id| {
+        devchievements_privacy::stable_alias(id)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let health = devchievements_storage::observability::outbox_health(&pool, now)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let caps = current_capabilities();
+    Ok(StatusView {
+        events: snapshot.events,
+        repositories: snapshot.repositories.len(),
+        unlocked_achievements: snapshot.unlocked_achievements.len(),
+        notifications_never_shown: snapshot.notifications_never_shown,
+        pending_notifications: health.pending,
+        channel: serde_json::to_value(caps.channel())
+            .ok()
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .unwrap_or_else(|| "in_app_only".to_string()),
+        toast_ready: toast::registration_state().is_ready(),
+        sounds: audio::available_sound_ids(),
+    })
+}
+
+/// Called by the page once it has rendered.
+///
+/// Without this the only evidence of a working UI is a window that exists, which is
+/// exactly the sort of half-proof that let the earlier webview problem hide.
+#[tauri::command]
+fn ui_ready(view: String) {
+    UI_READY.store(true, Ordering::SeqCst);
+    println!("UI READY view={view}");
+}
 fn main() {
     // A probe entry point, used by scripts/e2e/toast.mjs. It runs the SAME code path
     // as the app (register + show) instead of a separate implementation, so the test
@@ -636,38 +765,43 @@ fn main() {
     // started, then exit. Exists because the tray-only build never creates a
     // webview, so the failure this reproduces was invisible.
     if std::env::args().any(|a| a == "--window-smoke") {
-        let result = tauri::Builder::default()
-            .setup(|app| {
-                use tauri::Manager;
-                let window = tauri::WebviewWindowBuilder::new(
-                    app,
-                    "smoke",
-                    tauri::WebviewUrl::App("index.html".into()),
-                )
-                .title("Devchievements")
-                .inner_size(420.0, 320.0)
-                // WebView2 needs a writable profile directory. Passing it explicitly
-                // removes the failure mode where the default (next to the exe) is
-                // not writable and the environment reports only E_ACCESSDENIED.
-                .data_directory(default_data_dir().join("webview"))
-                .build();
-
-                match window {
-                    Ok(w) => {
-                        println!("WINDOW OK title={:?}", w.title().unwrap_or_default());
-                    }
-                    Err(e) => println!("WINDOW FAILED error={e}"),
+        // Report success only when the page says it rendered. A window that opens
+        // onto a blank page would otherwise look identical to a working one.
+        std::thread::spawn(|| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            while std::time::Instant::now() < deadline {
+                if UI_READY.load(Ordering::SeqCst) {
+                    println!("WINDOW OK ui=ready");
+                    std::process::exit(0);
                 }
-                std::process::exit(0);
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            println!("WINDOW FAILED reason=page did not report ready");
+            std::process::exit(1);
+        });
+
+        let result = tauri::Builder::default()
+            .invoke_handler(tauri::generate_handler![
+                get_settings,
+                save_settings,
+                get_status,
+                ui_ready
+            ])
+            .setup(|app| {
+                match open_main_window(app.handle()) {
+                    Ok(()) => println!("WINDOW created"),
+                    Err(e) => {
+                        println!("WINDOW FAILED error={e}");
+                        std::process::exit(1);
+                    }
+                }
+                Ok(())
             })
             .run(tauri::generate_context!());
 
-        match result {
-            Ok(()) => {}
-            Err(e) => {
-                println!("WINDOW FAILED error={e}");
-                std::process::exit(1);
-            }
+        if let Err(e) = result {
+            println!("WINDOW FAILED error={e}");
+            std::process::exit(1);
         }
         std::process::exit(0);
     }
@@ -690,6 +824,12 @@ fn main() {
     }
 
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            get_settings,
+            save_settings,
+            get_status,
+            ui_ready
+        ])
         .setup(|app| {
             // Spec 26.2 requires a tray shortcut for privacy mode, so the menu item
             // is a checkbox bound to the persisted setting rather than a one-shot
