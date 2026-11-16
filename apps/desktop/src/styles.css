@@ -115,34 +115,83 @@ button:disabled { opacity: .6; cursor: default; }
 .wizard h1 { margin: 0 0 6px; font-size: 22px; }
 .wizard h2 { margin: 8px 0 6px; font-size: 17px; }
 
-/* Notification popup: its own window, so it fills the viewport edge to edge. */
-html, body { margin: 0; height: 100%; }
+/*
+ * Notification popup.
+ *
+ * The reference style is a wide, short, translucent dark card with a small icon and
+ * three lines of text. It stays visually quiet on purpose: the icon and the name are
+ * what the user is meant to notice, not the card.
+ */
+html, body { margin: 0; height: 100%; background: transparent; }
 
 .popup {
+  position: relative;
   height: 100vh;
-  padding: 14px 16px;
-  background: #1b1e24;
-  border: 1px solid #2b3240;
-  border-left: 4px solid #3d7bfd;
-  border-radius: 10px;
+  box-sizing: border-box;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  /* Deep grey, mostly opaque: over bright content a heavier scrim reads better. */
+  background: rgba(22, 24, 28, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 0;
+  overflow: hidden;
+  animation:
+    popup-in 240ms cubic-bezier(.2, .8, .3, 1) both,
+    popup-out 420ms ease-in 4.4s both;
 }
 
-.popup-badge {
+/* The card cannot exceed the window, so text truncates rather than pushing it wider. */
+.popup-text { min-width: 0; flex: 1; }
+
+.popup-icon {
+  flex: 0 0 auto;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(160deg, #2a2f38, #1b1e24);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.popup-monogram {
+  font: 600 22px/1 system-ui, -apple-system, Segoe UI, sans-serif;
+  color: #d5d9de;
+}
+
+.popup-label {
   font-size: 10px;
-  letter-spacing: .12em;
+  letter-spacing: .14em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: #8f98a0;
 }
 
-.popup-title { font-size: 15px; font-weight: 600; }
-.popup-body { color: var(--muted); }
-.popup-others { color: var(--muted); font-size: 12px; }
+.popup-title {
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #eef1f4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-.rarity-uncommon { border-left-color: #2fbf71; }
-.rarity-rare { border-left-color: #3d7bfd; }
-.rarity-epic { border-left-color: #a855f7; }
-.rarity-legendary { border-left-color: #e0b341; }
+.popup-body {
+  margin-top: 1px;
+  font-size: 12px;
+  color: #9aa3ad;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes popup-in {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes popup-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}

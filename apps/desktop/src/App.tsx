@@ -22,9 +22,16 @@ type PageId = (typeof PAGES)[number]["id"];
 // The hash selects the initial page, so a smoke test can open any page directly
 // instead of driving the nav with synthetic clicks.
 function initialPage(): PageId {
-  const raw = window.location.hash.replace(/^#/, "");
+  const raw = window.location.hash.replace(/^#/, "").split("?")[0] ?? "";
   const found = PAGES.find((p) => p.id === raw);
   return found ? found.id : "dashboard";
+}
+
+/// A wizard step requested in the URL, used by the smoke test.
+function requestedStep(): string | null {
+  const raw = window.location.hash.replace(/^#/, "");
+  const query = raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "";
+  return new URLSearchParams(query).get("step");
 }
 
 export default function App() {
@@ -52,7 +59,14 @@ export default function App() {
   }, [onboarded, current]);
 
   if (onboarded === null) return <p className="muted">Starting...</p>;
-  if (!onboarded) return <Welcome onFinish={() => setOnboarded(true)} />;
+  if (!onboarded) {
+    return (
+      <Welcome
+        initialStep={requestedStep() ?? "welcome"}
+        onFinish={() => setOnboarded(true)}
+      />
+    );
+  }
 
   const page = PAGES.find((p) => p.id === current) ?? PAGES[0];
   const Page = page.component;

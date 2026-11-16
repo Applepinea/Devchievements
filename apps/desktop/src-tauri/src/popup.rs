@@ -20,7 +20,11 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 const PREFIX: &str = "notify";
 
 /// How long a popup stays before closing itself.
-const LIFETIME: std::time::Duration = std::time::Duration::from_secs(6);
+const LIFETIME: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Window size in logical pixels, matching the wide-and-short proportion Steam uses.
+const WIDTH: f64 = 364.0;
+const HEIGHT: f64 = 88.0;
 
 /// Everything a popup needs to render.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -48,21 +52,11 @@ pub fn show(app: &AppHandle, payload: &PopupPayload, counter: u64) -> Result<(),
     let encoded = serde_json::to_string(payload).map_err(|e| e.to_string())?;
     let url = format!("index.html#popup?data={}", urlencoding(&encoded));
 
-    let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
-        .title("Devchievements")
-        .inner_size(380.0, 132.0)
-        .decorations(false)
-        .resizable(false)
-        .always_on_top(true)
-        // Spec 29.2: a notification must not take the keyboard away from the user.
-        .focused(false)
-        .skip_taskbar(true)
-        .shadow(true)
-        .visible(false)
-        // Same profile as the main window; a second one would start another browser
-        // process for no benefit.
-        .data_directory(crate::default_data_dir().join("webview"))
-        .build()
+    // Translucency is wanted (the popup floats over whatever the user is doing) but
+    // it is the first thing that can fail on a given GPU or theme, so a failure here
+    // falls back to an opaque window instead of losing the notification entirely.
+    let window = build_window(app, &label, &url, true)
+        .or_else(|_| build_window(app, &label, &url, false))
         .map_err(|e| e.to_string())?;
 
     place_bottom_right(&window);
@@ -82,6 +76,31 @@ pub fn show(app: &AppHandle, payload: &PopupPayload, counter: u64) -> Result<(),
     Ok(())
 }
 
+/// Build the popup window, optionally with a transparent background.
+fn build_window(
+    app: &AppHandle,
+    label: &str,
+    url: &str,
+    transparent: bool,
+) -> tauri::Result<tauri::WebviewWindow> {
+    WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
+        .title("Devchievements")
+        .inner_size(WIDTH, HEIGHT)
+        .decorations(false)
+        .resizable(false)
+        .always_on_top(true)
+        // Spec 29.2: a notification must not take the keyboard away from the user.
+        .focused(false)
+        .skip_taskbar(true)
+        .transparent(transparent)
+        .shadow(false)
+        .visible(false)
+        // Same profile as the main window; a second one would start another browser
+        // process for no benefit.
+        .data_directory(crate::default_data_dir().join("webview"))
+        .build()
+}
+
 /// Put the popup in the bottom-right corner of the current monitor's work area.
 fn place_bottom_right(window: &tauri::WebviewWindow) {
     let Ok(Some(monitor)) = window.current_monitor() else {
@@ -91,13 +110,13 @@ fn place_bottom_right(window: &tauri::WebviewWindow) {
     let position = monitor.position();
     let scale = monitor.scale_factor();
 
-    // Leave room for taskbar and for the window's own frame.
-    let width = (380.0 * scale) as i32;
-    let height = (132.0 * scale) as i32;
-    let margin = (24.0 * scale) as i32;
+    let width = (WIDTH * scale) as i32;
+    let height = (HEIGHT * scale) as i32;
 
-    let x = position.x + size.width as i32 - width - margin;
-    let y = position.y + size.height as i32 - height - margin * 3;
+    // Flush against the bottom-right corner: no margin, because the card is meant to
+    // read as attached to the edge rather than floating near it.
+    let x = position.x + size.width as i32 - width;
+    let y = position.y + size.height as i32 - height;
 
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
 }

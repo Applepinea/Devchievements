@@ -2,24 +2,42 @@ import { useEffect, useState } from "react";
 import {
   completeOnboarding,
   getSettings,
+  importHistory,
   installHooks,
   onboardingStatus,
   saveSettings,
   type OnboardingStatus,
   type SettingsView,
+  uiReady,
 } from "../ipc";
 
 // Spec 25: the first run explains what the companion needs and why. It is a
 // sequence rather than one long form because each step has a precondition: without
 // an identity, installing hooks would capture commits that are then refused.
-type Step = "welcome" | "identity" | "hooks" | "done";
+type Step = "welcome" | "identity" | "hooks" | "import" | "done";
 
-export default function Welcome({ onFinish }: { onFinish: () => void }) {
+export default function Welcome({
+  onFinish,
+  initialStep = "welcome",
+}: {
+  onFinish: () => void;
+  initialStep?: string;
+}) {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [settings, setSettings] = useState<SettingsView | null>(null);
-  const [step, setStep] = useState<Step>("welcome");
+  const known: Step[] = ["welcome", "identity", "hooks", "import", "done"];
+  const [step, setStepState] = useState<Step>(
+    known.includes(initialStep as Step) ? (initialStep as Step) : "welcome",
+  );
+
+  // Report the current step so the smoke test can prove each one renders.
+  useEffect(() => {
+    void uiReady("welcome-" + step);
+  }, [step]);
   const [repoPath, setRepoPath] = useState<string>("");
   const [notice, setNotice] = useState<string>("");
+  const [importPath, setImportPath] = useState<string>("");
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     Promise.all([onboardingStatus(), getSettings()]).then(([s, v]) => {
@@ -29,6 +47,8 @@ export default function Welcome({ onFinish }: { onFinish: () => void }) {
   }, []);
 
   if (!status || !settings) return <p className="muted">Loading...</p>;
+
+  const setStep = (next: Step) => setStepState(next);
 
   const emails = settings.emails;
 
@@ -57,9 +77,29 @@ export default function Welcome({ onFinish }: { onFinish: () => void }) {
         "Installed: " + results.map((r) => r.hook).join(", ") +
           ". Commits in this repository are now captured.",
       );
-      setStep("done");
+      setImportPath(repoPath.trim());
+      setStep("import");
     } catch (e) {
       setNotice("Install failed: " + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
+  const runImport = async () => {
+    if (!importPath.trim()) {
+      setNotice("Enter the path to a repository.");
+      return;
+    }
+    setImporting(true);
+    try {
+      const report = await importHistory(importPath.trim());
+      setNotice(
+        "Imported " + report.ingested + " commits (" + report.duplicates + " already known).",
+      );
+      setStep("done");
+    } catch (e) {
+      setNotice("Import failed: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -166,6 +206,32 @@ export default function Welcome({ onFinish }: { onFinish: () => void }) {
           <button className="ghost" onClick={() => void finish()}>
             Skip for now
           </button>
+        </>
+      ) : null}
+
+      {step === "import" ? (
+        <>
+          <h2>Import past commits</h2>
+          <p className="muted">
+            Optional. Past commits can be counted too, at their original dates.
+            Imports are silent and can be repeated safely.
+          </p>
+          <div className="row">
+            <input
+              value={importPath}
+              onChange={(e) => setImportPath(e.target.value)}
+              placeholder="C:\path\to\repo"
+            />
+            <button onClick={() => void runImport()} disabled={importing}>
+              {importing ? "Importing..." : "Import"}
+            </button>
+          </div>
+          <p className="notice">{notice}</p>
+          <div className="row">
+            <button className="ghost" onClick={() => setStep("done")}>
+              Skip
+            </button>
+          </div>
         </>
       ) : null}
 

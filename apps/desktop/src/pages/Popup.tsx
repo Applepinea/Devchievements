@@ -22,24 +22,36 @@ function readPayload(): Payload | null {
   }
 }
 
+// A monogram instead of an icon: the product has no artwork per achievement, and
+// inventing one would be inventing data. The letter is derived from the name.
+function monogram(title: string): string {
+  const first = title.trim().charAt(0);
+  return first ? first.toUpperCase() : "?";
+}
+
 export default function Popup() {
   const [payload] = useState<Payload | null>(readPayload);
 
   useEffect(() => {
-    // The Rust side closes the window; this only marks it as drawn.
     document.documentElement.dataset.rendered = "true";
   }, []);
 
-  if (!payload) return <div className="popup">Achievement unlocked</div>;
+  if (!payload) return <div className="popup" />;
 
   return (
-    <div className={"popup rarity-" + payload.rarity.toLowerCase()}>
-      <div className="popup-badge">unlocked</div>
-      <div className="popup-title">{payload.title}</div>
-      <div className="popup-body">{payload.body}</div>
-      {payload.others.length > 0 ? (
-        <div className="popup-others">+{payload.others.length} more</div>
-      ) : null}
+    <div className="popup">
+      <div className="popup-icon">
+        <span className="popup-monogram">{monogram(payload.title)}</span>
+      </div>
+      <div className="popup-text">
+        <div className="popup-label">成就已解锁</div>
+        <div className="popup-title">{payload.title}</div>
+        <div className="popup-body">
+          {payload.others.length > 0
+            ? payload.body + " (+" + payload.others.length + ")"
+            : payload.body}
+        </div>
+      </div>
     </div>
   );
 }

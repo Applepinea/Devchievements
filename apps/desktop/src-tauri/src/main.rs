@@ -281,7 +281,14 @@ pub(crate) fn open_main_window_at(app: &tauri::AppHandle, page: &str) -> Result<
         .map_err(|e| e.to_string())
 }
 
-pub(crate) fn default_data_dir() -> std::path::PathBuf {
+pub(crate) fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn default_data_dir() -> std::path::PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
@@ -617,6 +624,57 @@ fn main() {
     // Print the capability set and the channel the degradation chain selects.
     // Import one repository's history (spec 11). Print a JSON report so the caller
     // (installer, wizard, tests) can show progress and failures.
+    // Write a backup of the database and report where it went.
+    if std::env::args().any(|a| a == "--backup") {
+        let data_dir = default_data_dir();
+        let destination = data_dir
+            .join("backups")
+            .join(format!("companion-{}.db", now_millis()));
+        let result = async_std::task::block_on(async {
+            let pool = devchievements_storage::open(&data_dir.join("companion.db"))
+                .await
+                .map_err(|e| e.to_string())?;
+            devchievements_storage::ingest::migrate(&pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            devchievements_storage::backup::backup(&pool, &destination)
+                .await
+                .map_err(|e| e.to_string())
+        });
+        match result {
+            Ok(report) => {
+                println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("BACKUP FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Restore a backup over the live database. Only safe while nothing is writing.
+    if let Some(i) = std::env::args().position(|a| a == "--restore") {
+        let Some(source) = std::env::args().nth(i + 1) else {
+            println!("RESTORE FAILED: --restore needs a file");
+            std::process::exit(2);
+        };
+        let target = default_data_dir().join("companion.db");
+        match devchievements_storage::backup::restore(
+            std::path::Path::new(&source),
+            &target,
+        ) {
+            Ok(()) => {
+                println!("RESTORED {}", target.to_string_lossy());
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("RESTORE FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     if let Some(i) = std::env::args().position(|a| a == "--import") {
         let Some(repo_arg) = std::env::args().nth(i + 1) else {
             println!("{{\"error\":\"--import needs a repository path\"}}");
@@ -865,7 +923,16 @@ fn main() {
                     .position(|a| a == "--page")
                     .and_then(|i| std::env::args().nth(i + 1))
                     .unwrap_or_else(|| "dashboard".to_string());
-                match open_main_window_at(app.handle(), &page) {
+                // Wizard steps are addressable too, so each one can be rendered and
+                // checked without scripted clicking.
+                let step = std::env::args()
+                    .position(|a| a == "--step")
+                    .and_then(|i| std::env::args().nth(i + 1));
+                let fragment = match step {
+                    Some(step) => format!("{page}?step={step}"),
+                    None => page.clone(),
+                };
+                match open_main_window_at(app.handle(), &fragment) {
                     Ok(()) => println!("WINDOW created"),
                     Err(e) => {
                         println!("WINDOW FAILED error={e}");
@@ -892,6 +959,40 @@ fn main() {
         match toast::show_with_aumid(&aumid, "Devchievements", "probe") {
             Ok(()) => println!("TOAST OK aumid={aumid}"),
             Err(e) => println!("TOAST FAILED aumid={aumid} error={e}"),
+        }
+        std::process::exit(0);
+    }
+
+    // Show one popup with sample content and exit, for checking the visual design
+    // without having to make a commit.
+    if std::env::args().any(|a| a == "--popup-demo") {
+        let payload = popup::PopupPayload {
+            title: "先提交为敬".to_string(),
+            body: "Common Day · 第 1 天".to_string(),
+            rarity: "Uncommon".to_string(),
+            others: vec![],
+        };
+        let result = tauri::Builder::default()
+            .setup(move |app| {
+                let handle = app.handle().clone();
+                // Let the event loop start before creating a window.
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(600));
+                    match popup::show(&handle, &payload, 1) {
+                        Ok(()) => println!("POPUP demo shown"),
+                        Err(e) => {
+                            println!("POPUP demo failed: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                });
+                Ok(())
+            })
+            .run(tauri::generate_context!());
+
+        if let Err(e) = result {
+            println!("POPUP demo failed: {e}");
+            std::process::exit(1);
         }
         std::process::exit(0);
     }

@@ -27,10 +27,12 @@ function check(label, ok, detail) {
   }
 }
 
-function openWindow(page, dataRoot, logName) {
+function openWindow(page, dataRoot, logName, step) {
+  const args = ["--window-smoke", "--page", page];
+  if (step) args.push("--step", step);
   const log = path.join(scratch, logName);
   const fd = fs.openSync(log, "w");
-  const r = spawnSync(appExe, ["--window-smoke", "--page", page], {
+  const r = spawnSync(appExe, args, {
     stdio: ["ignore", fd, fd],
     windowsHide: true,
     env: { ...process.env, LOCALAPPDATA: dataRoot },
@@ -53,7 +55,14 @@ function main() {
   fs.mkdirSync(fresh, { recursive: true });
   const first = openWindow("dashboard", fresh, "fresh.log");
   check("the app starts on a fresh machine", first.status === 0, first.out);
-  check("it shows the wizard instead of the dashboard", /UI READY view=welcome/.test(first.out), first.out);
+  check("it shows the wizard instead of the dashboard", /UI READY view=welcome-/.test(first.out), first.out);
+
+  // Spec 34.1 lists the import step as part of the wizard; each step is rendered
+  // separately so a broken one cannot hide behind the first.
+  for (const step of ["identity", "hooks", "import", "done"]) {
+    const run = openWindow("welcome", fresh, "step-" + step + ".log", step);
+    check("the " + step + " step renders", run.out.includes("view=welcome-" + step), run.out);
+  }
 
   // 2. Onboarding completed: the dashboard must open directly.
   const ready = path.join(scratch, "ready");
