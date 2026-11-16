@@ -223,11 +223,10 @@ async fn ingest_commit_inner(
     if let Some(sha) = event.commit_sha.as_deref() {
         let same_commit: Option<(String,)> = sqlx::query_as(
             "SELECT event_id FROM events
-             WHERE canonical_repository_id = ? AND commit_sha = ? AND event_type = ?",
+             WHERE canonical_repository_id = ? AND commit_sha = ?",
         )
         .bind(event.canonical_repository_id.0.as_str())
         .bind(sha)
-        .bind(event.event_type.as_str())
         .fetch_optional(&mut *tx)
         .await?;
         if same_commit.is_some() {

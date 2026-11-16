@@ -172,7 +172,7 @@ async fn importing_history_records_commits_silently() {
     for i in 0..5 {
         fx.commit_at(
             &format!("f{i}.txt"),
-            "2023-06-0{i}T10:00:00",
+            &format!("2023-06-{:02}T10:00:00", i + 1),
             &format!("c{i}"),
         );
     }
@@ -242,7 +242,7 @@ async fn importing_the_same_history_twice_is_idempotent() {
     for i in 0..3 {
         fx.commit_at(
             &format!("g{i}.txt"),
-            "2023-07-0{i}T10:00:00",
+            &format!("2023-07-{:02}T10:00:00", i + 1),
             &format!("d{i}"),
         );
     }
