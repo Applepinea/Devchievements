@@ -952,6 +952,7 @@ ok  the data directory is outside the package
 | 项 | 状态 |
 | --- | --- |
 | 商店审核是否接受「写入用户 Git 仓库 + 复制可执行文件到用户目录」 | **未验证**，属于审核判断 |
+| 提交时的认证备注 | 已写好：[store-certification-notes.md](store-certification-notes.md)，逐条对照代码核实过 |
 | 图标质量 | 源 `icon.ico` 只有 32×32，放大到 310 会糊；**需要真正的美术资源** |
 | 无 WebView2 的机器上「一键安装」全流程 | 本机有运行库，**只能在你的虚拟机验** |
 | `fixedRuntime`（把 130MB 运行时打进包） | 未做；当前用 bootstrapper 按需安装，包体保持 6.5MB |
