@@ -15,7 +15,10 @@ import {
   listAssets,
   removeAsset,
   showPreview,
+  resetOnboarding,
+  exportDiagnostics,
 } from "../ipc";
+import { t, tf } from "../i18n";
 
 /** Add an excluded repository id. */
 function AddExclusion({ onAdd }: { onAdd: (id: string) => void }) {
@@ -36,7 +39,7 @@ function AddExclusion({ onAdd }: { onAdd: (id: string) => void }) {
           if (e.key === "Enter") commit();
         }}
       />
-      <button onClick={commit}>Exclude</button>
+      <button onClick={commit}>{t("Exclude")}</button>
     </div>
   );
 }
@@ -78,16 +81,18 @@ export default function Settings() {
   const [previewNotice, setPreviewNotice] = useState<string>("");
   const [assetNotice, setAssetNotice] = useState<string>("");
   const [soundNotice, setSoundNotice] = useState<string>("");
+  const [diagnosticsRaw, setDiagnosticsRaw] = useState(false);
+  const [diagnosticsNotice, setDiagnosticsNotice] = useState<string>("");
 
   const pickSound = async () => {
     const chosen = await openFileDialog(["wav"]);
     if (!chosen) return;
     try {
       await importSound(chosen);
-      setSoundNotice("Imported.");
+      setSoundNotice(t("Imported."));
       await refreshSounds();
     } catch (e) {
-      setSoundNotice("Refused: " + (e instanceof Error ? e.message : String(e)));
+      setSoundNotice(tf("Refused: {error}", { error: e instanceof Error ? e.message : String(e) }));
     }
   };
   const [assets, setAssets] = useState<StoredAsset[]>([]);
@@ -115,20 +120,22 @@ export default function Settings() {
     if (!chosen) return;
     try {
       await importAsset(chosen);
-      setAssetNotice("Imported.");
+      setAssetNotice(t("Imported."));
       await refreshAssets();
     } catch (e) {
-      setAssetNotice("Refused: " + (e instanceof Error ? e.message : String(e)));
+      setAssetNotice(tf("Refused: {error}", { error: e instanceof Error ? e.message : String(e) }));
     }
   };
 
   const dropAsset = async (name: string) => {
     try {
       await removeAsset(name);
-      setAssetNotice("Removed.");
+      setAssetNotice(t("Removed."));
       await refreshAssets();
     } catch (e) {
-      setAssetNotice("Could not remove: " + (e instanceof Error ? e.message : String(e)));
+      setAssetNotice(
+        tf("Could not remove: {error}", { error: e instanceof Error ? e.message : String(e) }),
+      );
     }
   };
 
@@ -139,29 +146,37 @@ export default function Settings() {
     await saveSettings(settings);
     try {
       await showPreview();
-      setPreviewNotice("Preview opened.");
+      setPreviewNotice(t("Preview opened."));
     } catch (e) {
-      setPreviewNotice("Preview failed: " + (e instanceof Error ? e.message : String(e)));
+      setPreviewNotice(
+        tf("Preview failed: {error}", { error: e instanceof Error ? e.message : String(e) }),
+      );
     }
   };
 
   const onBackup = async () => {
     try {
       const report = await backupDatabase();
-      setBackupNotice("Backup written: " + (report.bytes / 1024).toFixed(1) + " KB");
+      setBackupNotice(
+        tf("Backup written: {size}", { size: (report.bytes / 1024).toFixed(1) + " KB" }),
+      );
     } catch (e) {
-      setBackupNotice("Backup failed: " + (e instanceof Error ? e.message : String(e)));
+      setBackupNotice(
+        tf("Backup failed: {error}", { error: e instanceof Error ? e.message : String(e) }),
+      );
     }
   };
 
   const onClear = async () => {
     try {
       await clearData();
-      setBackupNotice("Statistics deleted.");
+      setBackupNotice(t("Statistics deleted."));
       setConfirmClear(false);
       await load();
     } catch (e) {
-      setBackupNotice("Delete failed: " + (e instanceof Error ? e.message : String(e)));
+      setBackupNotice(
+        tf("Delete failed: {error}", { error: e instanceof Error ? e.message : String(e) }),
+      );
     }
   };
 
@@ -184,34 +199,56 @@ export default function Settings() {
     setNotice("");
     try {
       await saveSettings(settings);
-      setNotice("Saved.");
+      setNotice(t("Saved."));
     } catch (e) {
-      setNotice("Could not save: " + (e instanceof Error ? e.message : String(e)));
+      setNotice(tf("Could not save: {error}", { error: e instanceof Error ? e.message : String(e) }));
     } finally {
       setSaving(false);
     }
   };
 
   if (error) return <p className="error">{error}</p>;
-  if (!settings) return <p className="muted">Loading...</p>;
+  if (!settings) return <p className="muted">{t("Loading...")}</p>;
 
   const update = (patch: Partial<SettingsView>) =>
     setSettings({ ...settings, ...patch });
 
   return (
     <>
-      <h2>Settings</h2>
+      <h2>{t("Settings")}</h2>
       {settings.emails.length === 0 ? (
         <p className="notice">
-          No identity yet. Add the email you commit with; until then the companion
-          records nothing rather than guessing which commits are yours.
+          {t("No identity yet. Add the email you commit with; until then the companion records nothing rather than guessing which commits are yours.")}
         </p>
       ) : null}
 
-      <h3>Identity</h3>
+      <h3>{t("Language")}</h3>
+      <div className="row">
+        <select
+          value={settings.language}
+          onChange={async (e) => {
+            const next = { ...settings, language: e.target.value };
+            setSettings(next);
+            // Saved and reloaded immediately: the strings on screen are produced by
+            // the shell before this page renders, so a language that only took effect
+            // at the next launch would look like a broken switch. Saving first also
+            // means other edits on this page are not silently dropped by the reload.
+            await saveSettings(next);
+            window.location.reload();
+          }}
+        >
+          <option value="system">{t("Follow the system")}</option>
+          <option value="en">English</option>
+          <option value="zh-CN">简体中文</option>
+        </select>
+      </div>
       <p className="muted">
-        Commits count only when the author email is one of these. At least one is
-        required before statistics start.
+        {t("Applies immediately: the window reloads. The popup follows the same choice.")}
+      </p>
+
+      <h3>{t("Identity")}</h3>
+      <p className="muted">
+        {t("Commits count only when the author email is one of these. At least one is required before statistics start.")}
       </p>
       <ul className="list">
         {settings.emails.map((email, index) => (
@@ -227,23 +264,21 @@ export default function Settings() {
             <button className="ghost" onClick={() => update({
               emails: settings.emails.filter((_, i) => i !== index),
             })}>
-              Remove
+              {t("Remove")}
             </button>
           </li>
         ))}
       </ul>
       <button onClick={() => update({ emails: [...settings.emails, ""] })}>
-        Add email
+        {t("Add email")}
       </button>
 
-      <h3>GitHub logins</h3>
+      <h3>{t("GitHub logins")}</h3>
       <p className="muted">
-        The browser extension reports commits by GitHub account. A report only
-        counts when its login is mapped here to one of the emails above;
-        everything else is refused rather than assumed to be yours.
+        {t("The browser extension reports commits by GitHub account. A report only counts when its login is mapped here to one of the emails above; everything else is refused rather than assumed to be yours.")}
       </p>
       <ul className="list">
-        {(settings.githubLogins ?? []).map((mapping, index) => (
+        {(settings.githubLogins ?? []).map((mapping: LoginMapping, index: number) => (
           <li key={index} className="row">
             <input
               value={mapping.login}
@@ -271,11 +306,11 @@ export default function Settings() {
               className="ghost"
               onClick={() =>
                 update({
-                  githubLogins: settings.githubLogins.filter((_, i) => i !== index),
+                  githubLogins: settings.githubLogins.filter((_, i: number) => i !== index),
                 })
               }
             >
-              Remove
+              {t("Remove")}
             </button>
           </li>
         ))}
@@ -287,18 +322,17 @@ export default function Settings() {
           })
         }
       >
-        Add mapping
+        {t("Add mapping")}
       </button>
 
-      <h3>Popup appearance</h3>
+      <h3>{t("Popup appearance")}</h3>
       <p className="muted">
-        The notification window. Values outside the allowed range are clamped when
-        saved, so the popup can never be placed off-screen.
+        {t("The notification window. Values outside the allowed range are clamped when saved, so the popup can never be placed off-screen.")}
       </p>
 
       <div className="row">
         <label className="field">
-          <span>Width</span>
+          <span>{t("Width")}</span>
           <input
             type="range" min={280} max={600}
             value={settings.popup.width}
@@ -309,7 +343,7 @@ export default function Settings() {
           <span className="mono">{settings.popup.width}</span>
         </label>
         <label className="field">
-          <span>Scale</span>
+          <span>{t("Scale")}</span>
           <input
             type="range" min={70} max={150}
             value={settings.popup.scalePercent}
@@ -323,21 +357,21 @@ export default function Settings() {
 
       <div className="row">
         <label className="field">
-          <span>Corner</span>
+          <span>{t("Corner")}</span>
           <select
             value={settings.popup.corner}
             onChange={(e) =>
               update({ popup: { ...settings.popup, corner: e.target.value as typeof settings.popup.corner } })
             }
           >
-            <option value="top_left">top left</option>
-            <option value="top_right">top right</option>
-            <option value="bottom_left">bottom left</option>
-            <option value="bottom_right">bottom right</option>
+            <option value="top_left">{t("top left")}</option>
+            <option value="top_right">{t("top right")}</option>
+            <option value="bottom_left">{t("bottom left")}</option>
+            <option value="bottom_right">{t("bottom right")}</option>
           </select>
         </label>
         <label className="field">
-          <span>Margin</span>
+          <span>{t("Margin")}</span>
           <input
             type="range" min={0} max={100}
             value={settings.popup.screenMargin}
@@ -351,7 +385,7 @@ export default function Settings() {
 
       <div className="row">
         <label className="field">
-          <span>Display seconds</span>
+          <span>{t("Display seconds")}</span>
           <input
             type="range" min={1} max={30}
             value={settings.popup.displaySeconds}
@@ -362,7 +396,7 @@ export default function Settings() {
           <span className="mono">{settings.popup.displaySeconds}s</span>
         </label>
         <label className="field">
-          <span>Corner radius</span>
+          <span>{t("Corner radius")}</span>
           <input
             type="range" min={0} max={32}
             value={settings.popup.cornerRadius}
@@ -376,7 +410,7 @@ export default function Settings() {
 
       <div className="row">
         <label className="field">
-          <span>Icon size</span>
+          <span>{t("Icon size")}</span>
           <input
             type="range" min={32} max={160}
             value={settings.popup.iconSize}
@@ -387,7 +421,7 @@ export default function Settings() {
           <span className="mono">{settings.popup.iconSize}px</span>
         </label>
         <label className="field">
-          <span>Opacity</span>
+          <span>{t("Opacity")}</span>
           <input
             type="range" min={20} max={100}
             value={settings.popup.opacityPercent}
@@ -401,7 +435,7 @@ export default function Settings() {
 
       <div className="row">
         <label className="field">
-          <span>Animation</span>
+          <span>{t("Animation")}</span>
           <input
             type="range" min={0} max={1000} step={20}
             value={settings.popup.animationMs}
@@ -412,7 +446,7 @@ export default function Settings() {
           <span className="mono">{settings.popup.animationMs}ms</span>
         </label>
         <label className="field">
-          <span>Background blur</span>
+          <span>{t("Background blur")}</span>
           <input
             type="range" min={0} max={24}
             value={settings.popup.backgroundBlur}
@@ -425,55 +459,49 @@ export default function Settings() {
       </div>
 
       <div className="row">
-        <button onClick={() => void preview()}>Preview popup</button>
+        <button onClick={() => void preview()}>{t("Preview popup")}</button>
         <span className="notice">{previewNotice}</span>
       </div>
 
-      <h3>Sounds</h3>
+      <h3>{t("Sounds")}</h3>
       <p className="muted">
-        Available sounds. Import a WAV to replace one: a file named after a slot
-        (for example commitment) becomes selectable, and an override pointing at it
-        is what actually changes playback.
+        {t("Available sounds. Import a WAV to replace one: a file named after a slot (for example commitment) becomes selectable, and an override pointing at it is what actually changes playback.")}
       </p>
       <div className="row">
-        <button onClick={() => void pickSound()}>Import sound…</button>
+        <button onClick={() => void pickSound()}>{t("Import sound…")}</button>
         <span className="notice">{soundNotice}</span>
       </div>
-      <p className="tiny">{sounds.join(" · ") || "No sounds found."}</p>
+      <p className="tiny">{sounds.join(" · ") || t("No sounds found.")}</p>
 
-      <h3>Custom assets</h3>
+      <h3>{t("Custom assets")}</h3>
       <p className="muted">
-        Images and sounds you import. Each file is checked against its actual bytes
-        before it is stored: a renamed document is refused, and an SVG that could
-        run code is rejected rather than sanitised.
+        {t("Images and sounds you import. Each file is checked against its actual bytes before it is stored: a renamed document is refused, and an SVG that could run code is rejected rather than sanitised.")}
       </p>
       <div className="row">
-        <button onClick={() => void pickAsset()}>Import file…</button>
+        <button onClick={() => void pickAsset()}>{t("Import file…")}</button>
         <span className="notice">{assetNotice}</span>
       </div>
       {assets.length === 0 ? (
-        <p className="tiny">No custom assets yet.</p>
+        <p className="tiny">{t("No custom assets yet.")}</p>
       ) : (
         <ul className="list">
-          {assets.map((asset) => (
+          {assets.map((asset: StoredAsset) => (
             <li key={asset.name} className="row spread">
               <span className="mono">{asset.name}</span>
               <span className="muted">
                 {asset.format} · {(asset.bytes / 1024).toFixed(1)} KB
               </span>
               <button className="ghost" onClick={() => void dropAsset(asset.name)}>
-                Remove
+                {t("Remove")}
               </button>
             </li>
           ))}
         </ul>
       )}
 
-      <h3>Event filters</h3>
+      <h3>{t("Event filters")}</h3>
       <p className="muted">
-        These affect your dashboard and ordinary statistics only. Built-in
-        achievements keep counting everything: excluding a repository here never
-        takes an achievement away.
+        {t("These affect your dashboard and ordinary statistics only. Built-in achievements keep counting everything: excluding a repository here never takes an achievement away.")}
       </p>
 
       <label className="row">
@@ -482,7 +510,7 @@ export default function Settings() {
           checked={settings.filters.include_merges}
           onChange={(e) => update({ filters: { ...settings.filters, include_merges: e.target.checked } })}
         />
-        <span>Count merge commits</span>
+        <span>{t("Count merge commits")}</span>
       </label>
 
       <label className="row">
@@ -491,28 +519,28 @@ export default function Settings() {
           checked={settings.filters.include_imported}
           onChange={(e) => update({ filters: { ...settings.filters, include_imported: e.target.checked } })}
         />
-        <span>Count imported history</span>
+        <span>{t("Count imported history")}</span>
       </label>
 
-      <p className="muted">Excluded repositories:</p>
+      <p className="muted">{t("Excluded repositories:")}</p>
       {settings.filters.repositories.mode === "all" ? (
-        <p className="tiny">Nothing excluded.</p>
+        <p className="tiny">{t("Nothing excluded.")}</p>
       ) : (
         <ul className="list">
-          {settings.filters.repositories.ids.map((id, index) => (
+          {settings.filters.repositories.ids.map((id: string, index: number) => (
             <li key={id} className="row spread">
               <span className="mono">{id}</span>
               <button className="ghost" onClick={() => {
                 const ids = settings.filters.repositories.mode === "all"
                   ? []
-                  : settings.filters.repositories.ids.filter((_, i) => i !== index);
+                  : settings.filters.repositories.ids.filter((_, i: number) => i !== index);
                 update({
                   filters: {
                     ...settings.filters,
                     repositories: ids.length ? { mode: "except", ids } : { mode: "all" },
                   },
                 });
-              }}>Remove</button>
+              }}>{t("Remove")}</button>
             </li>
           ))}
         </ul>
@@ -526,7 +554,7 @@ export default function Settings() {
         }}
       />
 
-      <h3>Privacy</h3>
+      <h3>{t("Privacy")}</h3>
       <label className="row">
         <input
           type="checkbox"
@@ -535,35 +563,33 @@ export default function Settings() {
             update({ privacy: e.target.checked ? "privacy" : "normal" })
           }
         />
-        <span>Hide repository names and commit detail in notifications</span>
+        <span>{t("Hide repository names and commit detail in notifications")}</span>
       </label>
       <p className="muted">
-        Privacy mode hides context. It does not encrypt anything and does not detect
-        screen sharing.
+        {t("Privacy mode hides context. It does not encrypt anything and does not detect screen sharing.")}
       </p>
 
-      <h3>Notifications</h3>
+      <h3>{t("Notifications")}</h3>
       <label className="row">
         <input
           type="checkbox"
           checked={settings.notifications}
           onChange={(e) => update({ notifications: e.target.checked })}
         />
-        <span>Show a popup when an achievement unlocks</span>
+        <span>{t("Show a popup when an achievement unlocks")}</span>
       </label>
       <p className="muted">
-        Turning this off stops the interruption, not the counting: unlocks still
-        happen and still appear in the gallery.
+        {t("Turning this off stops the interruption, not the counting: unlocks still happen and still appear in the gallery.")}
       </p>
 
-      <h3>Sound</h3>
+      <h3>{t("Sound")}</h3>
       <label className="row">
         <input
           type="checkbox"
           checked={settings.muted}
           onChange={(e) => update({ muted: e.target.checked })}
         />
-        <span>Mute all sound</span>
+        <span>{t("Mute all sound")}</span>
       </label>
       <div className="row">
         <input
@@ -578,37 +604,115 @@ export default function Settings() {
         <span className="mono">{settings.volume}</span>
       </div>
       <p className="muted">
-        Volume applies to this app only, by scaling the played samples rather than
-        changing the system volume.
+        {t("Volume applies to this app only, by scaling the played samples rather than changing the system volume.")}
       </p>
 
-      <h3>Run mode</h3>
+      <h3>{t("Run mode")}</h3>
       <p className="muted">
         <strong>{settings.runMode}</strong>
       </p>
       <p className="muted">
-        Browser-based features (pull requests, releases, issues) need the extension;
-        in Desktop Only they are listed as unavailable rather than hidden.
+        {t("Browser-based features (pull requests, releases, issues) need the extension; in Desktop Only they are listed as unavailable rather than hidden.")}
       </p>
 
-      <h3>Timezone</h3>
+      <label className="row">
+        <input
+          type="checkbox"
+          checked={settings.startHidden}
+          onChange={(e) => update({ startHidden: e.target.checked })}
+        />
+        {t("Start hidden in the tray")}
+      </label>
+      <p className="muted">
+        {t("On: a launch only puts the icon in the tray and the app keeps counting. Off: the window opens too, which is what a launcher behaves like. Either way the first run shows the setup wizard, and the tray menu can always open the window. Takes effect on the next launch.")}
+      </p>
+
+      <label className="row">
+        <input
+          type="checkbox"
+          checked={settings.startWithWindows}
+          onChange={(e) => update({ startWithWindows: e.target.checked })}
+        />
+        {t("Start with Windows")}
+      </label>
+      <p className="muted">
+        {t("Off by default. Turning it on registers the app in")}
+        <span className="mono"> HKCU\...\CurrentVersion\Run</span>
+        {t(", which signing out and back in follows; uninstalling removes the same entry, so nothing is left behind. Combined with start hidden this is the usual companion setup: running from login, silent until it has something to say.")}
+      </p>
+
+      <h3>{t("Timezone")}</h3>
       <input
         value={settings.timezone ?? ""}
         placeholder="Asia/Taipei"
         onChange={(e) => update({ timezone: e.target.value || null })}
       />
       <p className="muted">
-        Decides which day a commit belongs to. Empty means the system zone.
+        {t("Decides which day a commit belongs to. Empty means the system zone.")}
       </p>
 
-      <h3>Data</h3>
+      <h3>{t("Data")}</h3>
       <p className="muted">
-        Database: {(settings.databaseBytes / 1024).toFixed(1)} KB
+        {tf("Database: {size} KB", { size: (settings.databaseBytes / 1024).toFixed(1) })}
       </p>
       <p className="tiny">{settings.dataDir}</p>
       <div className="row">
-        <button onClick={() => void openDataFolder()}>Open folder</button>
-        <button onClick={() => void onBackup()}>Back up now</button>
+        <button onClick={() => void openDataFolder()}>{t("Open folder")}</button>
+        <button onClick={() => void onBackup()}>{t("Back up now")}</button>
+      </div>
+
+      <h3>{t("Diagnostics")}</h3>
+      <p className="muted">
+        {t("Writes a JSON report next to the database: counters, outbox health, capabilities and settings. Attach it to a bug report. The redacted form replaces repository names with stable aliases and masks the data path.")}
+      </p>
+      <label className="row">
+        <input
+          type="checkbox"
+          checked={diagnosticsRaw}
+          onChange={(e) => setDiagnosticsRaw(e.target.checked)}
+        />
+        {t("Include real repository names and paths")}
+      </label>
+      {diagnosticsRaw ? (
+        <p className="error">
+          {t("The raw form is not safe to share publicly: it names your repositories.")}
+        </p>
+      ) : null}
+      <div className="row">
+        <button
+          onClick={async () => {
+            try {
+              const report = await exportDiagnostics(diagnosticsRaw);
+              setDiagnosticsNotice(tf("Saved to {path}", { path: report.path }));
+            } catch (e) {
+              setDiagnosticsNotice(
+                tf("Export failed: {error}", {
+                  error: e instanceof Error ? e.message : String(e),
+                }),
+              );
+            }
+          }}
+        >
+          {t("Export diagnostics")}
+        </button>
+        <span className="notice">{diagnosticsNotice}</span>
+      </div>
+
+      <h3>{t("Setup")}</h3>
+      <p className="muted">
+        {t("Runs the first-run wizard again: confirm which email is yours and install the Git hooks. Nothing is deleted — history, achievements and these settings stay as they are.")}
+      </p>
+      <div className="row">
+        <button
+          onClick={async () => {
+            await resetOnboarding();
+            // Reload instead of navigating: the wizard is rendered by the shell, not
+            // by a page, so the shell has to re-read the flag it decided on.
+            window.location.reload();
+          }}
+        >
+          {t("Re-run setup")}
+        </button>
       </div>
       <p className="notice">{backupNotice}</p>
 
@@ -616,25 +720,25 @@ export default function Settings() {
         {confirmClear ? (
           <>
             <button className="danger" onClick={() => void onClear()}>
-              Yes, delete everything
+              {t("Yes, delete everything")}
             </button>
             <button className="ghost" onClick={() => setConfirmClear(false)}>
-              Cancel
+              {t("Cancel")}
             </button>
           </>
         ) : (
           <button className="ghost" onClick={() => setConfirmClear(true)}>
-            Delete all statistics
+            {t("Delete all statistics")}
           </button>
         )}
       </div>
       <p className="muted">
-        Deleting removes the database and the spool. Settings and backups stay.
+        {t("Deleting removes the database and the spool. Settings and backups stay.")}
       </p>
 
       <div className="row">
         <button onClick={() => void save()} disabled={saving}>
-          {saving ? "Saving..." : "Save"}
+          {saving ? t("Saving...") : t("Save")}
         </button>
         <span className="notice">{notice}</span>
       </div>

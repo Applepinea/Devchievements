@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { onboardingStatus, uiReady } from "./ipc";
+import { getSettings, onboardingStatus, uiLanguage, uiReady } from "./ipc";
+import { currentLanguage, setLanguage, t } from "./i18n";
 import Dashboard from "./pages/Dashboard";
 import Gallery from "./pages/Gallery";
 import Activity from "./pages/Activity";
@@ -8,6 +9,9 @@ import About from "./pages/About";
 import Settings from "./pages/Settings";
 import Welcome from "./pages/Welcome";
 
+// Labels are resolved at render time, so switching the language is a reload rather
+// than a state machine. Page ids stay English: they are the URL contract used by the
+// smoke tests, not text a user reads.
 const PAGES = [
   { id: "dashboard", label: "Dashboard", component: Dashboard },
   { id: "gallery", label: "Achievements", component: Gallery },
@@ -36,14 +40,36 @@ function requestedStep(): string | null {
 
 export default function App() {
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
+  const [languageReady, setLanguageReady] = useState(false);
   const [current, setCurrent] = useState<PageId>(initialPage);
+
+  // Language first: every string below is produced after this resolves, so the
+  // window never paints English and then switch.
+  useEffect(() => {
+    getSettings().then(
+      (settings) => {
+        const lang = setLanguage(settings.language);
+        // Recorded server-side so "the UI is in the wrong language" can be answered
+        // from the log, and so an end-to-end test can assert what actually rendered
+        // rather than what the settings file asked for.
+        void uiLanguage(lang, t("Dashboard"));
+        setLanguageReady(true);
+      },
+      // Without settings the app must still open; English is the source language.
+      () => setLanguageReady(true),
+    );
+  }, []);
 
   // Spec 25: the wizard runs before the pages, and only once.
   useEffect(() => {
     onboardingStatus().then(
       (s) => setOnboarded(s.completed),
       // If the status cannot be read the app must still open; the wizard is
-      // helpful, not mandatory.
+      // helpful, not mandatory. This branch is also how a registration bug hid for
+      // weeks: when `onboarding_status` was missing from the app's command list but
+      // present in the smoke-test list, the product opened straight to an empty
+      // dashboard while every test passed. The command lists are one macro now, and
+      // scripts/e2e/wizard.mjs drives a real launch, not only the smoke builder.
       () => setOnboarded(true),
     );
   }, []);
@@ -54,11 +80,18 @@ export default function App() {
     // Wait for the status before reporting: while it is unknown the app does not
     // yet know whether this is a first run, and reporting early would claim the
     // dashboard rendered on a machine that is about to show the wizard.
-    if (onboarded === null) return;
-    void uiReady(onboarded === false ? "welcome" : current);
-  }, [onboarded, current]);
+    if (onboarded === null || !languageReady) return;
+    // The wizard reports its own steps, and knows when one of them is still
+    // loading. Announcing "welcome" from here marked the window ready before the
+    // first-run dependency check had answered, so a smoke run could exit with the
+    // panel still saying "Checking...".
+    if (!onboarded) return;
+    void uiReady(current);
+  }, [onboarded, current, languageReady]);
 
-  if (onboarded === null) return <p className="muted">Starting...</p>;
+  if (onboarded === null || !languageReady) {
+    return <p className="muted">{t("Starting...")}</p>;
+  }
   if (!onboarded) {
     return (
       <Welcome
@@ -81,7 +114,7 @@ export default function App() {
             className={p.id === current ? "nav active" : "nav"}
             onClick={() => setCurrent(p.id)}
           >
-            {p.label}
+            {t(p.label)}
           </button>
         ))}
       </nav>

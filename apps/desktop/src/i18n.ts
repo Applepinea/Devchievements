@@ -1,0 +1,261 @@
+/**
+ * UI translations.
+ *
+ * Design: the English string *is* the key. Two consequences, both wanted:
+ *
+ * 1. a missing translation falls back to readable English instead of showing a key,
+ *    so partial coverage is a cosmetic problem, not a broken window;
+ * 2. English needs no dictionary at all, so the source stays the single place where
+ *    the wording lives.
+ *
+ * Values may contain {placeholders}; `tf` fills them. No plural rules: the strings
+ * that would need them are written to avoid it, and Chinese has no plural form.
+ *
+ * `scripts/check-i18n.mjs` fails when a string is used but missing here.
+ */
+
+export type Lang = "en" | "zh-CN";
+
+let current: Lang = "en";
+
+/** Simplified Chinese. Keys are the exact English source strings. */
+const ZH: Record<string, string> = {
+  "About & Diagnostics": "关于与诊断",
+  "Achievement unlocked": "成就已解锁",
+  "Achievements": "成就",
+  "Off by default. Turning it on registers the app in": "默认关闭。打开后会注册到",
+  ", which signing out and back in follows; uninstalling removes the same entry, so nothing is left behind. Combined with start hidden this is the usual companion setup: running from login, silent until it has something to say.": "，注销再登录就会自启；卸载时会删掉同一条目，不会留下残留。配合「启动时隐藏」，这就是常驻陪伴程序的典型配置：从登录起就在跑，直到有事才出声。",
+  "Activity": "活动",
+  "Active days": "活跃天数",
+  "Add at least one email first.": "请先至少填一个邮箱。",
+  "Add email": "添加邮箱",
+  "Add mapping": "添加映射",
+  "Added": "已添加",
+  "Animation": "动画",
+  "Applies immediately: the window reloads. The popup follows the same choice.": "立即生效：窗口会重新加载。弹窗也跟随同一选择。",
+  "Available sounds. Import a WAV to replace one: a file named after a slot (for example commitment) becomes selectable, and an override pointing at it is what actually changes playback.": "可用的音效。导入一个 WAV 即可替换：按槽位命名的文件（例如 commitment）会变成可选项，真正改变播放效果的是指向它的那条覆盖配置。",
+  "Back up now": "立即备份",
+  "Background blur": "背景模糊",
+  "Backup failed: {error}": "备份失败：{error}",
+  "Backup written: {size}": "备份已写入：{size}",
+  "Browser-based features (pull requests, releases, issues) need the extension; in Desktop Only they are listed as unavailable rather than hidden.": "基于浏览器的功能（PR、发布、Issue）需要扩展；在 Desktop Only 模式下它们被标为不可用，而不是隐藏。",
+  "Cancel": "取消",
+  "Capabilities": "能力",
+  "Commits": "提交数",
+  "Commits are matched by author email. Without one, the companion records nothing rather than attributing someone else's work to you.": "提交按作者邮箱归属。没有配置邮箱时，程序宁可什么都不记，也不会把别人的工作算成你的。",
+  "Commits count only when the author email is one of these. At least one is required before statistics start.": "只有作者邮箱属于这些地址之一时提交才计入。开始统计前至少需要一个。",
+  "Companion {version}": "陪伴程序 {version}",
+  "Continue": "继续",
+  "Corner": "角落",
+  "Corner radius": "圆角",
+  "Could not remove: {error}": "无法删除：{error}",
+  "Could not save: {error}": "无法保存：{error}",
+  "Count imported history": "把导入的历史计入",
+  "Count merge commits": "把合并提交计入",
+  "Currently using": "当前使用",
+  "Custom assets": "自定义资源",
+  "DPI scaling": "DPI 缩放",
+  "Dashboard": "仪表盘",
+  "Data": "数据",
+  "Database: {size} KB": "数据库：{size} KB",
+  "Decides which day a commit belongs to. Empty means the system zone.": "决定一次提交算在哪一天。留空表示跟随系统时区。",
+  "Delete all statistics": "删除全部统计",
+  "Delete failed: {error}": "删除失败：{error}",
+  "Deleting removes the database and the spool. Settings and backups stay.": "删除会移除数据库和 spool，设置与备份保留。",
+  "Desktop popup": "桌面弹窗",
+  "Display seconds": "显示秒数",
+  "Do not disturb": "免打扰",
+  "Enter the path to a repository.": "请填写仓库路径。",
+  "Event filters": "事件过滤器",
+  "Exclude": "排除",
+  "Excluded repositories:": "已排除的仓库：",
+  "Follow the system": "跟随系统",
+  "Found in your Git configuration:": "在你的 Git 配置里找到：",
+  "Get started": "开始",
+  "Git has no user.email configured, so type the address you commit with.": "Git 里没有配置 user.email，请手动填写你提交时用的邮箱。",
+  "GitHub logins": "GitHub 账号",
+  "Hidden": "未公开",
+  "Hide repository names and commit detail in notifications": "通知里隐藏仓库名和提交细节",
+  "Icon size": "图标尺寸",
+  "Identity": "身份",
+  "Images and sounds you import. Each file is checked against its actual bytes before it is stored: a renamed document is refused, and an SVG that could run code is rejected rather than sanitised.": "你导入的图片和音效。存下来之前会校验真实字节：改了扩展名的文档会被拒绝，可能执行代码的 SVG 也会被拒绝而不是清洗。",
+  "Import": "导入",
+  "Import failed: {error}": "导入失败：{error}",
+  "Import file…": "导入文件…",
+  "Import history": "导入历史",
+  "Import past commits": "导入历史提交",
+  "Import sound…": "导入音效…",
+  "Imported {ingested} commits ({duplicates} already known).": "已导入 {ingested} 次提交（{duplicates} 次已知）。",
+  "Imported.": "已导入。",
+  "Importing...": "导入中…",
+  "Install": "安装",
+  "Install failed: {error}": "安装失败：{error}",
+  "Install the Git hook": "安装 Git Hook",
+  "Installed: {hooks}. Commits in this repository are now captured.": "已安装：{hooks}。这个仓库的提交现在会被采集。",
+  "Known repositories": "已知仓库",
+  "Language": "语言",
+  "Last two weeks": "最近两周",
+  "Loading...": "加载中…",
+  "Longest streak": "最长连续",
+  "Make a commit and the first achievement will unlock.": "提交一次，第一个成就就会解锁。",
+  "Margin": "边距",
+  "Mark {n} as seen": "把 {n} 个标为已读",
+  "Multi monitor": "多显示器",
+  "Mute all sound": "全部静音",
+  "Names are aliases, so the real path never appears here.": "名称是别名，真实路径不会出现在这里。",
+  "Needs the browser extension": "需要浏览器扩展",
+  "Never shown": "从未显示",
+  "New achievements": "新成就",
+  "No activity yet. Make a commit with the hooks installed.": "还没有活动。在装好 Hook 的仓库里提交一次即可。",
+  "No custom assets yet.": "还没有自定义资源。",
+  "No delivery failures recorded.": "没有投递失败记录。",
+  "No identity yet. Add the email you commit with; until then the companion records nothing rather than guessing which commits are yours.": "还没有身份。填上你提交用的邮箱；在那之前程序宁可什么都不记，也不猜哪些提交是你的。",
+  "No repositories yet. Install the hooks, or import a folder above.": "还没有仓库。安装 Hook，或在上方导入一个文件夹。",
+  "No sounds found.": "没有找到音效。",
+  "Nothing excluded.": "没有排除任何仓库。",
+  "Nothing recorded yet.": "还没有任何记录。",
+  "Notifications": "通知",
+  "Oldest event:": "最早的事件：",
+  "On: a launch only puts the icon in the tray and the app keeps counting. Off: the window opens too, which is what a launcher behaves like. Either way the first run shows the setup wizard, and the tray menu can always open the window. Takes effect on the next launch.": "开：启动只把图标放进托盘，程序照常统计。关：同时打开窗口，像普通启动器一样。两种情况首次运行都会显示配置向导，托盘菜单也随时能开窗口。下次启动生效。",
+  "Opacity": "不透明度",
+  "Open folder": "打开文件夹",
+  "Open the dashboard": "打开仪表盘",
+  "Optional. Past commits can be counted too, at their original dates. Imports are silent and can be repeated safely.": "可选。历史提交也能按原始日期计入。导入是静默的，重复执行也安全。",
+  "Ordered newest first. Bars are scaled to the busiest day.": "按时间倒序。柱状条以最忙的一天为满格。",
+  "Pending": "待处理",
+  "Point at a repository folder to import its past commits. Imports are silent and repeatable; already known commits are skipped.": "指向一个仓库文件夹以导入它的历史提交。导入是静默且可重复的，已知提交会被跳过。",
+  "Popup appearance": "弹窗外观",
+  "Presentation": "呈现方式",
+  "Presentation channel:": "呈现通道：",
+  "Preview failed: {error}": "预览失败：{error}",
+  "Preview opened.": "预览已打开。",
+  "Preview popup": "预览弹窗",
+  "Privacy": "隐私",
+  "Privacy mode hides context. It does not encrypt anything and does not detect screen sharing.": "隐私模式只是隐藏上下文。它不加密任何东西，也无法检测屏幕共享。",
+  "Re-run setup": "重新运行向导",
+  "Ready": "完成",
+  "Refused: {error}": "已拒绝：{error}",
+  "Remove": "移除",
+  "Removed.": "已移除。",
+  "Repositories": "仓库",
+  "Run mode": "运行模式",
+  "Runs the first-run wizard again: confirm which email is yours and install the Git hooks. Nothing is deleted — history, achievements and these settings stay as they are.": "重新运行首次配置向导：确认哪个邮箱属于你，并安装 Git Hook。不会删除任何东西——历史、成就和这些设置都保持原样。",
+  "Samples": "样本数",
+  "Save": "保存",
+  "Saved.": "已保存。",
+  "Saving...": "保存中…",
+  "Scale": "缩放",
+  "Scanned {scanned}, imported {ingested}, already known {duplicates}": "扫描 {scanned}，导入 {ingested}，已知 {duplicates}",
+  "Settings": "设置",
+  "Setup": "配置",
+  "Show a popup when an achievement unlocks": "解锁成就时弹出窗口",
+  "Skip": "跳过",
+  "Skip for now": "暂时跳过",
+  "Sound": "声音",
+  "Sounds": "音效",
+  "Start hidden in the tray": "启动时隐藏到托盘",
+  "Start with Windows": "开机自启动",
+  "Starting...": "正在启动…",
+  "Statistics deleted.": "统计已删除。",
+  "Storage": "存储",
+  "System notification": "系统通知",
+  "System notifications:": "系统通知：",
+  "The browser extension reports commits by GitHub account. A report only counts when its login is mapped here to one of the emails above; everything else is refused rather than assumed to be yours.": "浏览器扩展按 GitHub 账号上报提交。只有这个账号在此映射到上面某个邮箱时才计入；其余一律拒绝，而不是假定属于你。",
+  "The hook helper is missing next to the app, so hooks cannot be installed. Reinstall the companion.": "程序旁边的 Hook helper 缺失，无法安装 Hook。请重新安装本程序。",
+  "The notification window. Values outside the allowed range are clamped when saved, so the popup can never be placed off-screen.": "通知窗口。超出允许范围的数值在保存时会被夹到边界，所以弹窗不会被放到屏幕外。",
+  "These affect your dashboard and ordinary statistics only. Built-in achievements keep counting everything: excluding a repository here never takes an achievement away.": "这些只影响仪表盘和普通统计。内置成就照旧统计一切：在这里排除某个仓库，不会把已到手的成就拿走。",
+  "These work only in Full Experience. Desktop Only lists them as unavailable rather than pretending they work.": "这些功能只在完整模式下可用。Desktop Only 会把它们标为不可用，而不是假装能用。",
+  "This companion watches your local Git commits and unlocks achievements. Everything stays on this machine.": "这个陪伴程序读取你本机的 Git 提交并解锁成就。所有东西都留在这台机器上。",
+  "Timezone": "时区",
+  "Total": "总数",
+  "Tray": "托盘",
+  "Turning this off stops the interruption, not the counting: unlocks still happen and still appear in the gallery.": "关掉只会停止打扰，不会停止统计：解锁照常发生，也照常出现在成就馆里。",
+  "Unlock to reveal": "解锁后可见",
+  "Use this": "用这个",
+  "Version": "版本",
+  "Volume applies to this app only, by scaling the played samples rather than changing the system volume.": "音量只作用于本程序：通过缩放播放的采样实现，不改系统音量。",
+  "Which commits are yours?": "哪些提交算你的？",
+  "Width": "宽度",
+  "Working...": "处理中…",
+  "Yes, delete everything": "是，全部删除",
+  "available": "可用",
+  "bottom left": "左下",
+  "bottom right": "右下",
+  "last": "最近",
+  "locked": "未解锁",
+  "needs extension": "需要扩展",
+  "new": "新",
+  "p50 latency": "p50 延迟",
+  "p99 latency": "p99 延迟",
+  "schema v{v}": "schema v{v}",
+  "top left": "左上",
+  "top right": "右上",
+  "unavailable": "不可用",
+  "{n} commits": "{n} 次提交",
+  "{n} d": "{n} 天",
+  "— it never uploads anything": "— 从不上传任何东西",
+  "— it reads commit facts through a Git hook": "— 通过 Git Hook 读取提交事实",
+  "— it records nothing until you confirm your email": "— 在你确认邮箱之前不记录任何东西",
+  "C:\\path\\to\\repo": "C:\\path\\to\\repo",
+  "Before we start": "开始之前",
+  "The companion needs two things from Windows. This checks them and tells you where to get anything that is missing.": "这个程序需要 Windows 上的两样东西。这里会检查，并告诉你缺的东西去哪里装。",
+  "Checking...": "检查中…",
+  "Installed": "已安装",
+  "Missing": "缺失",
+  "Install what is missing, then open this window again. Nothing is installed for you: that is your decision, not ours.": "装好缺的东西后再打开这个窗口。程序不会替你安装：那是你的决定，不是我们的。",
+  "Get {name}": "下载 {name}",
+  "Browser extension": "浏览器扩展",
+  "Optional. The companion already counts your local Git commits. The extension adds what only a browser can see: pull requests, releases and issues on GitHub.": "可选。本地 Git 提交已经由主程序统计。扩展补充的是只有浏览器看得到的东西：GitHub 上的 PR、发布和 Issue。",
+  "It is not in a store yet, so it is installed by hand: open edge://extensions or chrome://extensions, turn on Developer mode, choose Load unpacked, and pick the extension folder that ships with this app.": "扩展还没上架，所以需要手动安装：打开 edge://extensions 或 chrome://extensions，打开「开发人员模式」，选择「加载解压缩的扩展」，指向随本程序一起安装的扩展文件夹。",
+  "Everything stays local either way: the extension reports to this app on this machine, and nothing is uploaded.": "两种情况都只在本机：扩展把数据报告给这台机器上的主程序，不上传任何东西。",
+  "Open the data folder": "打开数据文件夹",
+  "Done": "完成",
+  "Point at a repository to start capturing its commits. To add another one later, run this setup again from Settings.": "指向一个仓库开始采集它的提交。之后要再加一个仓库，在设置里重新运行本向导即可。",
+  "Draws the window and the notification popup.": "用来绘制窗口和通知弹窗。",
+  "Records your commits. Without it the companion has nothing to watch.": "记录你的提交。没有它，这个程序没有东西可看。",
+  "Diagnostics": "诊断",
+  "Writes a JSON report next to the database: counters, outbox health, capabilities and settings. Attach it to a bug report. The redacted form replaces repository names with stable aliases and masks the data path.": "在数据库旁边写一份 JSON 报告：计数器、outbox 健康度、能力集和设置。可以附在 bug 报告里。脱敏形式会把仓库名替换成稳定别名，并遮蔽数据路径。",
+  "Include real repository names and paths": "包含真实仓库名和路径",
+  "The raw form is not safe to share publicly: it names your repositories.": "原始形式不适合公开分享：它会写出你的仓库名称。",
+  "Export diagnostics": "导出诊断",
+  "Saved to {path}": "已保存到 {path}",
+  "Export failed: {error}": "导出失败：{error}",
+};
+
+/**
+ * Turn the setting into a concrete language.
+ *
+ * `system` is resolved here rather than in Rust: the answer lives in the webview's
+ * locale, which is what the user actually sees elsewhere on this machine.
+ */
+export function resolveLanguage(setting: string): Lang {
+  if (setting === "en") return "en";
+  if (setting === "zh-CN") return "zh-CN";
+  const nav = typeof navigator === "undefined" ? "en" : navigator.language;
+  return nav.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+}
+
+/** Apply a language setting and return what it resolved to. */
+export function setLanguage(setting: string): Lang {
+  current = resolveLanguage(setting);
+  return current;
+}
+
+export function currentLanguage(): Lang {
+  return current;
+}
+
+/** Translate one string. Unknown strings stay in English on purpose. */
+export function t(english: string): string {
+  if (current === "en") return english;
+  return ZH[english] ?? english;
+}
+
+/** Translate a string with `{name}` placeholders. */
+export function tf(english: string, vars: Record<string, string | number>): string {
+  let out = t(english);
+  for (const [key, value] of Object.entries(vars)) {
+    out = out.split("{" + key + "}").join(String(value));
+  }
+  return out;
+}

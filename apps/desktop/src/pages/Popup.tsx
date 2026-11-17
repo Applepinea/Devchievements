@@ -1,4 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
+import { invoke } from "../ipc";
+import { t } from "../i18n";
 
 interface Payload {
   title: string;
@@ -46,6 +48,20 @@ export default function Popup() {
 
   useEffect(() => {
     document.documentElement.dataset.rendered = "true";
+    // Spec 44.4 ends the latency budget at the first rendered frame, and only the
+    // page knows when that happened. Two frames: the first confirms the commit,
+    // the second that a frame containing it has been painted.
+    let cancelled = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        // A failure here costs a measurement, never the popup itself.
+        invoke("popup_painted").catch(() => undefined);
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (!payload) return <div className="popup" />;
@@ -82,7 +98,7 @@ export default function Popup() {
         )}
       </div>
       <div className="popup-text">
-        <div className="popup-label">成就已解锁</div>
+        <div className="popup-label">{t("Achievement unlocked")}</div>
         <div className="popup-title">{payload.title}</div>
         <div className="popup-body">
           {payload.others.length > 0

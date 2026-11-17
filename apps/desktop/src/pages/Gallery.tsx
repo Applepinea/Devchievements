@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getGallery, markViewed, type GalleryItem } from "../ipc";
 import { dateTime } from "../format";
+import { t, tf } from "../i18n";
 
 // The new marker must cover realtime, delayed, backfill and silent unlocks
 // (spec 34.2), so it keys off viewed_at rather than off how the unlock arrived.
@@ -20,7 +21,7 @@ export default function Gallery() {
   }, [load]);
 
   if (error) return <p className="error">{error}</p>;
-  if (!items) return <p className="muted">Loading...</p>;
+  if (!items) return <p className="muted">{t("Loading...")}</p>;
 
   const fresh = items.filter((i) => i.unlocked && !i.viewed);
 
@@ -32,9 +33,11 @@ export default function Gallery() {
   return (
     <>
       <div className="row spread">
-        <h2>Achievements</h2>
+        <h2>{t("Achievements")}</h2>
         {fresh.length > 0 ? (
-          <button onClick={() => void reveal()}>Mark {fresh.length} as seen</button>
+          <button onClick={() => void reveal()}>
+            {tf("Mark {n} as seen", { n: fresh.length })}
+          </button>
         ) : null}
       </div>
 
@@ -42,14 +45,20 @@ export default function Gallery() {
         {items.map((item) => (
           <li key={item.id} className={item.unlocked ? "card unlocked" : "card"}>
             <div className="row spread">
-              <strong>{item.unlocked || !item.hidden ? item.name : "Hidden"}</strong>
-              {item.unlocked && !item.viewed ? <span className="badge">new</span> : null}
+              <strong>
+                {item.unlocked || !item.hidden ? item.name : t("Hidden")}
+              </strong>
+              {item.unlocked && !item.viewed ? (
+                <span className="badge">{t("new")}</span>
+              ) : null}
             </div>
             <p className="muted">
-              {item.unlocked || !item.hidden ? item.description : "Unlock to reveal"}
+              {item.unlocked || !item.hidden ? item.description : t("Unlock to reveal")}
             </p>
             <p className="tiny">
-              {item.unlocked ? item.rarity + " · " + item.unlockSource + " · " + dateTime(item.unlockedAt) : item.rarity + " · locked"}
+              {item.unlocked
+                ? item.rarity + " · " + item.unlockSource + " · " + dateTime(item.unlockedAt)
+                : item.rarity + " · " + t("locked")}
             </p>
           </li>
         ))}

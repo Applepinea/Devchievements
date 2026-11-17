@@ -146,6 +146,12 @@ export interface SettingsView {
   volume: number;
   muted: boolean;
   runMode: string;
+  /** Whether a normal launch stays in the tray instead of opening the window. */
+  startHidden: boolean;
+  /** Whether Windows starts the companion at sign-in. */
+  startWithWindows: boolean;
+  /** UI language setting: system, en or zh-CN. */
+  language: string;
   databaseBytes: number;
   githubLogins: LoginMapping[];
   filters: FilterSet;
@@ -223,6 +229,8 @@ export const onboardingStatus = () =>
   invoke<OnboardingStatus>("onboarding_status");
 export const installHooks = (repoPath: string) =>
   invoke<HookInstallResult[]>("install_hooks", { repoPath });
+/** Clears the setup flag so the wizard runs again; settings and data are untouched. */
+export const resetOnboarding = () => invoke<void>("reset_onboarding");
 export const completeOnboarding = () => invoke<void>("complete_onboarding");
 export const showPreview = () => invoke<void>("show_popup_preview");
 export const openDataFolder = () => invoke<void>("open_data_folder");
@@ -239,3 +247,42 @@ export const removeAsset = (name: string) => invoke<void>("remove_asset", { name
 export const importSound = (path: string) => invoke<StoredAsset>("import_sound", { path });
 export const availableSounds = () => invoke<string[]>("available_sounds");
 export const uiReady = (view: string) => invoke<void>("ui_ready", { view });
+
+/** One prerequisite, as the Rust preflight reports it. */
+export interface Dependency {
+  id: string;
+  name: string;
+  ok: boolean;
+  purpose: string;
+  version: string | null;
+  downloadUrl: string | null;
+}
+
+export interface DependencyReport {
+  dependencies: Dependency[];
+  ready: boolean;
+}
+
+/** Checks WebView2 and Git without installing anything (spec 25). */
+export const checkDependencies = () => invoke<DependencyReport>("check_dependencies");
+
+/**
+ * Writes a diagnostics document into the data directory.
+ *
+ * `raw` keeps real repository names and paths. Spec 26.2 allows that only as an
+ * explicit choice, so it is a parameter rather than a setting.
+ */
+export const exportDiagnostics = (raw: boolean) =>
+  invoke<{ path: string; raw: boolean }>("export_diagnostics", { raw });
+
+/** Opens a URL in the default browser. Only http(s) is honoured, in Rust. */
+export const openExternal = (url: string) => invoke<void>("open_external", { url });
+
+/**
+ * Reports the language the window actually rendered in, for logs and tests.
+ *
+ * `sample` is a translated word: it proves the dictionary was consulted, which the
+ * setting alone cannot.
+ */
+export const uiLanguage = (lang: string, sample: string) =>
+  invoke<void>("ui_language", { lang, sample });

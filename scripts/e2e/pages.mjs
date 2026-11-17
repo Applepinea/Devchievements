@@ -73,6 +73,36 @@ function main() {
     check("it did not crash", status === 0 && /WINDOW OK/.test(out), out);
   }
 
+  // Spec 40.1, languages: the window must render in the chosen language, and `system`
+  // must follow the machine. Asserting the setting alone would pass even if the
+  // dictionary were never consulted, so the page reports one translated word.
+  const languageRoot = path.join(scratch, "languages");
+  fs.mkdirSync(path.join(languageRoot, "devchievements"), { recursive: true });
+  const setLanguage = (value) =>
+    fs.writeFileSync(
+      path.join(languageRoot, "devchievements", "settings.json"),
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          emails: ["pages@devchievements.local"],
+          onboardingCompleted: true,
+          language: value,
+        },
+        null,
+        2,
+      ),
+    );
+
+  setLanguage("zh-CN");
+  const zh = openPage("dashboard", languageRoot);
+  check("the window reports the Chinese language", /UI LANGUAGE lang=zh-CN/.test(zh.out), zh.out);
+  check("the dictionary is actually consulted", /sample=仪表盘/.test(zh.out), zh.out);
+
+  setLanguage("en");
+  const en = openPage("dashboard", languageRoot);
+  check("the window reports English", /UI LANGUAGE lang=en/.test(en.out), en.out);
+  check("English keeps the source text", /sample=Dashboard/.test(en.out), en.out);
+
   console.log("");
   if (failures) {
     console.log("PAGES FAILED (" + failures + " checks)");

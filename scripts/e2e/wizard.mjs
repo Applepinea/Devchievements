@@ -8,7 +8,7 @@
  * already been through it opens straight to the dashboard.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +42,47 @@ function openWindow(page, dataRoot, logName, step) {
   return { status: r.status, out: fs.readFileSync(log, "utf8") };
 }
 
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/// Wait until `predicate` is true or the deadline passes.
+function waitFor(predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    sleep(100);
+  }
+  return predicate();
+}
+
+/// Start the app the way the product starts it (no --window-smoke) and wait for a
+/// log line, then stop it. Needed because a command missing from the *app's* handler
+/// list is invisible to a smoke-test run: that is exactly how the wizard became
+/// unreachable while every check here still passed.
+function realLaunch(dataRoot, logName, needle, timeoutMs) {
+  const log = path.join(scratch, logName);
+  const fd = fs.openSync(log, "w");
+  const child = spawn(appExe, ["--open-window"], {
+    stdio: ["ignore", fd, fd],
+    windowsHide: true,
+    env: { ...process.env, LOCALAPPDATA: dataRoot },
+  });
+  const found = waitFor(() => {
+    try {
+      return fs.readFileSync(log, "utf8").includes(needle);
+    } catch {
+      return false;
+    }
+  }, timeoutMs);
+  try {
+    child.kill();
+  } catch {}
+  fs.closeSync(fd);
+  const out = fs.readFileSync(log, "utf8");
+  return { found, out };
+}
+
 function main() {
   if (!fs.existsSync(appExe)) {
     console.error("missing desktop binary: " + appExe);
@@ -57,9 +98,21 @@ function main() {
   check("the app starts on a fresh machine", first.status === 0, first.out);
   check("it shows the wizard instead of the dashboard", /UI READY view=welcome-/.test(first.out), first.out);
 
+  // 1b. The same claim through the REAL launch path. The smoke builder and the app
+  // used to carry different command lists, so the wizard worked here and not for the
+  // user; a check that only uses --window-smoke cannot see that.
+  const real = path.join(scratch, "fresh-real");
+  fs.mkdirSync(real, { recursive: true });
+  const launched = realLaunch(real, "fresh-real.log", "UI READY view=welcome", 30000);
+  check(
+    "a real launch on a fresh machine opens the wizard",
+    launched.found,
+    launched.out,
+  );
+
   // Spec 34.1 lists the import step as part of the wizard; each step is rendered
   // separately so a broken one cannot hide behind the first.
-  for (const step of ["identity", "hooks", "import", "done"]) {
+  for (const step of ["checks", "identity", "hooks", "import", "extension", "done"]) {
     const run = openWindow("welcome", fresh, "step-" + step + ".log", step);
     check("the " + step + " step renders", run.out.includes("view=welcome-" + step), run.out);
   }
@@ -106,6 +159,26 @@ function main() {
   check("the hook file exists", installed, path.join(repo, ".git", "hooks"));
   const hookBody = installed ? fs.readFileSync(path.join(repo, ".git", "hooks", "post-commit"), "utf8") : "";
   check("it points at the helper", hookBody.includes("devch-helper"), hookBody.slice(0, 200));
+
+  // 5. Re-running setup from the settings page: the same command the button calls.
+  const reset = spawnSync(appExe, ["--reset-onboarding"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+    env: { ...process.env, LOCALAPPDATA: ready },
+    timeout: 60000,
+  });
+  const resetOut = (reset.stdout ?? Buffer.alloc(0)).toString();
+  check("setup can be re-armed from the app", reset.status === 0, resetOut);
+  check("the flag is cleared, not the data", /completed=false/.test(resetOut), resetOut);
+
+  const afterReset = realLaunch(ready, "after-reset.log", "UI READY view=welcome", 30000);
+  check("the next launch shows the wizard again", afterReset.found, afterReset.out);
+  const keptSettings = JSON.parse(fs.readFileSync(path.join(ready, "devchievements", "settings.json"), "utf8"));
+  check(
+    "re-running setup keeps the configured identity",
+    Array.isArray(keptSettings.emails) && keptSettings.emails.length === 1,
+    JSON.stringify(keptSettings),
+  );
 
   console.log("");
   if (failures) {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getActivity, type ActivityDay } from "../ipc";
+import { t, tf } from "../i18n";
 
 export default function Activity() {
   const [days, setDays] = useState<ActivityDay[] | null>(null);
@@ -11,16 +12,18 @@ export default function Activity() {
   }, []);
 
   if (error) return <p className="error">{error}</p>;
-  if (!days) return <p className="muted">Loading...</p>;
+  if (!days) return <p className="muted">{t("Loading...")}</p>;
 
   const peak = days.reduce((max, d) => Math.max(max, d.commits), 0);
 
   return (
     <>
-      <h2>Activity</h2>
-      <p className="muted">Ordered newest first. Bars are scaled to the busiest day.</p>
+      <h2>{t("Activity")}</h2>
+      <p className="muted">
+        {t("Ordered newest first. Bars are scaled to the busiest day.")}
+      </p>
       {days.length === 0 ? (
-        <p className="muted">Nothing recorded yet.</p>
+        <p className="muted">{t("Nothing recorded yet.")}</p>
       ) : (
         <ul className="list">
           {days.map((day) => (
