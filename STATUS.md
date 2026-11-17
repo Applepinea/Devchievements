@@ -44,6 +44,21 @@ ALL CHECKS PASSED
 
 ---
 
+## Phase 3b 任务表（Full Experience：扩展检测 + 桌面判定）
+
+> 2026-11-17 产品决定：扩展只负责**检测**，判定与弹窗由本地桌面应用完成。
+> 这条改变了 §36（Browser Only）的边界，见 ADR-0018。
+
+| # | 任务 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| 3b.1 | Native Messaging 协议（4 字节长度 + JSON） | `Tested` | `native-host` e2e 11 项：真实管道、真实分帧 |
+| 3b.2 | 浏览器报告 → 本地判定 → 入库 | `Tested` | 同一 e2e：companion drain 后诊断显示 1 个提交 |
+| 3b.3 | 扩展侧转发 + 本地兜底 | `Partially Implemented` | 代码与构建完成；**浏览器到 host 的真实握手未验证** |
+| 3b.4 | Host 清单与浏览器注册（固定扩展 ID） | `Not Started` | 需要扩展 key 与注册表写入 |
+| 3b.5 | 桌面弹窗呈现浏览器事件 | `Not Started` | 复用已有弹窗通道 |
+
+---
+
 ## Phase 3a 任务表（Browser Only）
 
 > 检查点 B 已由用户以「继续 phase3」明确批准。

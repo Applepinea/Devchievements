@@ -66,8 +66,12 @@ export function repositoryFromPath(pathname: string): RepositoryId | null {
 
 /** A commit page: /owner/repo/commit/<sha>. */
 function commitEvent(facts: PageFacts, repo: RepositoryId, pathname: string): Extraction {
-  const match = pathname.match(/^\/[^/]+\/[^/]+\/commit\/([0-9a-f]{7,40})\/?$/i);
-  if (!match || !match[1]) return { kind: "ignored", reason: "not a commit page" };
+  const match = pathname.match(/^\/[^/]+\/[^/]+\/commit\/([0-9a-f]{40})\/?$/i);
+  if (!match || !match[1]) {
+    // A short id cannot deduplicate against the hook path, which records the full id,
+    // so accepting one would count the same commit twice.
+    return { kind: "ignored", reason: "not a commit page with a full commit id" };
+  }
   const sha = match[1].toLowerCase();
 
   // The page states when the commit was made; without it the day would be invented.

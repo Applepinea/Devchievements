@@ -229,12 +229,12 @@ async function main() {
       await sleep(250);
     }
 
-    const first = await sendPage("https://github.com/Applepinea/Devchievements/commit/02d5183", {
+    const first = await sendPage("https://github.com/Applepinea/Devchievements/commit/abcdef0123456789abcdef0123456789abcdef01", {
       "octolytics-dimension-commit_date": "2026-11-17T10:00:00Z",
     });
     check("a commit page is recorded", first?.stored === true, JSON.stringify(first));
 
-    const duplicate = await sendPage("https://github.com/Applepinea/Devchievements/commit/02d5183", {
+    const duplicate = await sendPage("https://github.com/Applepinea/Devchievements/commit/abcdef0123456789abcdef0123456789abcdef01", {
       "octolytics-dimension-commit_date": "2026-11-17T10:00:00Z",
     });
     check("the same commit is not recorded twice", duplicate?.stored === false, JSON.stringify(duplicate));

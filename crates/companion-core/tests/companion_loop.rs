@@ -479,3 +479,46 @@ async fn a_plain_commit_plays_a_sound_and_shows_no_popup() {
 
     fx.cleanup();
 }
+
+/// A record forwarded by the Native Messaging host must be judged like any other
+/// event. This is the link between the extension and the desktop engine, so it is
+/// tested here rather than only in a browser.
+#[tokio::test]
+async fn a_browser_report_is_ingested_as_a_commit() {
+    let fixture = Fixture::new("browser").await;
+    let spool = Spool::open(&fixture.spool).expect("spool");
+    spool
+        .append(
+            "browser:github:o/r#abcdef0123456789abcdef0123456789abcdef01",
+            &serde_json::json!({
+                "kind": "browser_github",
+                "event_id": "browser:github:o/r#abcdef0123456789abcdef0123456789abcdef01",
+                "repository_id": "github:o/r",
+                "activity": "commit",
+                "commit_sha": "abcdef0123456789abcdef0123456789abcdef01",
+                "external_id": null,
+                "occurred_ms": now_ms() - 1_000,
+            })
+            .to_string(),
+        )
+        .expect("append");
+
+    let mut id = Identity::default();
+    id.add_email("browser@devchievements.local", EmailOrigin::UserConfigured);
+
+    let report = fixture.companion().drain_once(&id).await.expect("drain");
+
+    assert_eq!(
+        report.ingested, 1,
+        "a browser report must count: {report:?}"
+    );
+    assert_eq!(report.failed, 0, "nothing should fail: {report:?}");
+
+    let count =
+        devchievements_storage::projections::repository_commit_count(&fixture.pool, "github:o/r")
+            .await
+            .expect("count");
+    assert_eq!(count, 1, "the commit must be visible in projections");
+
+    fixture.cleanup();
+}

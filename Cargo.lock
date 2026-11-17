@@ -496,6 +496,7 @@ dependencies = [
 name = "devchievements-git-hooks"
 version = "0.0.0"
 dependencies = [
+ "devchievements-core",
  "devchievements-events",
  "interprocess",
  "serde_json",
@@ -524,6 +525,7 @@ dependencies = [
 name = "devchievements-native-host"
 version = "0.0.0"
 dependencies = [
+ "devchievements-git-hooks",
  "serde_json",
 ]
 

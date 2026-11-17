@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 serde_json = { workspace = true }
+devchievements-git-hooks = { path = "../../crates/git-hooks" }
 
 [lints]
 workspace = true

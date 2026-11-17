@@ -19,7 +19,7 @@ function facts(url: string, opts: { meta?: Record<string, string>; text?: Record
 
 test("a commit page becomes a commit event", () => {
   const result = extract(
-    facts("https://github.com/Applepinea/Devchievements/commit/02d5183abcdef", {
+    facts("https://github.com/Applepinea/Devchievements/commit/abcdef0123456789abcdef0123456789abcdef01", {
       meta: { "octolytics-dimension-commit_date": "2026-11-17T10:00:00Z" },
     }),
   );
@@ -27,13 +27,13 @@ test("a commit page becomes a commit event", () => {
   if (result.kind !== "event") return;
   assert.equal(result.event.eventType, "commit_created");
   assert.equal(result.event.canonicalRepositoryId, "github:applepinea/devchievements");
-  assert.equal(result.event.commitSha, "02d5183abcdef");
+  assert.equal(result.event.commitSha, "abcdef0123456789abcdef0123456789abcdef01");
   assert.equal(result.event.localDate, "2026-11-17");
   assert.equal(result.event.occurredAt, Date.parse("2026-11-17T10:00:00Z"));
 });
 
 test("the same commit always yields the same event id", () => {
-  const page = facts("https://github.com/o/r/commit/abc1234", {
+  const page = facts("https://github.com/o/r/commit/abcdef0123456789abcdef0123456789abcdef01", {
     meta: { "octolytics-dimension-commit_date": "2026-01-01T00:00:00Z" },
   });
   const first = extract(page);
@@ -46,7 +46,7 @@ test("the same commit always yields the same event id", () => {
 
 test("owner and repository case are normalised", () => {
   const result = extract(
-    facts("https://github.com/ApplePinea/DevChievements/commit/abc1234", {
+    facts("https://github.com/ApplePinea/DevChievements/commit/abcdef0123456789abcdef0123456789abcdef01", {
       meta: { "octolytics-dimension-commit_date": "2026-01-01T00:00:00Z" },
     }),
   );
@@ -56,7 +56,7 @@ test("owner and repository case are normalised", () => {
 });
 
 test("a commit page without a machine-readable date is ignored, not invented", () => {
-  const result = extract(facts("https://github.com/o/r/commit/abc1234"));
+  const result = extract(facts("https://github.com/o/r/commit/abcdef0123456789abcdef0123456789abcdef01"));
   assert.equal(result.kind, "ignored");
   if (result.kind !== "ignored") return;
   assert.match(result.reason, /machine-readable date/);
@@ -97,7 +97,7 @@ test("pages that are not activity are ignored", () => {
     "https://github.com/o/r",
     "https://github.com/o/r/pulls",
     "https://github.com/notifications",
-    "https://example.com/o/r/commit/abc1234",
+    "https://example.com/o/r/commit/abcdef0123456789abcdef0123456789abcdef01",
   ];
   for (const url of cases) {
     assert.equal(extract(facts(url)).kind, "ignored", url);

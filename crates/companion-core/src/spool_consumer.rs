@@ -131,6 +131,11 @@ impl Companion {
                 Err(reason) => {
                     // A storage failure is not the record's fault; leave the Spool
                     // file in place so nothing is lost and retry later.
+                    // A discarded reason makes a failed record indistinguishable from
+                    // a missing one. Keep the diagnostic available on demand.
+                    if std::env::var_os("DEVCH_DRAIN_DEBUG").is_some() {
+                        eprintln!("DRAIN RECORD FAILED: {reason}");
+                    }
                     let _ = reason;
                     report.failed += 1;
                     report.retry_needed = true;
@@ -155,8 +160,11 @@ impl Companion {
         let payload: serde_json::Value =
             serde_json::from_str(&record.payload).map_err(|e| format!("bad payload: {e}"))?;
 
-        let Some(event) = self.event_from_hook_payload(&payload) else {
-            return Err("payload did not describe a commit-ish event".to_string());
+        // Two record kinds arrive here: hook captures (the original path) and reports
+        // forwarded by the browser extension through the Native Messaging host.
+        // Both become events; neither is trusted beyond what its rule set accepts.
+        let Some(event) = self.event_from_record_payload(&payload) else {
+            return Err("payload did not describe a supported event".to_string());
         };
 
         let occurred = event.occurred_at;
@@ -215,6 +223,32 @@ impl Companion {
     }
 
     /// Build an event from what the Hook Helper wrote.
+    /// Turn either record kind into an event.
+    ///
+    /// The kind is explicit in the payload rather than inferred from which fields are
+    /// present: guessing would let a malformed hook record be read as a browser report.
+    fn event_from_record_payload(&self, payload: &serde_json::Value) -> Option<Event> {
+        match payload.get("kind").and_then(|k| k.as_str()) {
+            Some("browser_github") => {
+                let report = devchievements_git_hooks::browser_event::parse(payload)?;
+                let clock = SystemClock;
+                let tz = BundledTimezoneProvider::new();
+                let mut ids = UuidishIds::new();
+                let cfg = StaticConfig;
+                let ctx = InjectedContext {
+                    clock: &clock,
+                    timezone: &tz,
+                    ids: &mut ids,
+                    config: &cfg,
+                };
+                devchievements_git_hooks::browser_event::to_event(&report, &ctx)
+            }
+            // Everything else keeps the original hook shape, including records written
+            // before this field existed (they have no kind at all).
+            _ => self.event_from_hook_payload(payload),
+        }
+    }
+
     fn event_from_hook_payload(&self, payload: &serde_json::Value) -> Option<Event> {
         let event_id = payload.get("event_id")?.as_str()?;
         let commit_sha = payload.get("commit_sha")?.as_str()?;

@@ -10,6 +10,7 @@
  * messages (spec 17.7), which is why the IndexedDB handle is opened lazily.
  */
 
+import { forward } from "../../src/bridge.ts";
 import { extract } from "../../src/github/extract.ts";
 import { IndexedDbEventStore } from "../../src/storage/idb.ts";
 import type {
@@ -32,8 +33,21 @@ async function handlePage(message: Extract<ExtensionMessage, { type: "devch:page
     return { stored: false, reason: extraction.reason };
   }
 
+  // The desktop companion judges and presents; this only reports what it saw.
+  const bridged = await forward(extraction.event);
+  if (bridged.delivered) {
+    return { stored: true, event: extraction.event };
+  }
+
+  // Desktop side unreachable: keep a local copy so the dashboard is not blind, and
+  // say why it was not forwarded. Losing the detection would be worse, and the
+  // desktop side deduplicates by event id if it arrives later.
   const stored = await store.add(extraction.event);
-  return { stored, event: extraction.event, reason: stored ? undefined : "already recorded" };
+  return {
+    stored,
+    event: extraction.event,
+    reason: bridged.reason,
+  };
 }
 
 async function handleEvents(): Promise<EventsResult> {
