@@ -12,6 +12,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 devchievements-themes = { path = "../themes" }
 devchievements-achievements = { path = "../achievements" }
+devchievements-filters = { path = "../filters" }
 
 [lints]
 workspace = true

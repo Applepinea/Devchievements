@@ -465,6 +465,10 @@ struct SettingsView {
     database_bytes: i64,
     /// GitHub login to email mappings (spec 7).
     github_logins: Vec<LoginMapping>,
+    /// User event filters (spec 15).
+    filters: devchievements_filters::FilterSet,
+    /// Popup appearance (spec 21).
+    popup: devchievements_themes::PopupStyle,
 }
 
 /// One login mapping, as a list of pairs so the UI can edit them in order.
@@ -497,6 +501,8 @@ fn get_settings() -> SettingsView {
         emails: stored.emails,
         privacy: stored.privacy.as_str().to_string(),
         timezone: stored.timezone,
+        filters: stored.filters.clone(),
+        popup: stored.popup.clone(),
         notifications: stored.notifications,
         volume: stored.volume,
         muted: stored.muted,
@@ -564,6 +570,10 @@ fn save_settings(settings: SettingsView) -> Result<(), String> {
         })
         .collect();
 
+    stored.filters = settings.filters;
+    // Clamped on the way in: a hand-edited value must not place the popup
+    // off-screen.
+    stored.popup = settings.popup.clamped();
     stored.notifications = settings.notifications;
     // Clamp instead of trusting the caller: a volume outside 0-100 would either be
     // ignored by the audio path or overflow the gain arithmetic.
@@ -1152,6 +1162,7 @@ fn main() {
                     "sounds": audio::available_sound_ids(),
                     "privacy": settings::Settings::load(&settings_path()).privacy.as_str(),
                     "popup": settings::Settings::load(&settings_path()).popup,
+                    "filters": settings::Settings::load(&settings_path()).filters,
                     "capabilities": current_capabilities(),
                     "snapshot": snapshot,
                     "outboxHealth": health,
@@ -1205,11 +1216,13 @@ fn main() {
             commands::onboarding_status,
             commands::install_hooks,
             commands::complete_onboarding,
+            commands::show_popup_preview,
             commands::open_data_folder,
             commands::clear_data,
             commands::onboarding_status,
             commands::install_hooks,
             commands::complete_onboarding,
+            commands::show_popup_preview,
             commands::open_data_folder,
             commands::clear_data,
             commands::restore_database,

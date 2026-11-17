@@ -94,6 +94,12 @@ pub struct Settings {
     /// document never reaches this list.
     #[serde(default, rename = "userAchievements")]
     pub user_achievements: Vec<devchievements_achievements::definition::UserAchievement>,
+    /// User event filters (spec 15).
+    ///
+    /// Applied to the user-filtered statistics profile only: excluding a
+    /// repository here must never change a built-in achievement's outcome.
+    #[serde(default, rename = "filters")]
+    pub filters: devchievements_filters::FilterSet,
     /// Popup appearance (spec 21).
     #[serde(default)]
     pub popup: devchievements_themes::PopupStyle,
@@ -127,6 +133,7 @@ impl Default for Settings {
             github_logins: std::collections::BTreeMap::new(),
             sound_overrides: std::collections::BTreeMap::new(),
             user_achievements: Vec::new(),
+            filters: devchievements_filters::FilterSet::default(),
             popup: devchievements_themes::PopupStyle::default(),
             onboarding_completed: false,
         }
@@ -189,6 +196,7 @@ impl Settings {
             muted: self.muted,
             sound_overrides: self.sound_overrides.clone(),
             user_achievements: self.user_achievements.clone(),
+            filters: self.filters.clone(),
             popup: self.popup.clone(),
         }
     }
@@ -207,6 +215,7 @@ impl Settings {
         self.muted = document.muted;
         self.sound_overrides = document.sound_overrides;
         self.user_achievements = document.user_achievements;
+        self.filters = document.filters;
         self.popup = document.popup;
     }
 }

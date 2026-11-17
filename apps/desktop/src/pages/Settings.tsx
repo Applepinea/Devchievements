@@ -7,7 +7,33 @@ import {
   saveSettings,
   type SettingsView,
   type LoginMapping,
+  type FilterSet,
+  showPreview,
 } from "../ipc";
+
+/** Add an excluded repository id. */
+function AddExclusion({ onAdd }: { onAdd: (id: string) => void }) {
+  const [value, setValue] = useState("");
+  const commit = () => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    onAdd(trimmed);
+    setValue("");
+  };
+  return (
+    <div className="row">
+      <input
+        value={value}
+        placeholder="github:owner/repo"
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+        }}
+      />
+      <button onClick={commit}>Exclude</button>
+    </div>
+  );
+}
 
 export default function Settings() {
   const [settings, setSettings] = useState<SettingsView | null>(null);
@@ -16,6 +42,20 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [backupNotice, setBackupNotice] = useState<string>("");
+  const [previewNotice, setPreviewNotice] = useState<string>("");
+
+  const preview = async () => {
+    if (!settings) return;
+    // Save first: a preview that shows unsaved values would be a lie about what
+    // the next notification looks like.
+    await saveSettings(settings);
+    try {
+      await showPreview();
+      setPreviewNotice("Preview opened.");
+    } catch (e) {
+      setPreviewNotice("Preview failed: " + (e instanceof Error ? e.message : String(e)));
+    }
+  };
 
   const onBackup = async () => {
     try {
@@ -159,6 +199,127 @@ export default function Settings() {
       >
         Add mapping
       </button>
+
+      <h3>Popup appearance</h3>
+      <p className="muted">
+        The notification window. Values outside the allowed range are clamped when
+        saved, so the popup can never be placed off-screen.
+      </p>
+
+      <div className="row">
+        <label className="field">
+          <span>Width</span>
+          <input
+            type="range" min={280} max={600}
+            value={settings.popup.width}
+            onChange={(e) =>
+              update({ popup: { ...settings.popup, width: Number(e.target.value) } })
+            }
+          />
+          <span className="mono">{settings.popup.width}</span>
+        </label>
+        <label className="field">
+          <span>Scale</span>
+          <input
+            type="range" min={70} max={150}
+            value={settings.popup.scalePercent}
+            onChange={(e) =>
+              update({ popup: { ...settings.popup, scalePercent: Number(e.target.value) } })
+            }
+          />
+          <span className="mono">{settings.popup.scalePercent}%</span>
+        </label>
+      </div>
+
+      <div className="row">
+        <label className="field">
+          <span>Corner</span>
+          <select
+            value={settings.popup.corner}
+            onChange={(e) =>
+              update({ popup: { ...settings.popup, corner: e.target.value as typeof settings.popup.corner } })
+            }
+          >
+            <option value="top_left">top left</option>
+            <option value="top_right">top right</option>
+            <option value="bottom_left">bottom left</option>
+            <option value="bottom_right">bottom right</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Margin</span>
+          <input
+            type="range" min={0} max={100}
+            value={settings.popup.screenMargin}
+            onChange={(e) =>
+              update({ popup: { ...settings.popup, screenMargin: Number(e.target.value) } })
+            }
+          />
+          <span className="mono">{settings.popup.screenMargin}</span>
+        </label>
+      </div>
+
+      <div className="row">
+        <button onClick={() => void preview()}>Preview popup</button>
+        <span className="notice">{previewNotice}</span>
+      </div>
+
+      <h3>Event filters</h3>
+      <p className="muted">
+        These affect your dashboard and ordinary statistics only. Built-in
+        achievements keep counting everything: excluding a repository here never
+        takes an achievement away.
+      </p>
+
+      <label className="row">
+        <input
+          type="checkbox"
+          checked={settings.filters.include_merges}
+          onChange={(e) => update({ filters: { ...settings.filters, include_merges: e.target.checked } })}
+        />
+        <span>Count merge commits</span>
+      </label>
+
+      <label className="row">
+        <input
+          type="checkbox"
+          checked={settings.filters.include_imported}
+          onChange={(e) => update({ filters: { ...settings.filters, include_imported: e.target.checked } })}
+        />
+        <span>Count imported history</span>
+      </label>
+
+      <p className="muted">Excluded repositories:</p>
+      {settings.filters.repositories.mode === "all" ? (
+        <p className="tiny">Nothing excluded.</p>
+      ) : (
+        <ul className="list">
+          {settings.filters.repositories.ids.map((id, index) => (
+            <li key={id} className="row spread">
+              <span className="mono">{id}</span>
+              <button className="ghost" onClick={() => {
+                const ids = settings.filters.repositories.mode === "all"
+                  ? []
+                  : settings.filters.repositories.ids.filter((_, i) => i !== index);
+                update({
+                  filters: {
+                    ...settings.filters,
+                    repositories: ids.length ? { mode: "except", ids } : { mode: "all" },
+                  },
+                });
+              }}>Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <AddExclusion
+        onAdd={(id) => {
+          const current =
+            settings.filters.repositories.mode === "all" ? [] : settings.filters.repositories.ids;
+          if (current.includes(id)) return;
+          update({ filters: { ...settings.filters, repositories: { mode: "except", ids: [...current, id] } } });
+        }}
+      />
 
       <h3>Privacy</h3>
       <label className="row">

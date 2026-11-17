@@ -466,6 +466,7 @@ name = "devchievements-config"
 version = "0.0.0"
 dependencies = [
  "devchievements-achievements",
+ "devchievements-filters",
  "devchievements-themes",
  "serde",
  "serde_json",

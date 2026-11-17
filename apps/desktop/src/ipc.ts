@@ -105,6 +105,36 @@ export interface LoginMapping {
   emails: string[];
 }
 
+/** Popup appearance (spec 21). */
+export interface PopupStyle {
+  width: number;
+  height: number | null;
+  scalePercent: number;
+  iconSize: number;
+  cornerRadius: number;
+  screenMargin: number;
+  corner: "top_left" | "top_right" | "bottom_left" | "bottom_right";
+  opacityPercent: number;
+  displaySeconds: number;
+}
+
+/** How a repository selector treats its list (spec 15). */
+export type RepositorySelection =
+  | { mode: "all" }
+  | { mode: "only"; ids: string[] }
+  | { mode: "except"; ids: string[] };
+
+/** User event filters (spec 15). */
+export interface FilterSet {
+  repositories: RepositorySelection;
+  author_emails: string[];
+  include_merges: boolean;
+  include_imported: boolean;
+  allowed_confidence: string[];
+  time_range: { from: number; to: number } | null;
+  event_types: string[];
+}
+
 export interface SettingsView {
   emails: string[];
   privacy: "normal" | "privacy";
@@ -116,6 +146,8 @@ export interface SettingsView {
   runMode: string;
   databaseBytes: number;
   githubLogins: LoginMapping[];
+  filters: FilterSet;
+  popup: PopupStyle;
 }
 
 export interface StatusView {
@@ -190,6 +222,7 @@ export const onboardingStatus = () =>
 export const installHooks = (repoPath: string) =>
   invoke<HookInstallResult[]>("install_hooks", { repoPath });
 export const completeOnboarding = () => invoke<void>("complete_onboarding");
+export const showPreview = () => invoke<void>("show_popup_preview");
 export const openDataFolder = () => invoke<void>("open_data_folder");
 export const clearData = () => invoke<void>("clear_data");
 export const uiReady = (view: string) => invoke<void>("ui_ready", { view });

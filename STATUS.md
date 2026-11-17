@@ -296,10 +296,10 @@ ALL CHECKS PASSED
 | 4a.1 | 资源安全校验（magic bytes / SVG / 配额） | `Tested` | 14 个测试，含伪装成 PNG 的脚本、SVG 执行向量 |
 | 4a.2 | Popup Editor 约束与定位 | `Tested` | 15 个测试：范围钳制、四角定位、缩放 |
 | 4a.3 | 主题包校验与导入 | `Tested` | 拒绝含脚本/样式/javascript: 的主题；未来 schema 拒绝而非猜测 |
-| 4a.4 | Sound Manager 界面 | `Not Started` | 选择逻辑已有（15 测试），界面未做 |
-| 4a.5 | Asset Manager 界面 | `Not Started` | |
-| 4a.6 | Popup Editor 实时预览 | `Not Started` | 约束层已就绪 |
-| 4a.7 | Event Filters 界面 | `Not Started` | 规则层已有 |
+| 4a.4 | Sound Manager | `Partially Implemented` | 覆盖生效已 e2e 验证（5 项）；**无独立管理界面**，需手改配置或导入 |
+| 4a.5 | Asset Manager | `Partially Implemented` | 校验层 14 测试；**无导入界面** |
+| 4a.6 | Popup Editor | `Partially Implemented` | 约束 15 测试；设置页可调宽/缩放/角落/边距 + 实时预览按钮 |
+| 4a.7 | Event Filters 界面 | `Tested` | 设置页可编辑；9 项 e2e 含「不影响官方统计」 |
 | 4a.8 | Achievement Builder（JSON 模式） | `Partially Implemented` | 定义校验与存储已测（12+12 项）；**表单界面未做** |
 | 4a.9 | 配置完整导入导出 | `Tested` | 11 个单元测试 + 18 项 e2e，含「失败不改变现状」 |
 

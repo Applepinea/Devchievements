@@ -870,6 +870,7 @@ name = "devchievements-config"
 version = "0.0.0"
 dependencies = [
  "devchievements-achievements",
+ "devchievements-filters",
  "devchievements-themes",
  "serde",
  "serde_json",
@@ -903,6 +904,7 @@ dependencies = [
  "devchievements-config",
  "devchievements-core",
  "devchievements-events",
+ "devchievements-filters",
  "devchievements-git-hooks",
  "devchievements-notifications",
  "devchievements-platform",
@@ -922,6 +924,15 @@ dependencies = [
 name = "devchievements-events"
 version = "0.0.0"
 dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "devchievements-filters"
+version = "0.0.0"
+dependencies = [
+ "devchievements-events",
  "serde",
  "serde_json",
 ]

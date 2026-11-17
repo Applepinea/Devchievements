@@ -77,6 +77,9 @@ pub struct ConfigDocument {
     /// export is a promise and must not be broken by adding a field.
     #[serde(default)]
     pub user_achievements: Vec<devchievements_achievements::definition::UserAchievement>,
+    /// User event filters (spec 15).
+    #[serde(default)]
+    pub filters: devchievements_filters::FilterSet,
     /// Popup appearance.
     pub popup: devchievements_themes::PopupStyle,
 }
@@ -94,6 +97,7 @@ impl Default for ConfigDocument {
             muted: false,
             sound_overrides: std::collections::BTreeMap::new(),
             user_achievements: Vec::new(),
+            filters: devchievements_filters::FilterSet::default(),
             popup: devchievements_themes::PopupStyle::default(),
         }
     }

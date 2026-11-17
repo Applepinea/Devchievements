@@ -452,6 +452,28 @@ pub async fn clear_data() -> Result<(), String> {
     Ok(())
 }
 
+/// Render one popup with sample content, using the saved appearance.
+///
+/// Saves nothing itself: the caller saves first, so what the preview shows is what
+/// the next real notification would use.
+#[tauri::command]
+pub fn show_popup_preview(app: tauri::AppHandle) -> Result<(), String> {
+    let payload = crate::popup::PopupPayload {
+        title: "Preview".to_string(),
+        body: "This is how your notifications will look".to_string(),
+        rarity: "Rare".to_string(),
+        others: vec![],
+    };
+    let handle = app.clone();
+    app.run_on_main_thread(move || {
+        match crate::popup::show(&handle, &payload, 1) {
+            Ok(()) => println!("POPUP preview shown"),
+            Err(e) => println!("POPUP preview failed: {e}"),
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
 /// Open the settings window (used by the dashboard shortcut).
 #[tauri::command]
 pub fn open_window(app: tauri::AppHandle) -> Result<(), String> {
