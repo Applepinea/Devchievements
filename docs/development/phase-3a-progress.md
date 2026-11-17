@@ -340,3 +340,29 @@ host 校验通过、写库成功、日志正常——但作者信息在那一跳
 | --- | --- |
 | `a_browser_report_without_attribution_is_refused` | 无作者 → `refused: 1`，不是静默丢弃 |
 | `only_a_mapped_login_is_the_user` | 映射的登录计数，陌生登录拒绝 |
+
+### 一次「测试全线失败」的正确解读
+
+改完门禁后，storage 层 6 个测试同时失败，其中一条叫：
+
+```text
+an_event_without_an_author_is_not_blocked_by_the_gate
+```
+
+**这个名字本身就是旧行为的快照。** 它把「无作者也放行」写成了断言，
+所以我改行为它必然红——这正是测试在起作用，不是测试坏了。
+
+另外几条失败另有原因：夹具用裸 `"{}"` 当 payload，
+而真实提交事件一定带 `author_email`。夹具不真实，修夹具。
+
+两者要分开处理：
+
+| 情况 | 处理 |
+| --- | --- |
+| 测试固化了旧的错误行为 | **改测试**，并写清为什么旧行为是错的 |
+| 夹具不真实 | **改夹具**，让它代表真实输入 |
+
+把两者混为一谈（一律改测试让它变绿）会把回归悄悄合法化。
+
+那条测试现在叫 `an_event_without_an_author_is_refused_not_counted`，
+并额外断言 `event_count == 0`——拒绝必须意味着没写进去。

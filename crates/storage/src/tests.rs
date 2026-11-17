@@ -108,7 +108,8 @@ fn commit_event(sha: &str, occurred_at: i64, local_date: &str) -> Event {
         local_date: LocalDate::new(local_date).expect("date"),
         timezone: "Asia/Taipei".to_string(),
         date_policy: 0,
-        payload: "{}".to_string(),
+        // A real commit event always names its author; the gate depends on it (spec 7).
+        payload: "{\"author_email\":\"me@example.com\"}".to_string(),
         schema_version: SchemaVersion(1),
     }
 }
@@ -171,9 +172,10 @@ async fn a_commit_by_someone_else_is_refused_not_attributed() {
 }
 
 #[tokio::test]
-async fn an_event_without_an_author_is_not_blocked_by_the_gate() {
-    // GitHub release/PR events carry no author email; they are attributed by the
-    // verified browser account, so the email gate must not reject them.
+async fn an_event_without_an_author_is_refused_not_counted() {
+    // Spec 7: attribution is mandatory. An event that says nothing about who did
+    // it is refused rather than counted, because counting it would fold somebody
+    // else's work into the user's statistics.
     let pool = temp_pool("no-author").await;
     let facts = ingest::commit_facts(1, false);
     let mut event = commit_event(&"7".repeat(40), 1_794_787_200_000, "2026-11-16");
@@ -186,9 +188,10 @@ async fn an_event_without_an_author_is_not_blocked_by_the_gate() {
         .expect("ingest");
 
     assert!(
-        matches!(outcome, IngestOutcome::Ingested { .. }),
-        "an authorless event must still be recorded, got {outcome:?}"
+        matches!(outcome, IngestOutcome::Refused(_)),
+        "an authorless event must be refused, got {outcome:?}"
     );
+    assert_eq!(ingest::event_count(&pool).await.expect("count"), 0);
 }
 
 #[tokio::test]
