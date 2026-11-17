@@ -7,7 +7,7 @@
 >
 > **不可混淆的五件事**（AGENTS.md §10）：代码已写 / 构建已过 / 自动化测试已过 / 实际运行测试已过 / 平台兼容性已验证。
 >
-> 最后更新：2026-11-17 —— **Phase 4b 进行中（安装包打通、更新机制接入、发布流水线就位）**
+> 最后更新：2026-11-18 —— **Phase 4b 进行中（安装包打通、更新机制接入、发布流水线就位）**
 
 ---
 
@@ -241,6 +241,9 @@ ALL CHECKS PASSED
 
 > 每个数字都能在 `.verify/` 或 `scripts/**/.out/*.json` 找到原始样本。未实测的格子明确标注「未测量」。
 
+> 2026-11-18 性能跟进调整了 spool 计数的内存用法、托盘空闲扫描周期、历史导入分配和扩展 IndexedDB 查询。
+> 上表仍是**改动前基线**；新版本的延迟、内存和 CPU 尚未测量，不应视为改动后的结果。
+
 ---
 
 ## 平台兼容性
@@ -317,6 +320,7 @@ ALL CHECKS PASSED
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-11-18（性能优化跟进） | Spool 计数改为定长缓冲读取；托盘空闲扫描改为约 100 ms；历史导入去掉未使用提交主题和全量匹配引用副本；扩展统计改走 IndexedDB 索引；**新性能数据待测** |
 | 2026-11-16（第一轮） | Phase 0 主体：环境勘察、隔离工具链、Monorepo、AGENTS/STATUS/spec 拆分/ADR、15 场景 Git 实验 + fixtures、WASM 验证、扩展构建 |
 | 2026-11-18（Phase 4b 第十二轮） | 修掉 §22 的功能缺口：自定义成就**真正会被评估**（同事务、官方统计、复用内置记录路径）；新增 `user-achievements` e2e；顺带让 headless companion 也读规则 |
 | 2026-11-18（Phase 4b 第十一轮） | 商店路线打通：MSIX 打包（真图标 / startupTask / 包内 bootstrapper）+ **helper 复制出包**，解决「hook 不能执行包内 exe」；`probe-packaged-app` 10 项实测通过 |
@@ -366,7 +370,7 @@ ALL CHECKS PASSED
 | 4b.16 | 微软商店（MSIX） | `Tested`（本机） | `scripts/msix/` 打真实 MSIX 并装机：安装/AOT 图标/startupTask/数据包外；**helper 复制到 `%LOCALAPPDATA%\bin` 后 hook 可执行并投递记录**（10 项探测全过）。当前用 bootstrapper 按需装 WebView2，认证备注见 `docs/development/store-certification-notes.md`；商店审核口径与无运行库真机流程**未验证**。见 §13–§14 |
 | 4b.5 | 数据迁移（§26.4） | `In Progress` | 更新前后快照/还原路径已测；数据库迁移兼容旧版本尚未做 |
 | 4b.6 | 多语言（§40.1） | `Tested` | 英文原文当 key + 简体中文字典（178/178）；`system` 跟随 webview locale；`UI LANGUAGE lang=… sample=…` 由 e2e 断言查表真的发生；`check-i18n.mjs` 守漏译 |
-| 4b.7 | 性能优化（§40.1 / §44.1） | `Partially Implemented` | 三个目标已实测达标（hook p95 10.81 ms、commit→通知 p95 280 ms、空闲 CPU 0.12% 整机），并修掉一处 500 ms 轮询导致的超预算；**开窗口时的空闲 CPU、以及 §44.3 的并发/损坏场景未测** |
+| 4b.7 | 性能优化（§40.1 / §44.1） | `Partially Implemented` | 改动前基线：hook p95 10.81 ms、commit→通知 p95 274/328 ms、空闲 CPU 0.12% 整机；2026-11-18 有性能跟进改动，**改动后未测**；开窗口时的空闲 CPU、以及 §44.3 的并发/损坏场景未测 |
 | 4b.8 | 错误恢复（§40.1） | `Partially Implemented` | 崩溃恢复、更新失败回滚已测；其余错误路径未逐一评估 |
 | 4b.9 | 完整隐私设置（§40.1） | `Tested` | 隐私模式/托盘开关/日志脱敏；诊断导出默认脱敏、`--raw` 与设置页勾选才含真实仓库名，**警告写进文件本身**；`diagnostics-export` e2e 9 项 |
 | 4b.10 | 启动行为：可选隐藏到托盘 | `Tested` | 设置页开关 + `startHidden`（默认 true）；`STARTUP hidden=` 日志对两种取值都有断言；配置导出对旧文件兼容 |
