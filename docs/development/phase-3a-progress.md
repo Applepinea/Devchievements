@@ -1,0 +1,106 @@
+# Phase 3a 进展（Browser Only）
+
+- **开始**：2026-11-17（用户以「继续 phase3」批准跨越检查点 B）
+- **状态**：**In Progress**
+
+---
+
+## 1. 扩展终于能被加载了
+
+### 1.1 先纠正一个旧结论
+
+ADR-0001 曾判定「MV3 浏览器内加载在本机无法验证」，**这个结论是错的**。
+
+两个原因叠在一起：
+
+1. 当时只试了 headless，而 headless **不支持加载扩展**
+   （实测：`Multiple targets are not supported in headless mode`）。
+2. 有窗口时 `--load-extension` 在当前 Chromium 上也已被忽略——
+   而「被忽略」和「加载失败」从外面看完全一样。
+
+正确做法：CDP 的 `Extensions.loadUnpacked`（需 `--enable-unsafe-extension-debugging`），
+再用 `Target.attachToTarget` 连进 MV3 service worker 求值。
+
+### 1.2 顺带发现的真 bug
+
+扩展**从来没有被加载过**：清单里手写了 `content-scripts/github.js`，
+但 WXT 不会因为手写清单就生成这个文件，浏览器直接拒绝安装。
+
+改用 WXT 入口约定 `entrypoints/github.content.ts`。
+
+## 2. 活动识别（3a.3）
+
+设计要点：**把「是不是可验证活动」写成纯函数**，页面由一个小接口描述：
+
+```ts
+interface PageFacts {
+  url: string;
+  meta(name: string): string | null;
+  text(selector: string): string | null;
+}
+```
+
+内容脚本用 `document` 实现它，测试用固定数据实现它。
+于是规则可测，DOM 只剩十行适配。
+
+### 只认可验证的事实
+
+- 仓库来自 URL 路径；保留顶层路径（`/settings`、`/notifications`）不算仓库
+- 提交 id 来自 URL，要求 7–40 位十六进制（GitHub 不会更短）
+- **时间必须来自页面给的机器可读值**；没有就忽略，不猜
+
+「没有日期就忽略」这条是刻意的：猜一个日期会让事件落到错误的一天，
+而错误的数据比缺失的数据更难发现。
+
+### 去重键
+
+提交：`repo#sha`；发布：`repo#release:<tag>`。
+事件 id 由去重键派生，所以同一页面重复上报不会重复计数。
+
+9 个测试覆盖：正常提交、幂等、大小写归一、缺日期、发布、两个发布不同、
+非活动页面、保留路径、`.git` 后缀。
+
+## 3. 持久化（3a.4）
+
+| 层 | 内容 |
+| --- | --- |
+| `EventStore` 接口 | `add`（返回是否新增）、`all`、`counts` |
+| 内存实现 | 单元测试用，5 个测试 |
+| IndexedDB 实现 | 浏览器用，端到端验证 |
+
+IndexedDB 里 `add` 撞主键就是「已经记录过」，不是错误——
+用 `preventDefault` 把它转成 `false` 返回值。
+
+## 4. 端到端证据
+
+NaN 现在 12 项：
+
+```text
+ok  the extension installs
+ok  the MV3 service worker is running
+ok  it is our extension
+ok  the Rust core is packaged
+ok  it instantiates inside the worker under the MV3 CSP
+ok  a commit page is recorded
+ok  the same commit is not recorded twice
+ok  an unrelated page is ignored
+ok  the worker reports one stored event
+ok  it is counted as a commit
+```
+
+### 一个必须写下来的坑
+
+MV3 worker 刚被唤醒时，**第一条消息会丢**（监听器还没注册）。
+测试第一次跑就因为这条误判成「事件没记录」。
+
+修法不是加重试掩盖问题，而是先做一次 stats 往返握手，
+确认通道活着再开始断言。
+
+## 5. 仍未做
+
+- Outbox 队列（离线重放、原因码）
+- 浏览器通知与音效
+- 浏览器端设置/Dashboard/图鉴
+- 身份映射 GitHub Login → Git Email
+- **Service Worker 回收后的恢复没有实测**：数据在 IndexedDB 里，
+  重启后理论上还在，但「强制停掉 worker 再读」这一步没做过，所以不算验证。

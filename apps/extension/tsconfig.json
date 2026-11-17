@@ -10,6 +10,7 @@
       "ESNext",
       "DOM",
       "DOM.Iterable"
-    ]
+    ],
+    "allowImportingTsExtensions": true
   }
 }

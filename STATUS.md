@@ -52,8 +52,8 @@ ALL CHECKS PASSED
 | --- | --- | --- | --- |
 | 3a.1 | 扩展可独立安装并在真实浏览器运行 | `Tested` | `extension-load` e2e 7 项；CDP `Extensions.loadUnpacked` |
 | 3a.2 | Rust 核心在 MV3 worker 内实例化（CSP） | `Tested` | 同一脚本断言 WASM 实例化与探针调用 |
-| 3a.3 | GitHub 活动识别（Commit/Release） | `Not Started` | 需要内容脚本解析与验证 |
-| 3a.4 | IndexedDB 持久化 + 独立 Outbox | `Not Started` | |
+| 3a.3 | GitHub 活动识别（Commit/Release） | `Tested` | 9 个单元测试（URL/日期/去重键）+ `extension-load` 端到端入库 |
+| 3a.4 | IndexedDB 持久化 + 独立 Outbox | `Partially Implemented` | IndexedDB 存储与去重已端到端验证；**Outbox 队列尚未实现** |
 | 3a.5 | 浏览器通知与音效 | `Not Started` | |
 | 3a.6 | 浏览器端设置/Dashboard/图鉴 | `Not Started` | |
 | 3a.7 | 身份映射 GitHub Login → Git Email | `Not Started` | |

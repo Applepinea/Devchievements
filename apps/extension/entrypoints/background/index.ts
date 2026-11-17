@@ -1,20 +1,57 @@
 /**
  * MV3 service worker.
  *
- * Phase 0 scope: prove the WASM module loads under the extension's CSP and that
- * the service worker can survive suspension by storing its state in
- * storage.session rather than module scope (spec 27.4 / 17.7).
+ * Responsibilities so far (Phase 3a):
+ *  - turn reported page facts into events using the shared extractor;
+ *  - persist them in IndexedDB with dedup by event id;
+ *  - answer queries from the popup.
  *
- * NOT implemented here (Phase 3+): GitHub activity recognition, event delivery,
- * outbox, offer/claim/ack. Those depend on checkpoints A and B.
+ * Nothing here may live in module scope alone: the worker can be stopped between
+ * messages (spec 17.7), which is why the IndexedDB handle is opened lazily.
  */
 
-export default defineBackground(() => {
-  console.info("[devchievements] background service worker started");
+import { extract } from "../../src/github/extract.ts";
+import { IndexedDbEventStore } from "../../src/storage/idb.ts";
+import type { ExtensionMessage, PageFactsResult, StatsResult } from "../../src/messages.ts";
 
-  // Demonstrates the MV3 lifecycle constraint: nothing durable may live only in
-  // module scope, because the worker can be killed at any moment.
-  void chrome.storage.session.set({ backgroundStartedAt: Date.now() }).catch(() => {
-    // storage.session is unavailable before Chrome 102; failing here is not fatal.
+const store = new IndexedDbEventStore();
+
+async function handlePage(message: Extract<ExtensionMessage, { type: "devch:page" }>): Promise<PageFactsResult> {
+  const extraction = extract({
+    url: message.url,
+    meta: (name: string) => message.meta[name] ?? null,
+    text: (selector: string) => message.text[selector] ?? null,
   });
+
+  if (extraction.kind === "ignored") {
+    return { stored: false, reason: extraction.reason };
+  }
+
+  const stored = await store.add(extraction.event);
+  return { stored, event: extraction.event, reason: stored ? undefined : "already recorded" };
+}
+
+async function handleStats(): Promise<StatsResult> {
+  const counts = await store.counts();
+  return {
+    events: counts.commit_created + counts.release_published,
+    commits: counts.commit_created,
+    releases: counts.release_published,
+  };
+}
+
+export default defineBackground(() => {
+  chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
+    const work =
+      message?.type === "devch:page"
+        ? handlePage(message)
+        : message?.type === "devch:stats"
+          ? handleStats()
+          : Promise.resolve({ stored: false, reason: "unknown message" });
+
+    // Returning true keeps the response channel open for the async work.
+    work.then(sendResponse, (error) => sendResponse({ stored: false, reason: String(error) }));
+    return true;
+  });
+  console.info("[devchievements] service worker ready");
 });

@@ -150,7 +150,13 @@ function main() {
   const wxt = path.join(repoRoot, "node_modules", "wxt", "bin", "wxt.mjs");
   if (fs.existsSync(wxt)) {
     step("extension-build", process.execPath, [wxt, "build"], extDir);
-  } else {
+
+  // Fast unit tests for the browser-side rules. They run before the build because
+  // a broken rule should fail in seconds, not after a bundle is produced.
+  const extTests = path.join(repoRoot, "apps", "extension", "src");
+  if (fs.existsSync(extTests)) {
+    step("extension-test", process.execPath, ["--test", "src/**/*.test.ts"], path.join(repoRoot, "apps", "extension"));
+  }  } else {
     results.push({ name: "extension-build", ok: null, skipped: "wxt not installed (run: pnpm install --ignore-scripts)" });
     console.log("SKIP  extension-build      (wxt not installed)");
   }

@@ -182,6 +182,78 @@ async function main() {
     const value = wasm?.result?.value;
     check("the Rust core is packaged", (value?.bytes ?? 0) > 0, JSON.stringify(wasm));
     check("it instantiates inside the worker under the MV3 CSP", (value?.len ?? 0) > 0, JSON.stringify(wasm));
+
+    // ---- ingestion path, driven through the real message channel ----
+    const pageTarget = await cdp.send("Target.createTarget", {
+      url: `chrome-extension://${loaded.id}/popup.html`,
+    });
+    const attachedPage = await cdp.send("Target.attachToTarget", {
+      targetId: pageTarget.targetId,
+      flatten: true,
+    });
+    const pageSession = attachedPage.sessionId;
+
+    const sendPage = async (url, meta = {}, text = {}) => {
+      const res = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `new Promise((resolve) => chrome.runtime.sendMessage(${JSON.stringify({
+            type: "devch:page",
+            url,
+            meta,
+            text,
+          })}, resolve))`,
+          awaitPromise: true,
+          returnByValue: true,
+        },
+        pageSession,
+      );
+      return res?.result?.value;
+    };
+
+    // Warm-up: an MV3 worker that has just been woken can drop the first message
+    // because no listener is registered yet. A stats round-trip proves the channel
+    // is live before the assertions start, so a dropped message cannot masquerade as
+    // "the event was not recorded".
+    for (let i = 0; i < 20; i += 1) {
+      const ping = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `new Promise((resolve) => chrome.runtime.sendMessage({ type: "devch:stats" }, resolve))`,
+          awaitPromise: true,
+          returnByValue: true,
+        },
+        pageSession,
+      );
+      if (typeof ping?.result?.value?.events === "number") break;
+      await sleep(250);
+    }
+
+    const first = await sendPage("https://github.com/Applepinea/Devchievements/commit/02d5183", {
+      "octolytics-dimension-commit_date": "2026-11-17T10:00:00Z",
+    });
+    check("a commit page is recorded", first?.stored === true, JSON.stringify(first));
+
+    const duplicate = await sendPage("https://github.com/Applepinea/Devchievements/commit/02d5183", {
+      "octolytics-dimension-commit_date": "2026-11-17T10:00:00Z",
+    });
+    check("the same commit is not recorded twice", duplicate?.stored === false, JSON.stringify(duplicate));
+
+    const ignored = await sendPage("https://github.com/Applepinea/Devchievements/pulls");
+    check("an unrelated page is ignored", ignored?.stored === false, JSON.stringify(ignored));
+
+    const stats = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `new Promise((resolve) => chrome.runtime.sendMessage({ type: "devch:stats" }, resolve))`,
+        awaitPromise: true,
+        returnByValue: true,
+      },
+      pageSession,
+    );
+    const statsValue = stats?.result?.value;
+    check("the worker reports one stored event", statsValue?.events === 1, JSON.stringify(statsValue));
+    check("it is counted as a commit", statsValue?.commits === 1, JSON.stringify(statsValue));
   } finally {
     cdp?.close();
     child.kill();
