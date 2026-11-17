@@ -426,6 +426,10 @@ dependencies = [
 [[package]]
 name = "devchievements-assets"
 version = "0.0.0"
+dependencies = [
+ "devchievements-privacy",
+ "serde",
+]
 
 [[package]]
 name = "devchievements-companion-core"
@@ -589,6 +593,10 @@ dependencies = [
 [[package]]
 name = "devchievements-themes"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "digest"

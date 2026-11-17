@@ -8,7 +8,8 @@ authors.workspace = true
 description = "Asset validation (magic bytes, size limits) and fallback resolution."
 
 [dependencies]
-# Declared as the code arrives. Phase 0 scaffold has none.
+devchievements-privacy = { path = "../privacy" }
+serde = { version = "1", features = ["derive"] }
 
 [lints]
 workspace = true

@@ -287,6 +287,24 @@ ALL CHECKS PASSED
 
 ---
 
+## Phase 4a 任务表（自定义系统）
+
+> 检查点 C 已由用户以「进入 phase4」批准。
+
+| # | 任务 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| 4a.1 | 资源安全校验（magic bytes / SVG / 配额） | `Tested` | 14 个测试，含伪装成 PNG 的脚本、SVG 执行向量 |
+| 4a.2 | Popup Editor 约束与定位 | `Tested` | 15 个测试：范围钳制、四角定位、缩放 |
+| 4a.3 | 主题包校验与导入 | `Tested` | 拒绝含脚本/样式/javascript: 的主题；未来 schema 拒绝而非猜测 |
+| 4a.4 | Sound Manager 界面 | `Not Started` | 选择逻辑已有（15 测试），界面未做 |
+| 4a.5 | Asset Manager 界面 | `Not Started` | |
+| 4a.6 | Popup Editor 实时预览 | `Not Started` | 约束层已就绪 |
+| 4a.7 | Event Filters 界面 | `Not Started` | 规则层已有 |
+| 4a.8 | Achievement Builder（JSON 模式） | `Not Started` | builder.rs 已有骨架 |
+| 4a.9 | 配置完整导入导出 | `Not Started` | |
+
+---
+
 ## 检查点 C
 
 Phase 3a / 3b 的工作已完成为可验收状态，验收材料见
