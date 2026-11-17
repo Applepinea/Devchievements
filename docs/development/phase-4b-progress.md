@@ -763,4 +763,58 @@ WEBVIEW2 missing: prompting for installation
 
 另外 `diagnostics`、`config-io`、`pages`、`dependencies` 四个既有 e2e 与 `verify.mjs` 全部通过。
 
+## 12. 依赖检查搬进安装过程（用户要求）
+
+「缺 WebView2 无法启动」这个问题，**在启动后才处理已经太晚**。用户的要求是对的：
+检查应该在安装阶段，而不是装完再告诉用户跑不起来。
+
+### 12.1 安装包自己的检查为什么会漏
+
+tauri 的 NSIS 模板这样判断：
+
+```nsis
+ReadRegStr $4 HKLM "SOFTWARE\WOW6432Node\...\EdgeUpdate\Clients\{F3017226-...}" "pv"
+${If} $4 == "" ... 才去下载/安装 WebView2
+```
+
+**注册表有版本号就整段跳过。** 精简版 Windows 上正是「键在、`msedgewebview2.exe` 不在」，
+于是安装包认为已装、照常装完，应用再画一个白窗口然后死在 wry 里。
+
+### 12.2 改成：安装前查文件，查不到就装，装不上就不装
+
+`apps/desktop/src-tauri/installer-hooks.nsh`，挂在 `NSIS_HOOK_PREINSTALL` 上——
+这个位置在 `SetOutPath $INSTDIR` 之后、**第一个 `File` 之前**，所以失败时磁盘上什么都没写，
+**不需要回滚**。
+
+流程：
+
+```text
+1. 读三处注册表的 pv
+2. 拿这个版本去三个位置找 msedgewebview2.exe（ProgramFiles64 / ProgramFiles / LocalAppData）
+3. 找不到 → 运行随安装包内嵌的官方 bootstrapper（/silent /install）
+4. 再查一次，仍然没有 → 提示 + 打开下载页 + 退出码 2，一个文件都不装
+5. Git 只警告不拦截（没有 Git 程序照样能跑，只是没有提交可记）
+```
+
+`webviewInstallMode` 因此改成 `{"type":"skip"}`：WebView2 只有**一处**逻辑（我们的），
+不会出现「模板装了、我们又装一次」或者「模板跳过了、我们不知道」。
+
+### 12.3 两个刻意的细节
+
+- **`Quit` 而不是 `Abort`**：静默安装下 Abort 会让进程悬着不退出（实测），`Quit` + `SetErrorLevel 2`
+  既立刻退出又给出可判断的退出码。
+- **`${IfNot} ${Silent}` 才弹框**：静默安装（CI、`/S`）不能卡在消息框上。
+
+### 12.4 验证
+
+| 场景 | 结果 |
+| --- | --- |
+| 本机（有 WebView2）静默安装 | 退出码 0，主程序 / helper / sounds 全部就位 |
+| 强制缺运行库（`DEVCH_FORCE_NO_WEBVIEW2=1`） | **退出码 2，`devchievements-desktop.exe` 未安装** |
+| 安装后卸载 | 退出码 0，程序删除、数据保留 |
+| `scripts/e2e/installer.mjs` | 19 项全过（新增「缺运行库时安装失败且什么都没装」两项） |
+
+内嵌的 `MicrosoftEdgeWebView2Setup.exe` 来自微软官方下载，**Authenticode 签名校验通过**
+（`CN=Microsoft Corporation`），1.9 MB，安装包从 4.96 MB 变成 6.45 MB。
+
 ---

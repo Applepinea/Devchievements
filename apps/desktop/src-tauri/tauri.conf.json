@@ -43,10 +43,10 @@
     },
     "windows": {
       "webviewInstallMode": {
-        "type": "downloadBootstrapper",
-        "silent": true
+        "type": "skip"
       },
       "nsis": {
+        "installerHooks": "installer-hooks.nsh",
         "installMode": "currentUser",
         "languages": [
           "English"

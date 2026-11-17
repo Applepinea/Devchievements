@@ -206,6 +206,23 @@ function main() {
     updateStatus ? JSON.stringify(updateStatus) : "(no status)",
   );
 
+  // Spec 25: prerequisites are checked during installation, before anything is
+  // copied. A machine that cannot run the app must end up with no installation at
+  // all, rather than with a program that opens a blank window and dies.
+  const blockedDir = path.join(scratch, "blocked");
+  const blocked = spawnSync(installer, ["/S", "/NS", "/D=" + blockedDir], {
+    stdio: "ignore",
+    windowsHide: true,
+    timeout: 240000,
+    env: { ...process.env, DEVCH_FORCE_NO_WEBVIEW2: "1" },
+  });
+  check("a machine without WebView2 fails the install", blocked.status === 2, "exit=" + blocked.status);
+  check(
+    "and nothing was installed",
+    !fs.existsSync(path.join(blockedDir, "devchievements-desktop.exe")),
+    blockedDir,
+  );
+
   // Uninstall in place so the uninstaller can remove its own directory.
   const removal = run(uninstaller, ["/S", "_?=" + installDir]);
   const gone = waitFor(() => !fs.existsSync(mainExe), 120000);
