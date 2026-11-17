@@ -1,0 +1,161 @@
+# .github/workflows/release.yml
+#
+# Phase 4b release pipeline (spec 40.2 / 40.3 / 40.4).
+#
+# What it does: verify, build the Windows artifacts, sign them for the updater,
+# and publish a release that carries the update feed (latest.json).
+#
+# What it deliberately does NOT do:
+# - macOS/Linux builds. ADR-0017 scopes the product to Windows; a job that builds
+#   a target nobody supports is coverage theatre, and spec 40.2 asks for "the
+#   actual support scope".
+# - Authenticode signing. That needs a code signing certificate, which this
+#   project does not have (spec 40.4 stays Platform Unverified). Updater
+#   signatures are a different thing and ARE produced here: they prove an
+#   artifact came from us, not that Windows trusts the publisher name.
+#
+# Required repository secrets:
+#   TAURI_SIGNING_PRIVATE_KEY           private key from `tauri signer generate`
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
+# The matching public key is the `plugins.updater.pubkey` in tauri.conf.json;
+# update::the_endpoint_list_matches_the_config fails the Rust job if they drift
+# apart, and signature verification at install time fails if they are wrong.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: "Create the release as a draft"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  verify:
+    name: Verify (fmt, clippy, test, build, extension)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Build wasm core
+        run: cargo build -p devchievements-core --target wasm32-unknown-unknown --release
+
+      # The desktop app is a separate cargo project (it needs MSVC, the workspace
+      # builds with GNU locally), so its tests are its own step. This is where the
+      # updater safety net and the pubkey/endpoints drift check run.
+      - name: Test desktop app
+        working-directory: apps/desktop/src-tauri
+        run: cargo test
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install node dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Prepare WXT types
+        run: pnpm --filter @devchievements/extension exec wxt prepare
+
+      - name: Typecheck
+        run: pnpm -r --if-present typecheck
+
+      - name: Build extension
+        run: pnpm --filter @devchievements/extension build
+
+  windows:
+    name: Windows installer
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target\napps/desktop/src-tauri -> target"
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install node dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      # tauri build embeds the UI at compile time, so it has to exist first.
+      - name: Build desktop UI
+        run: pnpm --filter @devchievements/desktop build
+
+      # The helper is a bundle resource (tauri.conf.json bundle.resources), so it
+      # must be at target/release/devch-helper.exe before the bundle step looks.
+      - name: Build the git helper
+        run: cargo build --release -p devchievements-helper
+
+      # tauri-action runs `tauri build`, signs the NSIS installer with
+      # TAURI_SIGNING_PRIVATE_KEY, and (includeUpdaterJson) writes and uploads
+      # latest.json, which is the update feed spec 40.3 asks for.
+      - name: Build, sign and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop/src-tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: "Devchievements ${{ github.ref_name }}"
+          releaseBody: |
+            Not Authenticode-signed: Windows SmartScreen will warn until a code signing
+            certificate is configured (spec 40.4). Update artifacts are signed
+            with the updater key, which is a different signature.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+
+      # The .sig files are what an update feed serves next to each installer, so
+      # a release without them cannot be updated from. Fail loudly instead.
+      - name: Check that update signatures exist
+        shell: pwsh
+        run: |
+          $sigs = Get-ChildItem -Path apps/desktop/src-tauri/target/release/bundle -Recurse -Filter *.sig
+          if (-not $sigs) { throw "no .sig artifacts: the installer was not signed for updates" }
+          $sigs | ForEach-Object { Write-Output $_.FullName }
+
