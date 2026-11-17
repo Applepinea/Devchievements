@@ -73,7 +73,7 @@ ALL CHECKS PASSED
 | 3a.5 | 浏览器通知与音效 | `Not Started` | |
 | 3a.6 | 浏览器端设置/Dashboard/图鉴 | `Partially Implemented` | Dashboard 读 IndexedDB 并渲染（端到端 3 项）；**设置与图鉴未做** |
 | 3a.7 | 身份映射 GitHub Login → Git Email | `Not Started` | |
-| 3a.8 | Service Worker 回收后状态恢复 | `Not Started` | |
+| 3a.8 | Service Worker 回收后状态恢复 | `Tested` | `service-worker-restart` e2e：真实停掉 worker 后数据仍在 |
 
 ---
 

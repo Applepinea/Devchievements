@@ -227,3 +227,32 @@ ok  no system notification was attempted
 - 没有桌面应用时，扩展**不解锁任何成就**。这是 ADR-0018 的自觉选择，
   不是缺陷：判定规则只有一份，在 Rust 里。
 - 浏览器内没有设置页、没有图鉴。
+
+## 10. Service Worker 回收恢复（3a.8）
+
+### 为什么这条一直标着「未实测」
+
+数据在 IndexedDB 里，重启后理论上还在。但**「理论上」不是证据**：
+如果读回来的东西恰好来自模块作用域，测试也会绿，而生产里 worker 一被杀就丢。
+
+### 怎么才算是真的测了
+
+必须让 worker **真的死掉**，再通过一个新 worker 读。
+所以脚本里有一条专门断言「worker 确实停了」：
+
+```text
+ok  our worker is running before the stop
+ok  the worker was actually stopped      <-- 关键
+ok  the restarted worker answers
+ok  the event survived the restart
+ok  the event details survived too
+```
+
+**没有第二条，后面几条可能只是因为 worker 压根没停过**，
+读到的还是同一块内存。这正是「看起来测了其实没测」的典型形态。
+
+### 过程中的一处 API 误用
+
+`ServiceWorker.stopAllWorkers` 不在浏览器级会话上，只在页面级会话上。
+改用 `Target.closeTarget` 关掉 worker 目标——
+效果相同（worker 没了），而且不依赖会话类型。
