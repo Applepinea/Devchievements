@@ -57,6 +57,7 @@ ALL CHECKS PASSED
 | 3b.4 | Host 清单与浏览器注册（固定扩展 ID） | `Tested` | `register-native-host.mjs` 写清单 + HKCU 注册；ID 由提交的公钥推导并与加载一致 |
 | 3b.5 | 桌面弹窗呈现浏览器事件 | `Tested` | `browser-to-popup` e2e 6 项：浏览器字节 → host → 桌面弹窗 |
 | 3b.6 | 注册与清理脚本 | `Tested` | `register-native-host.mjs` / `unregister-native-host.mjs`，只动 HKCU |
+| 3b.7 | PR / Issue 识别 | `Tested` | 扩展 14 项测试；Rust 分类 opened/merged/closed；host 转发标志位 |
 
 ---
 

@@ -156,6 +156,102 @@ function releaseEvent(facts: PageFacts, repo: RepositoryId, pathname: string): E
   };
 }
 
+/** A pull request page: /owner/repo/pull/<number>. */
+function pullRequestEvent(facts: PageFacts, repo: RepositoryId, pathname: string): Extraction {
+  const match = pathname.match(/^\/[^/]+\/[^/]+\/pull\/(\d+)\/?$/);
+  if (!match || !match[1]) return { kind: "ignored", reason: "not a pull request page" };
+  const number = Number(match[1]);
+  if (!Number.isInteger(number) || number <= 0) {
+    return { kind: "ignored", reason: "pull request without a number" };
+  }
+
+  // GitHub marks a merged PR with a state badge; the page says so in the URL of
+  // the state element, which is the only machine-readable signal available.
+  const state = facts.attribute(".State", "data-state") ?? facts.meta("octolytics-dimension-pr_state");
+  const merged = state === "merged" || state === "MERGED";
+  // Same rule as commits: attribute only when the page says who did it.
+  const authorLogin =
+    facts.attribute('a[data-hovercard-type="user"]', "href")?.replace(/^\//, "") ??
+    facts.meta("octolytics-dimension-user_login");
+
+  const occurredAt = pageInstant(facts);
+  if (Number.isNaN(occurredAt)) {
+    return { kind: "ignored", reason: "pull request page without a machine-readable date" };
+  }
+
+  const base = {
+    canonicalRepositoryId: canonicalRepositoryId(repo),
+    commitSha: null,
+    externalId: "pr:" + number,
+  };
+
+  return {
+    kind: "event",
+    event: {
+      eventId: eventId(base),
+      eventType: merged ? "pull_request_merged" : "pull_request_opened",
+      source: "browser-github",
+      canonicalRepositoryId: base.canonicalRepositoryId,
+      commitSha: null,
+      externalId: base.externalId,
+      occurredAt,
+      authorLogin,
+      localDate: localDateUtc(occurredAt),
+      payload: JSON.stringify({ via: "content-script", page: "pull_request", merged }),
+    },
+  };
+}
+
+/** An issue page: /owner/repo/issues/<number>. */
+function issueEvent(facts: PageFacts, repo: RepositoryId, pathname: string): Extraction {
+  const match = pathname.match(/^\/[^/]+\/[^/]+\/issues\/(\d+)\/?$/);
+  if (!match || !match[1]) return { kind: "ignored", reason: "not an issue page" };
+  const number = Number(match[1]);
+  if (!Number.isInteger(number) || number <= 0) {
+    return { kind: "ignored", reason: "issue without a number" };
+  }
+
+  const state = facts.attribute(".State", "data-state") ?? facts.meta("octolytics-dimension-issue_state");
+  const closed = state === "closed" || state === "CLOSED";
+  // Same rule as commits: attribute only when the page says who did it.
+  const authorLogin =
+    facts.attribute('a[data-hovercard-type="user"]', "href")?.replace(/^\//, "") ??
+    facts.meta("octolytics-dimension-user_login");
+
+  const occurredAt = pageInstant(facts);
+  if (Number.isNaN(occurredAt)) {
+    return { kind: "ignored", reason: "issue page without a machine-readable date" };
+  }
+
+  const base = {
+    canonicalRepositoryId: canonicalRepositoryId(repo),
+    commitSha: null,
+    externalId: "issue:" + number,
+  };
+
+  return {
+    kind: "event",
+    event: {
+      eventId: eventId(base),
+      eventType: closed ? "issue_closed" : "issue_opened",
+      source: "browser-github",
+      canonicalRepositoryId: base.canonicalRepositoryId,
+      commitSha: null,
+      externalId: base.externalId,
+      occurredAt,
+      authorLogin,
+      localDate: localDateUtc(occurredAt),
+      payload: JSON.stringify({ via: "content-script", page: "issue", closed }),
+    },
+  };
+}
+
+/** The instant the page states, or NaN. */
+function pageInstant(facts: PageFacts): number {
+  const stamp = facts.text("relative-time[datetime]");
+  return stamp ? Date.parse(stamp) : Number.NaN;
+}
+
 /** Decide whether this page is activity worth recording. */
 export function extract(facts: PageFacts): Extraction {
   let url: URL;
@@ -171,5 +267,7 @@ export function extract(facts: PageFacts): Extraction {
 
   if (/\/commit\//.test(url.pathname)) return commitEvent(facts, repo, url.pathname);
   if (/\/releases\/tag\//.test(url.pathname)) return releaseEvent(facts, repo, url.pathname);
+  if (/\/pull\/\d+/.test(url.pathname)) return pullRequestEvent(facts, repo, url.pathname);
+  if (/\/issues\/\d+/.test(url.pathname)) return issueEvent(facts, repo, url.pathname);
   return { kind: "ignored", reason: "page type not implemented" };
 }

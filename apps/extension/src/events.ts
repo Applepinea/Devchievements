@@ -13,7 +13,13 @@
 export type EventSource = "browser-github";
 
 /** What kind of activity was observed. */
-export type EventType = "commit_created" | "release_published";
+export type EventType =
+  | "commit_created"
+  | "release_published"
+  | "pull_request_opened"
+  | "pull_request_merged"
+  | "issue_opened"
+  | "issue_closed";
 
 /** A normalised GitHub repository identifier. */
 export interface RepositoryId {

@@ -25,6 +25,10 @@ pub enum BrowserActivity {
     Commit { sha: String },
     /// A release page was observed.
     Release { tag: String },
+    /// A pull request page was observed; `merged` distinguishes the two event types.
+    PullRequest { number: u64, merged: bool },
+    /// An issue page was observed.
+    Issue { number: u64, closed: bool },
 }
 
 /// A validated browser report.
@@ -85,6 +89,28 @@ pub fn parse(payload: &serde_json::Value) -> Option<BrowserReport> {
             }
             BrowserActivity::Release { tag }
         }
+        "pull_request" => {
+            let number = payload.get("number")?.as_u64()?;
+            if number == 0 {
+                return None;
+            }
+            let merged = payload
+                .get("merged")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            BrowserActivity::PullRequest { number, merged }
+        }
+        "issue" => {
+            let number = payload.get("number")?.as_u64()?;
+            if number == 0 {
+                return None;
+            }
+            let closed = payload
+                .get("closed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            BrowserActivity::Issue { number, closed }
+        }
         _ => return None,
     };
 
@@ -108,6 +134,22 @@ pub fn to_event(report: &BrowserReport, ctx: &InjectedContext<'_>) -> Option<Eve
     let (event_type, commit_sha, external_id) = match &report.activity {
         BrowserActivity::Commit { sha } => (EventType::CommitCreated, Some(sha.clone()), None),
         BrowserActivity::Release { tag } => (EventType::ReleasePublished, None, Some(tag.clone())),
+        BrowserActivity::PullRequest { number, merged } => {
+            let kind = if *merged {
+                EventType::PullRequestMerged
+            } else {
+                EventType::PullRequestOpened
+            };
+            (kind, None, Some(format!("pr:{number}")))
+        }
+        BrowserActivity::Issue { number, closed } => {
+            let kind = if *closed {
+                EventType::IssueClosed
+            } else {
+                EventType::IssueOpened
+            };
+            (kind, None, Some(format!("issue:{number}")))
+        }
     };
 
     let timezone = ctx.timezone.canonicalize("UTC")?;

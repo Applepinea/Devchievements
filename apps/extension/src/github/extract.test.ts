@@ -121,3 +121,62 @@ test("reserved top-level paths are not repositories", () => {
 test("a repository name ending in .git is normalised", () => {
   assert.deepEqual(repositoryFromPath("/o/r.git"), { owner: "o", name: "r" });
 });
+
+test("a pull request page becomes an opened event", () => {
+  const result = extract(
+    facts("https://github.com/o/r/pull/42", {
+      text: { "relative-time[datetime]": "2026-05-01T10:00:00Z" },
+      attribute: { 'a[data-hovercard-type="user"]': "/me" },
+    }),
+  );
+  assert.equal(result.kind, "event");
+  if (result.kind !== "event") return;
+  assert.equal(result.event.eventType, "pull_request_opened");
+  assert.equal(result.event.externalId, "pr:42");
+  assert.equal(result.event.authorLogin, "me");
+});
+
+test("a merged pull request is a different event", () => {
+  const result = extract(
+    facts("https://github.com/o/r/pull/42", {
+      text: { "relative-time[datetime]": "2026-05-01T10:00:00Z" },
+      attribute: { ".State": "merged" },
+    }),
+  );
+  assert.equal(result.kind, "event");
+  if (result.kind !== "event") return;
+  assert.equal(result.event.eventType, "pull_request_merged");
+});
+
+test("an issue page becomes an opened event", () => {
+  const result = extract(
+    facts("https://github.com/o/r/issues/7", {
+      text: { "relative-time[datetime]": "2026-05-02T10:00:00Z" },
+    }),
+  );
+  assert.equal(result.kind, "event");
+  if (result.kind !== "event") return;
+  assert.equal(result.event.eventType, "issue_opened");
+  assert.equal(result.event.externalId, "issue:7");
+});
+
+test("different issues are different events", () => {
+  const one = extract(
+    facts("https://github.com/o/r/issues/7", {
+      text: { "relative-time[datetime]": "2026-05-02T10:00:00Z" },
+    }),
+  );
+  const two = extract(
+    facts("https://github.com/o/r/issues/8", {
+      text: { "relative-time[datetime]": "2026-05-03T10:00:00Z" },
+    }),
+  );
+  assert.equal(one.kind, "event");
+  assert.equal(two.kind, "event");
+  if (one.kind !== "event" || two.kind !== "event") return;
+  assert.notEqual(one.event.eventId, two.event.eventId);
+});
+
+test("a pull request without a date is ignored", () => {
+  assert.equal(extract(facts("https://github.com/o/r/pull/42")).kind, "ignored");
+});

@@ -69,6 +69,10 @@ export class IndexedDbEventStore implements EventStore {
     const counts: Record<EventType, number> = {
       commit_created: 0,
       release_published: 0,
+      pull_request_opened: 0,
+      pull_request_merged: 0,
+      issue_opened: 0,
+      issue_closed: 0,
     };
     for (const event of await this.all()) counts[event.eventType] += 1;
     return counts;

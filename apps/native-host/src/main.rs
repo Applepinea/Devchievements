@@ -103,14 +103,37 @@ fn handle(raw: &[u8]) -> serde_json::Value {
         "activity": match &report.activity {
             browser_event::BrowserActivity::Commit { .. } => "commit",
             browser_event::BrowserActivity::Release { .. } => "release",
+            browser_event::BrowserActivity::PullRequest { .. } => "pull_request",
+            browser_event::BrowserActivity::Issue { .. } => "issue",
         },
         "commit_sha": match &report.activity {
             browser_event::BrowserActivity::Commit { sha } => Some(sha.clone()),
-            browser_event::BrowserActivity::Release { .. } => None,
+            _ => None,
         },
         "external_id": match &report.activity {
             browser_event::BrowserActivity::Commit { .. } => None,
             browser_event::BrowserActivity::Release { tag } => Some(tag.clone()),
+            browser_event::BrowserActivity::PullRequest { number, .. } => {
+                Some(format!("pr:{number}"))
+            }
+            browser_event::BrowserActivity::Issue { number, .. } => {
+                Some(format!("issue:{number}"))
+            }
+        },
+        // The flags that separate opened from merged/closed must survive this hop;
+        // dropping them here would silently reclassify every PR as merely opened.
+        "merged": match &report.activity {
+            browser_event::BrowserActivity::PullRequest { merged, .. } => Some(*merged),
+            _ => None,
+        },
+        "closed": match &report.activity {
+            browser_event::BrowserActivity::Issue { closed, .. } => Some(*closed),
+            _ => None,
+        },
+        "number": match &report.activity {
+            browser_event::BrowserActivity::PullRequest { number, .. }
+            | browser_event::BrowserActivity::Issue { number, .. } => Some(*number),
+            _ => None,
         },
         "occurred_ms": report.occurred_ms,
         // The attribution has to survive this hop. Dropping it here made the
