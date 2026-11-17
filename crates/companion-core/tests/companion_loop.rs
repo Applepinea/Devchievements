@@ -522,3 +522,125 @@ async fn a_browser_report_is_ingested_as_a_commit() {
 
     fixture.cleanup();
 }
+
+/// The same repository seen through the hook and through the browser must be ONE
+/// repository (spec 6.1). Before the remote was used, the hook recorded
+/// "local:<path>" while the browser recorded "github:owner/repo", so a user who
+/// worked both ways saw their history split in two.
+#[tokio::test]
+async fn hook_and_browser_agree_on_one_repository() {
+    let fixture = Fixture::new("identity").await;
+    let spool = Spool::open(&fixture.spool).expect("spool");
+
+    // The hook path, now carrying the remote it read from git config.
+    spool
+        .append(
+            "post-commit:hook-sha:1",
+            &serde_json::json!({
+                "event_id": "post-commit:hook-sha:1",
+                "hook": "post-commit",
+                "hook_args": [],
+                "repo_git_dir": "C:/repos/demo/.git",
+                "repo_remote_url": "git@github.com:Owner/Repo.git",
+                "commit_sha": "1111111111111111111111111111111111111111",
+                "parents": ["p"],
+                "author_name": "Me",
+                "author_email": "me@example.com",
+                "committer_email": "me@example.com",
+                "subject": "a commit",
+                "occurred_ms": now_ms() - 1_000,
+            })
+            .to_string(),
+        )
+        .expect("append");
+
+    // The browser path for the same repository, spelled differently on purpose:
+    // HTTPS, lowercase, with a .git suffix.
+    spool
+        .append(
+            "browser:github:owner/repo#abc",
+            &serde_json::json!({
+                "kind": "browser_github",
+                "event_id": "browser:github:owner/repo#abc",
+                "repository_id": "github:owner/repo",
+                "activity": "commit",
+                "commit_sha": "2222222222222222222222222222222222222222",
+                "external_id": null,
+                "occurred_ms": now_ms() - 500,
+            })
+            .to_string(),
+        )
+        .expect("append");
+
+    let report = fixture
+        .companion()
+        .drain_once(&identity())
+        .await
+        .expect("drain");
+    assert_eq!(report.ingested, 2, "both must ingest: {report:?}");
+
+    let repositories =
+        devchievements_storage::read_models::repositories(&fixture.pool, |id| id.to_string())
+            .await
+            .expect("repositories");
+
+    assert_eq!(
+        repositories.len(),
+        1,
+        "one repository, not two: {:?}",
+        repositories.iter().map(|r| &r.alias).collect::<Vec<_>>()
+    );
+    assert_eq!(repositories[0].commits, 2);
+
+    fixture.cleanup();
+}
+
+/// The other half of spec 6.1: without a remote there is nothing to merge, so the
+/// repository stays a local identity. Merging two remote-less clones would be a
+/// worse error than keeping them apart, and the spec forbids guessing.
+#[tokio::test]
+async fn a_repository_without_a_remote_stays_local() {
+    let fixture = Fixture::new("no-remote").await;
+    let spool = Spool::open(&fixture.spool).expect("spool");
+    spool
+        .append(
+            "post-commit:local-sha:1",
+            &serde_json::json!({
+                "event_id": "post-commit:local-sha:1",
+                "hook": "post-commit",
+                "hook_args": [],
+                "repo_git_dir": "C:/repos/private/.git",
+                "repo_remote_url": null,
+                "commit_sha": "3333333333333333333333333333333333333333",
+                "parents": ["p"],
+                "author_name": "Me",
+                "author_email": "me@example.com",
+                "committer_email": "me@example.com",
+                "subject": "local only",
+                "occurred_ms": now_ms() - 1_000,
+            })
+            .to_string(),
+        )
+        .expect("append");
+
+    let report = fixture
+        .companion()
+        .drain_once(&identity())
+        .await
+        .expect("drain");
+    assert_eq!(report.ingested, 1, "{report:?}");
+
+    let repositories =
+        devchievements_storage::read_models::repositories(&fixture.pool, |id| id.to_string())
+            .await
+            .expect("repositories");
+
+    assert_eq!(repositories.len(), 1);
+    assert!(
+        repositories[0].alias.starts_with("local:"),
+        "must stay a local identity, got {:?}",
+        repositories[0].alias
+    );
+
+    fixture.cleanup();
+}

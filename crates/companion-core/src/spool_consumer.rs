@@ -260,11 +260,20 @@ impl Companion {
             .unwrap_or("");
         let hook = payload.get("hook")?.as_str()?;
 
-        // The repository identity is derived from the recorded git dir. Using the
-        // path here is a Phase 2a simplification: spec 6.1 prefers the remote URL.
-        // It is recorded as a local identity so the origin is explicit rather than
-        // implying we resolved a remote we did not.
-        let repository_id = CanonicalRepositoryId(format!("local:{git_dir}"));
+        // Spec 6.1 priority: the remote decides identity, because the same repository
+        // is cloned to different paths on different machines. The path is only a
+        // fallback, and is kept distinguishable ("local:") so a split is visible in
+        // diagnostics rather than looking like a second repository.
+        let repository_id = CanonicalRepositoryId(
+            match payload
+                .get("repo_remote_url")
+                .and_then(|v| v.as_str())
+                .and_then(devchievements_events::repository::RepositoryIdentity::from_remote_url)
+            {
+                Some(identity) => identity.canonical_id,
+                None => format!("local:{git_dir}"),
+            },
+        );
 
         let local_date = devchievements_core::local_date_at(
             occurred_ms,

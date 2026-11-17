@@ -81,6 +81,34 @@ fn git_config(dir: &Path, args: &[&str]) -> Option<String> {
 /// The result is NOT auto-committed anywhere: the caller shows it as a suggestion.
 /// If Git has nothing configured, the returned identity is empty and
 /// [Identity::is_configured] is false, so statistics stay blocked (spec 7).
+/// The configured remote URL, preferring `origin`.
+///
+/// Spec 6.1 puts the remote above the local path when deriving repository
+/// identity, because the same repository is cloned to different paths on
+/// different machines and must still be one repository.
+pub fn remote_url(repo_dir: &Path) -> Option<String> {
+    // origin first: it is the conventional upstream, and a fork adds others.
+    if let Some(url) = git_config(repo_dir, &["remote", "origin", "url"]) {
+        let url = url.trim().to_string();
+        if !url.is_empty() {
+            return Some(url);
+        }
+    }
+
+    // Any other remote beats nothing: a repository with only `upstream` still has
+    // a stable identity.
+    let remotes = git_config(repo_dir, &["remote"])?;
+    for name in remotes.lines().map(str::trim).filter(|n| !n.is_empty()) {
+        if let Some(url) = git_config(repo_dir, &["remote", name, "url"]) {
+            let url = url.trim().to_string();
+            if !url.is_empty() {
+                return Some(url);
+            }
+        }
+    }
+    None
+}
+
 pub fn suggest_identity(repo_dir: &Path) -> Identity {
     let mut identity = Identity::default();
     for config in read_user_emails(repo_dir) {

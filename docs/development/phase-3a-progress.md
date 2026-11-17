@@ -256,3 +256,39 @@ ok  the event details survived too
 `ServiceWorker.stopAllWorkers` 不在浏览器级会话上，只在页面级会话上。
 改用 `Target.closeTarget` 关掉 worker 目标——
 效果相同（worker 没了），而且不依赖会话类型。
+
+## 11. 仓库身份映射（3a.7）
+
+### 这是个真漏洞，不是待办
+
+之前：
+
+| 路径 | 记录的仓库 id |
+| --- | --- |
+| 本地 hook | `local:C:/repos/foo/.git` |
+| 浏览器扩展 | `github:owner/foo` |
+
+同一个仓库被记成**两个**。用户本地提交一次、网页上提交一次，统计里会出现两个仓库。
+这违反 §6.1，而且是那种「不报错但数字全错」的问题。
+
+### 修法
+
+`crates/events/src/repository.rs` 里本来就有完整的规范化实现（SSH/HTTPS、`.git` 后缀、大小写、优先级），
+**只是钩子路径从来没用过它**：它压根没读 remote。
+
+改动：
+
+1. helper 读 `remote.origin.url`（没有 origin 就退到任意 remote），写进 payload；
+2. companion 用 `RepositoryIdentity::from_remote_url` 推导 canonical id；
+3. 没有 remote 时才回退到 `local:<path>`。
+
+### 两条测试，方向相反
+
+| 测试 | 断言 |
+| --- | --- |
+| `hook_and_browser_agree_on_one_repository` | SSH 写法的 hook 与 HTTPS 写法的 browser **合成一个仓库**，2 个提交 |
+| `a_repository_without_a_remote_stays_local` | 没有 remote 时**保持** local，不瞎合并 |
+
+第二条和第一条同样重要。**过度合并比不合并更难发现**：
+两个不相干的本地仓库被合成一个，数字看起来还很正常。
+§6.1 明确禁止「轻率合并同名仓库」，这条测试就是守那条。

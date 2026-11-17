@@ -103,6 +103,10 @@ fn handle_hook(hook_name: &str, hook_args: &[String]) -> Option<()> {
         "hook": hook_name,
         "hook_args": hook_args,
         "repo_git_dir": repo.git_dir.to_string_lossy(),
+        // The remote, when there is one, is what decides repository identity:
+        // the same repository lives at different paths on different machines
+        // (spec 6.1). Recorded here so the Companion does not have to guess.
+        "repo_remote_url": devchievements_git_hooks::gitread::config_read::remote_url(&cwd),
         "commit_sha": facts.sha,
         "parents": facts.parents,
         "author_name": facts.author_name,
