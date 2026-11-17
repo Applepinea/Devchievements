@@ -551,4 +551,40 @@ mod tests {
         let back: SoundOverrides = serde_json::from_str(&json).expect("deserialise");
         assert_eq!(overrides, back);
     }
+
+    #[test]
+    fn a_rarity_override_beats_its_builtin() {
+        let mut overrides = SoundOverrides::new();
+        overrides.set_rarity(Rarity::Uncommon, "commit");
+        let mut available = BTreeSet::new();
+        available.insert("achievement".to_string());
+        available.insert("commit".to_string());
+
+        let request = SoundRequest::Reward {
+            primary_id: "uncommon_day".to_string(),
+            rarity: Rarity::Uncommon,
+            daily_rank: None,
+        };
+        let selection = select(&request, &overrides, &available);
+        assert_eq!(selection.sound, "commit", "the override must win");
+        assert_eq!(selection.source, SoundSource::RarityCustom);
+    }
+
+    #[test]
+    fn an_override_pointing_at_a_missing_file_degrades_to_the_builtin() {
+        // Spec 19: a deleted custom sound must not silence the achievement.
+        let mut overrides = SoundOverrides::new();
+        overrides.set_rarity(Rarity::Uncommon, "deleted");
+        let mut available = BTreeSet::new();
+        available.insert("achievement".to_string());
+
+        let request = SoundRequest::Reward {
+            primary_id: "x".to_string(),
+            rarity: Rarity::Uncommon,
+            daily_rank: None,
+        };
+        let selection = select(&request, &overrides, &available);
+        assert_eq!(selection.sound, "achievement");
+        assert_eq!(selection.source, SoundSource::BuiltIn);
+    }
 }

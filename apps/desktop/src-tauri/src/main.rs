@@ -66,8 +66,12 @@ impl DeliverySink for DesktopSink {
 
                 // Spec 16.6: the leading item's sound plays, exactly one per event.
                 let prefs = settings::Settings::load(&settings_path());
+                let overrides = devchievements_sound::SoundOverrides {
+                    slots: prefs.sound_overrides.clone(),
+                };
                 let selection = audio::play_for_with(
                     &audio::request_for(&popup.primary_id, to_sound_rarity(popup.rarity)),
+                    &overrides,
                     prefs.volume,
                     prefs.muted,
                 );
@@ -133,11 +137,22 @@ impl DeliverySink for DesktopSink {
                 // Spec 16.4: a plain commit is acknowledged by sound only. No toast,
                 // because interrupting for every commit is exactly what that rule
                 // exists to prevent.
-                let selection = audio::play_for(&devchievements_sound::SoundRequest::Commit);
-                println!(
-                    "SOUND play id={} from={:?}",
-                    selection.sound, selection.source
-                );
+                let prefs = settings::Settings::load(&settings_path());
+                let overrides = devchievements_sound::SoundOverrides {
+                    slots: prefs.sound_overrides.clone(),
+                };
+                match audio::play_for_with(
+                    &devchievements_sound::SoundRequest::Commit,
+                    &overrides,
+                    prefs.volume,
+                    prefs.muted,
+                ) {
+                    Some(selection) => println!(
+                        "SOUND play id={} from={:?}",
+                        selection.sound, selection.source
+                    ),
+                    None => println!("SOUND suppressed muted={}", prefs.muted),
+                }
                 SHOWN.fetch_add(1, Ordering::Relaxed);
             }
             Presentation::Nothing => {}
@@ -958,6 +973,66 @@ fn main() {
         }
     }
 
+    // Export the whole configuration as a portable document.
+    if let Some(i) = std::env::args().position(|a| a == "--export-config") {
+        let Some(target) = std::env::args().nth(i + 1) else {
+            println!("EXPORT FAILED: --export-config needs a path");
+            std::process::exit(2);
+        };
+        let stored = settings::Settings::load(&settings_path());
+        let document = stored.to_document();
+        let text = document.to_json();
+        if let Some(parent) = std::path::Path::new(&target).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::write(&target, text + "\n") {
+            Ok(()) => {
+                println!("EXPORTED {target}");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("EXPORT FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Import a configuration document. Nothing is applied unless it validates.
+    if let Some(i) = std::env::args().position(|a| a == "--import-config") {
+        let Some(source) = std::env::args().nth(i + 1) else {
+            println!("IMPORT FAILED: --import-config needs a path");
+            std::process::exit(2);
+        };
+        let text = match std::fs::read_to_string(&source) {
+            Ok(text) => text,
+            Err(e) => {
+                println!("IMPORT FAILED: {e}");
+                std::process::exit(1);
+            }
+        };
+        match devchievements_config::ConfigDocument::from_json(&text) {
+            Ok(document) => {
+                let path = settings_path();
+                let mut stored = settings::Settings::load(&path);
+                stored.apply_document(document);
+                match stored.save(&path) {
+                    Ok(()) => {
+                        println!("IMPORTED {source}");
+                        std::process::exit(0);
+                    }
+                    Err(e) => {
+                        println!("IMPORT FAILED: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("IMPORT FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     if std::env::args().any(|a| a == "--capabilities") {
         let caps = current_capabilities();
         let report = serde_json::json!({
@@ -1030,6 +1105,7 @@ fn main() {
                     },
                     "sounds": audio::available_sound_ids(),
                     "privacy": settings::Settings::load(&settings_path()).privacy.as_str(),
+                    "popup": settings::Settings::load(&settings_path()).popup,
                     "capabilities": current_capabilities(),
                     "snapshot": snapshot,
                     "outboxHealth": health,

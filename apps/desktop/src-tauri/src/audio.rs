@@ -79,8 +79,8 @@ fn rank_from(name: &str) -> Option<devchievements_sound::DailyRank> {
     }
 }
 
-/// Choose a sound without playing it. Exposed for diagnostics and tests.
-pub fn choose(request: &SoundRequest) -> SoundSelection {
+/// Choose a sound without playing it, with no user overrides.
+fn choose(request: &SoundRequest) -> SoundSelection {
     select(request, &SoundOverrides::new(), &available())
 }
 
@@ -166,11 +166,17 @@ static PLAYBACK: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
 ///
 /// Returns the selection so the caller can log what was played, or None when the
 /// sound was suppressed.
-pub fn play_for_with(request: &SoundRequest, volume: u8, muted: bool) -> Option<SoundSelection> {
+pub fn play_for_with(
+    request: &SoundRequest,
+    overrides: &SoundOverrides,
+    volume: u8,
+    muted: bool,
+) -> Option<SoundSelection> {
     if muted || volume == 0 {
         return None;
     }
-    let selection = choose(request);
+    // The user's Sound Manager choices decide which file plays (spec 19).
+    let selection = select(request, overrides, &available());
     let file = sounds_dir().join(format!("{}.wav", selection.sound));
     if !file.exists() {
         return Some(selection);

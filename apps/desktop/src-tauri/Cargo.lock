@@ -866,6 +866,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "devchievements-config"
+version = "0.0.0"
+dependencies = [
+ "devchievements-themes",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "devchievements-core"
 version = "0.0.0"
 dependencies = [
@@ -890,6 +899,7 @@ dependencies = [
  "async-std",
  "devchievements-achievements",
  "devchievements-companion-core",
+ "devchievements-config",
  "devchievements-core",
  "devchievements-events",
  "devchievements-git-hooks",
@@ -898,6 +908,7 @@ dependencies = [
  "devchievements-privacy",
  "devchievements-sound",
  "devchievements-storage",
+ "devchievements-themes",
  "serde",
  "serde_json",
  "sqlx",
@@ -963,6 +974,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+]
+
+[[package]]
+name = "devchievements-themes"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

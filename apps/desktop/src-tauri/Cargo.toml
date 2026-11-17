@@ -20,6 +20,8 @@ devchievements-notifications = { path = "../../../crates/notifications" }
 devchievements-sound = { path = "../../../crates/sound" }
 devchievements-privacy = { path = "../../../crates/privacy" }
 devchievements-platform = { path = "../../../crates/platform" }
+devchievements-config = { path = "../../../crates/config" }
+devchievements-themes = { path = "../../../crates/themes" }
 devchievements-git-hooks = { path = "../../../crates/git-hooks" }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-async-std", "sqlite", "migrate"] }
 async-std = { version = "1", features = ["attributes"] }

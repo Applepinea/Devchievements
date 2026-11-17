@@ -22,9 +22,12 @@ const PREFIX: &str = "notify";
 /// How long a popup stays before closing itself.
 const LIFETIME: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Window size in logical pixels, matching the wide-and-short proportion Steam uses.
-const WIDTH: f64 = 364.0;
-const HEIGHT: f64 = 88.0;
+/// Fallback size, used when no style is configured.
+///
+/// The live size comes from the user's PopupStyle (spec 21); these exist so the
+/// popup still has sane dimensions if the settings file cannot be read.
+const FALLBACK_WIDTH: f64 = 364.0;
+const FALLBACK_HEIGHT: f64 = 88.0;
 
 /// Everything a popup needs to render.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -55,11 +58,30 @@ pub fn show(app: &AppHandle, payload: &PopupPayload, counter: u64) -> Result<(),
     // Translucency is wanted (the popup floats over whatever the user is doing) but
     // it is the first thing that can fail on a given GPU or theme, so a failure here
     // falls back to an opaque window instead of losing the notification entirely.
-    let window = build_window(app, &label, &url, true)
-        .or_else(|_| build_window(app, &label, &url, false))
+    // Appearance comes from the user's settings (spec 21), already clamped by the
+    // themes crate, so a hand-edited file cannot place the popup off-screen.
+    let style = crate::settings::Settings::load(&crate::settings_path()).popup;
+    let (width, height) = style.window_size();
+    let size = (f64::from(width), f64::from(height));
+
+    let window = build_window(app, &label, &url, true, size)
+        .or_else(|_| build_window(app, &label, &url, false, size))
         .map_err(|e| e.to_string())?;
 
-    place_bottom_right(&window);
+    // snake_case rather than the Debug spelling: the log is read by tests and by
+    // anyone diagnosing a report, and `TopLeft` vs `top_left` is a needless
+    // difference between what the docs say and what the log shows.
+    let corner = serde_json::to_value(style.corner)
+        .ok()
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "unknown".to_string());
+    println!(
+        "POPUP style width={} corner={} scale={}",
+        style.window_size().0,
+        corner,
+        style.scale_percent
+    );
+    place(&window, &style);
     let _ = window.show();
 
     // Close from the Rust side: the page does not need a window API, and a page that
@@ -82,10 +104,11 @@ fn build_window(
     label: &str,
     url: &str,
     transparent: bool,
+    size: (f64, f64),
 ) -> tauri::Result<tauri::WebviewWindow> {
     WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
         .title("Devchievements")
-        .inner_size(WIDTH, HEIGHT)
+        .inner_size(size.0, size.1)
         .decorations(false)
         .resizable(false)
         .always_on_top(true)
@@ -102,23 +125,27 @@ fn build_window(
 }
 
 /// Put the popup in the bottom-right corner of the current monitor's work area.
-fn place_bottom_right(window: &tauri::WebviewWindow) {
+fn place(window: &tauri::WebviewWindow, style: &devchievements_themes::PopupStyle) {
     let Ok(Some(monitor)) = window.current_monitor() else {
         return;
     };
-    let size = monitor.size();
-    let position = monitor.position();
+    let screen = monitor.size();
+    let origin = monitor.position();
     let scale = monitor.scale_factor();
 
-    let width = (WIDTH * scale) as i32;
-    let height = (HEIGHT * scale) as i32;
+    // Monitor sizes are physical pixels; the style works in logical ones. Convert
+    // by the scale factor so a 4K display does not produce a quarter-size popup.
+    let logical_width = (screen.width as f64 / scale) as u32;
+    let logical_height = (screen.height as f64 / scale) as u32;
 
-    // Flush against the bottom-right corner: no margin, because the card is meant to
-    // read as attached to the edge rather than floating near it.
-    let x = position.x + size.width as i32 - width;
-    let y = position.y + size.height as i32 - height;
+    // The arithmetic lives in the themes crate so all four corners are testable
+    // without a monitor.
+    let (x, y) = style.position((logical_width, logical_height));
 
-    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    let _ = window.set_position(tauri::PhysicalPosition::new(
+        origin.x + (f64::from(x) * scale) as i32,
+        origin.y + (f64::from(y) * scale) as i32,
+    ));
 }
 
 /// Percent-encode the payload for the URL fragment.

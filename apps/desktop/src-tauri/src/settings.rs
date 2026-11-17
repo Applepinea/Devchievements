@@ -85,6 +85,12 @@ pub struct Settings {
     /// companion will not count it without an explicit mapping.
     #[serde(default, rename = "githubLogins")]
     pub github_logins: std::collections::BTreeMap<String, Vec<String>>,
+    /// Sound overrides, keyed as the sound crate expects (spec 19).
+    #[serde(default, rename = "soundOverrides")]
+    pub sound_overrides: std::collections::BTreeMap<String, String>,
+    /// Popup appearance (spec 21).
+    #[serde(default)]
+    pub popup: devchievements_themes::PopupStyle,
     /// Whether the first-run wizard has been completed (spec 25).
     #[serde(default, rename = "onboardingCompleted")]
     pub onboarding_completed: bool,
@@ -113,6 +119,8 @@ impl Default for Settings {
             volume: 80,
             muted: false,
             github_logins: std::collections::BTreeMap::new(),
+            sound_overrides: std::collections::BTreeMap::new(),
+            popup: devchievements_themes::PopupStyle::default(),
             onboarding_completed: false,
         }
     }
@@ -157,5 +165,39 @@ impl Settings {
             identity.add_login_mapping(login.clone(), emails.clone());
         }
         identity
+    }
+}
+
+impl Settings {
+    /// Build the portable configuration document this file describes.
+    pub fn to_document(&self) -> devchievements_config::ConfigDocument {
+        devchievements_config::ConfigDocument {
+            schema_version: devchievements_config::CONFIG_SCHEMA_VERSION,
+            emails: self.emails.clone(),
+            github_logins: self.github_logins.clone(),
+            privacy: self.privacy.as_str().to_string(),
+            timezone: self.timezone.clone(),
+            notifications: self.notifications,
+            volume: self.volume,
+            muted: self.muted,
+            sound_overrides: self.sound_overrides.clone(),
+            popup: self.popup.clone(),
+        }
+    }
+
+    /// Apply an imported document.
+    ///
+    /// The document has already been validated by the config crate, so this only
+    /// maps fields; it does not re-judge them.
+    pub fn apply_document(&mut self, document: devchievements_config::ConfigDocument) {
+        self.emails = document.emails;
+        self.github_logins = document.github_logins;
+        self.privacy = PrivacyMode::parse(&document.privacy).unwrap_or(PrivacyMode::Normal);
+        self.timezone = document.timezone;
+        self.notifications = document.notifications;
+        self.volume = document.volume.min(100);
+        self.muted = document.muted;
+        self.sound_overrides = document.sound_overrides;
+        self.popup = document.popup;
     }
 }

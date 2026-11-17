@@ -37,7 +37,7 @@ pub enum Corner {
 }
 
 /// The popup's appearance.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PopupStyle {
     /// Width in logical pixels.

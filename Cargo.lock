@@ -462,6 +462,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "devchievements-config"
+version = "0.0.0"
+dependencies = [
+ "devchievements-themes",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "devchievements-core"
 version = "0.0.0"
 dependencies = [

@@ -74,6 +74,23 @@ async function main() {
   const fd = fs.openSync(appLog, "w");
   const app = spawn(appExe, [], { stdio: ["ignore", fd, fd], windowsHide: true, env });
 
+  // Spec 21: the popup size comes from the user's settings, not a constant.
+  // A width outside the default proves the setting is actually read.
+  const settingsPath = path.join(dataRoot, "devchievements", "settings.json");
+  const configured = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  configured.popup = {
+    width: 520,
+    height: null,
+    scalePercent: 100,
+    iconSize: 52,
+    cornerRadius: 0,
+    screenMargin: 0,
+    corner: "top_left",
+    opacityPercent: 94,
+    displaySeconds: 5,
+  };
+  fs.writeFileSync(settingsPath, JSON.stringify(configured, null, 2));
+
   const ready = await waitFor(
     () => fs.existsSync(appLog) && fs.readFileSync(appLog, "utf8").includes("TRAY READY"),
     25000,
@@ -90,6 +107,7 @@ async function main() {
   );
   const log = fs.readFileSync(appLog, "utf8");
   check("a popup was created for the unlock", shown, log.slice(-600));
+  check("the configured style was applied", /POPUP style width=520 corner=top_left/.test(log), log.slice(-600));
   check("it was not a failed creation", !/POPUP FAILED/.test(log), log.slice(-600));
 
   // The toast must no longer be part of the path at all.

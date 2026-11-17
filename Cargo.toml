@@ -15,6 +15,7 @@ members = [
     "crates/assets",
     "crates/filters",
     "crates/themes",
+    "crates/config",
     "crates/platform",
     "crates/storage",
     "crates/git-hooks",

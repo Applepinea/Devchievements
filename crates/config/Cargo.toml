@@ -1,0 +1,16 @@
+[package]
+name = "devchievements-config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Portable configuration import and export with validation."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+devchievements-themes = { path = "../themes" }
+
+[lints]
+workspace = true
