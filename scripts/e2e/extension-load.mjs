@@ -18,6 +18,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -105,7 +106,7 @@ async function main() {
       `--remote-debugging-port=${PORT}`,
       "about:blank",
     ],
-    { stdio: "ignore" },
+    { stdio: "ignore", env: { ...process.env, LOCALAPPDATA: path.join(scratch, "appdata") } },
   );
 
   let cdp = null;
@@ -129,6 +130,18 @@ async function main() {
 
     const loaded = await cdp.send("Extensions.loadUnpacked", { path: extDir });
     check("the extension installs", !!loaded?.id, JSON.stringify(loaded));
+
+    // The id must be the one derived from the committed key, otherwise the host
+    // manifest's allowed_origins cannot match and the bridge silently fails.
+    const keyDer = Buffer.from(
+      fs.readFileSync(path.join(repoRoot, "apps", "extension", "extension-key.pub"), "utf8").trim(),
+      "base64",
+    );
+    const expectedId = [...createHash("sha256").update(keyDer).digest().subarray(0, 16)]
+      .flatMap((b) => [b >> 4, b & 0x0f])
+      .map((n) => String.fromCharCode(97 + n))
+      .join("");
+    check("the extension id matches the committed key", loaded.id === expectedId, `got ${loaded.id}, expected ${expectedId}`);
     if (!loaded?.id) return;
 
     // Start the lazy worker by opening the popup page.
@@ -228,6 +241,42 @@ async function main() {
       if (typeof ping?.result?.value?.events === "number") break;
       await sleep(250);
     }
+
+    // ---- real Native Messaging handshake ----
+    // This is the part that cannot be faked: the browser launches the registered
+    // host binary and relays messages over stdio.
+    const handshake = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `new Promise((resolve) => {
+          let settled = false;
+          const done = (value) => { if (!settled) { settled = true; resolve(value); } };
+          try {
+            const port = chrome.runtime.connectNative('com.devchievements.host');
+            port.onMessage.addListener((reply) => done({ ok: true, reply }));
+            port.onDisconnect.addListener(() => done({ ok: false, error: chrome.runtime.lastError?.message ?? 'disconnected' }));
+            port.postMessage({
+              type: 'devch:github_event',
+              payload: {
+                kind: 'browser_github',
+                event_id: 'browser:github:o/r#abcdef0123456789abcdef0123456789abcdef01',
+                repository_id: 'github:o/r',
+                activity: 'commit',
+                commit_sha: 'abcdef0123456789abcdef0123456789abcdef01',
+                occurred_ms: 1700000000000
+              }
+            });
+            setTimeout(() => done({ ok: false, error: 'timeout' }), 10000);
+          } catch (e) { done({ ok: false, error: String(e) }); }
+        })`,
+        awaitPromise: true,
+        returnByValue: true,
+      },
+      pageSession,
+    );
+    const hs = handshake?.result?.value;
+    check("the browser can launch the native host", hs?.ok === true, JSON.stringify(hs));
+    check("the host acknowledges the report", hs?.reply?.stored === true, JSON.stringify(hs?.reply));
 
     const first = await sendPage("https://github.com/Applepinea/Devchievements/commit/abcdef0123456789abcdef0123456789abcdef01", {
       "octolytics-dimension-commit_date": "2026-11-17T10:00:00Z",

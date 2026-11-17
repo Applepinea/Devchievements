@@ -33,20 +33,20 @@ async function handlePage(message: Extract<ExtensionMessage, { type: "devch:page
     return { stored: false, reason: extraction.reason };
   }
 
-  // The desktop companion judges and presents; this only reports what it saw.
-  const bridged = await forward(extraction.event);
-  if (bridged.delivered) {
-    return { stored: true, event: extraction.event };
-  }
-
-  // Desktop side unreachable: keep a local copy so the dashboard is not blind, and
-  // say why it was not forwarded. Losing the detection would be worse, and the
-  // desktop side deduplicates by event id if it arrives later.
+  // Record locally AND forward.
+  //
+  // The local copy is a cache of what this browser saw, so the dashboard is not
+  // blind when the desktop app is doing the judging. It is not a second judgement:
+  // no achievement is unlocked here.
   const stored = await store.add(extraction.event);
+
+  // The desktop companion owns judgement and presentation.
+  const bridged = await forward(extraction.event);
+
   return {
     stored,
     event: extraction.event,
-    reason: bridged.reason,
+    reason: bridged.delivered ? undefined : bridged.reason,
   };
 }
 

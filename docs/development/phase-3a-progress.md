@@ -134,3 +134,48 @@ ok  the commit count is rendered
 
 弹窗在事件写入**之前**就打开了，读到的是空状态。
 测试里刷新一次再读，顺带证明了数据是**从 IndexedDB 读回来的**，不是页面内存里的残留。
+
+## 7. 扩展 → 桌面：真实握手（3b.1–3b.4）
+
+### 7.1 链路
+
+```text
+GitHub 页面 → 内容脚本描述页面 → service worker 提取事件
+   ├─ 存本地 IndexedDB（供 Dashboard 显示，不做判定）
+   └─ connectNative → host 校验 → Spool → Companion 判定 → SQLite → 弹窗
+```
+
+### 7.2 三个必须同时成立的部件
+
+| 部件 | 为什么不能少 |
+| --- | --- |
+| 提交的公钥（`extension-key.pub`） | 扩展 ID 由它推导；否则 ID 随安装路径变化，host 的 `allowed_origins` 永远对不上 |
+| `nativeMessaging` 权限 | 没有它 `chrome.runtime.connectNative` **根本不存在** |
+| HKCU 注册表项 | 浏览器靠它找到 host 清单 |
+
+### 7.3 抓到的两个真 bug
+
+**1. 浮窗 Dashboard 在转发模式下变空。**
+
+最初实现是「先转发，成功就不落地」，结果浏览器里什么都看不到——
+因为判定和存储都在桌面端。
+改成**两边都记**：本地留痕供界面显示，判定仍归桌面。
+本地存储是缓存，不是第二套规则。
+
+**2. 清单缺 `nativeMessaging` 权限。**
+
+握手直接报 `connectNative is not a function`。
+这类错误很隐蔽：代码看起来完全正常，只是那个函数根本不存在。
+
+### 7.4 证据
+
+`extension-load` 现在 **18 项**，包含真实握手：
+
+```text
+ok  the extension id matches the committed key
+ok  the browser can launch the native host
+ok  the host acknowledges the report
+```
+
+加上 `native-host` 的 11 项（含 companion 入库断言），
+以及 `companion_loop` 里那条浏览器事件必须被判定为提交的测试。

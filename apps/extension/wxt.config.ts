@@ -1,4 +1,10 @@
+import { readFileSync } from "node:fs";
 import { defineConfig } from "wxt";
+
+// The public key pins the extension id for unpacked builds. Without it the id is
+// derived from the install path, so allowed_origins in the Native Messaging host
+// manifest could never match a stable value.
+const extensionKey = readFileSync(new URL("./extension-key.pub", import.meta.url), "utf8").trim();
 
 /**
  * Devchievements extension — Phase 0 scaffold.
@@ -18,8 +24,11 @@ export default defineConfig({
     name: "Devchievements",
     description: "Achievements for Developers",
     version: "0.0.0",
+    key: extensionKey,
     // No <all_urls>: spec 27.2 limits us to verifiable GitHub activity.
-    permissions: ["storage", "notifications"],
+    // nativeMessaging is what makes chrome.runtime.connectNative exist at all;
+    // without it the bridge to the desktop companion silently cannot be built.
+    permissions: ["storage", "notifications", "nativeMessaging"],
     host_permissions: ["https://github.com/*"],
     // Explicit CSP so 'wasm-unsafe-eval' is provably present and testable.
     content_security_policy: {
