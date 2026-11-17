@@ -44,6 +44,23 @@ ALL CHECKS PASSED
 
 ---
 
+## Phase 3a 任务表（Browser Only）
+
+> 检查点 B 已由用户以「继续 phase3」明确批准。
+
+| # | 任务 | 状态 | 证据 |
+| --- | --- | --- | --- |
+| 3a.1 | 扩展可独立安装并在真实浏览器运行 | `Tested` | `extension-load` e2e 7 项；CDP `Extensions.loadUnpacked` |
+| 3a.2 | Rust 核心在 MV3 worker 内实例化（CSP） | `Tested` | 同一脚本断言 WASM 实例化与探针调用 |
+| 3a.3 | GitHub 活动识别（Commit/Release） | `Not Started` | 需要内容脚本解析与验证 |
+| 3a.4 | IndexedDB 持久化 + 独立 Outbox | `Not Started` | |
+| 3a.5 | 浏览器通知与音效 | `Not Started` | |
+| 3a.6 | 浏览器端设置/Dashboard/图鉴 | `Not Started` | |
+| 3a.7 | 身份映射 GitHub Login → Git Email | `Not Started` | |
+| 3a.8 | Service Worker 回收后状态恢复 | `Not Started` | |
+
+---
+
 ## Phase 2b 任务表
 
 > 用户已明确指示进入 Phase 2b。跨检查点时的未验证项见

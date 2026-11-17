@@ -1,6 +1,6 @@
 # ADR-0001：WASM 方案
 
-- **状态**：**Partially Accepted（编译与一致性已验证；MV3 浏览器内加载未验证）**
+- **状态**：**Accepted（2026-11-17 补上 MV3 浏览器内验证）**
 - **日期**：2026-11-16
 - **相关规范章节**：§3.3、§30.2、§31.3、§36.1
 - **证据**：`scripts/wasm-spike/.out/` 与 [git-behavior-experiments.md](../development/git-behavior-experiments.md)
@@ -129,3 +129,42 @@ content/browser/network_sandbox.cc:472 Failed to grant sandbox access to cache d
 ## 复查计划
 
 Phase 3a 开始前必须补齐第 2 项；Phase 1 完成时区实现后补齐第 4、5 项。补齐后把本 ADR 改为 Accepted 并附证据链接。
+
+---
+
+## 2026-11-17 更新：第 2 项已验证
+
+此前判定「MV3 浏览器内加载在本机无法验证」，**该判定是错的**，原因有两个：
+
+1. 当时只试了 headless。Headless **根本不支持加载扩展**
+   （实测报错：`Multiple targets are not supported in headless mode`）。
+2. 即便在有窗口的模式下，`--load-extension` 在当前 Chromium 上也已被忽略，
+   而这看起来和「扩展加载失败」一模一样。
+
+### 现在怎么验的
+
+用 CDP 的 `Extensions.loadUnpacked` 安装（需 `--enable-unsafe-extension-debugging`），
+再用 `Target.attachToTarget` 连到 MV3 service worker 里求值。
+
+### 实测结果
+
+```text
+ok  the extension installs
+ok  the MV3 service worker is running
+ok  it is our extension
+ok  the Rust core is packaged
+ok  it instantiates inside the worker under the MV3 CSP
+```
+
+脚本：`scripts/e2e/extension-load.mjs`。
+
+### 顺带发现的真 bug
+
+扩展**从来没有被加载过**：
+清单里手写了 `content-scripts/github.js`，但 WXT 不会因为手写清单就生成这个文件。
+浏览器直接拒绝安装（“无法加载脚本”）。
+
+改用 WXT 的入口约定（`entrypoints/github.content.ts`），由构建生成清单项。
+
+**这条也解释了 ADR-0001 第 2 项为什么一直没结论**：不是环境阻止，是扩展本身装不上，
+而当时没有能观测到这一点的工具。

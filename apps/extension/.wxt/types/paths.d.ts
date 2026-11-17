@@ -6,6 +6,7 @@ declare module "wxt/browser" {
     | ""
     | "/"
     | "/background.js"
+    | "/content-scripts/github.js"
     | "/popup.html"
     | "/wasm/devchievements_core.wasm"
   type HtmlPublicPath = Extract<PublicPath, `${string}.html`>

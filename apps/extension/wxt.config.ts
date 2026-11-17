@@ -28,12 +28,9 @@ export default defineConfig({
     },
     // Distinct dev vs store IDs matter for Native Messaging allowlisting
     // (spec 18.4). The dev key is generated locally and never used for release.
-    content_scripts: [
-      {
-        matches: ["https://github.com/*"],
-        js: ["content-scripts/github.js"],
-        run_at: "document_idle",
-      },
-    ],
+    // Content scripts are declared by WXT from entrypoints/*.content.ts. Hand-
+    // writing the manifest entry pointed at a file the build never produced, so the
+    // browser refused to install the extension at all (measured: "cannot load
+    // JavaScript content-scripts/github.js").
   },
 });
