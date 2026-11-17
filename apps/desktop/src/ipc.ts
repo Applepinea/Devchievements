@@ -99,6 +99,12 @@ export interface AboutView {
   needsExtension: string[];
 }
 
+/** One GitHub login mapped to the emails it commits with (spec 7). */
+export interface LoginMapping {
+  login: string;
+  emails: string[];
+}
+
 export interface SettingsView {
   emails: string[];
   privacy: "normal" | "privacy";
@@ -109,6 +115,7 @@ export interface SettingsView {
   muted: boolean;
   runMode: string;
   databaseBytes: number;
+  githubLogins: LoginMapping[];
 }
 
 export interface StatusView {

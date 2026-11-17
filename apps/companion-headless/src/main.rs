@@ -85,7 +85,31 @@ async fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&data_dir)?;
 
     let mut identity = Identity::default();
-    identity.add_email(email, EmailOrigin::UserConfigured);
+    identity.add_email(email.clone(), EmailOrigin::UserConfigured);
+
+    // Spec 7: a browser report is attributed by GitHub login. The headless companion
+    // takes its identity from the command line, so map any login that resolves to
+    // the configured email here too; otherwise every browser event would be refused
+    // in tests while the GUI, which reads the settings file, accepted them.
+    if let Ok(text) = std::fs::read_to_string(data_dir.join("settings.json")) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+            if let Some(map) = value.get("githubLogins").and_then(|v| v.as_object()) {
+                for (login, emails) in map {
+                    if let Some(list) = emails.as_array() {
+                        let owned: Vec<String> = list
+                            .iter()
+                            .filter_map(|e| e.as_str())
+                            .filter(|e| e.eq_ignore_ascii_case(&email))
+                            .map(|e| e.to_string())
+                            .collect();
+                        if !owned.is_empty() {
+                            identity.add_login_mapping(login.clone(), owned);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     let pool = devchievements_storage::open(&data_dir.join("companion.db")).await?;
     devchievements_storage::ingest::migrate(&pool).await?;

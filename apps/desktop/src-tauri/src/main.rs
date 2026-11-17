@@ -448,6 +448,16 @@ struct SettingsView {
     muted: bool,
     run_mode: String,
     database_bytes: i64,
+    /// GitHub login to email mappings (spec 7).
+    github_logins: Vec<LoginMapping>,
+}
+
+/// One login mapping, as a list of pairs so the UI can edit them in order.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoginMapping {
+    login: String,
+    emails: Vec<String>,
 }
 
 /// A read-only summary for the status section.
@@ -478,6 +488,14 @@ fn get_settings() -> SettingsView {
         // Spec 2: the mode is determined by whether the extension is present. It is
         // never inferred from a wish; until the extension exists it is Desktop Only.
         run_mode: "Desktop Only".to_string(),
+        github_logins: stored
+            .github_logins
+            .iter()
+            .map(|(login, emails)| LoginMapping {
+                login: login.clone(),
+                emails: emails.clone(),
+            })
+            .collect(),
         database_bytes: std::fs::metadata(&data_dir)
             .ok()
             .and_then(|_| std::fs::metadata(data_dir.join("companion.db")).ok())
@@ -509,6 +527,28 @@ fn save_settings(settings: SettingsView) -> Result<(), String> {
         _ => settings::PrivacyMode::Normal,
     };
     stored.timezone = settings.timezone.filter(|t| !t.trim().is_empty());
+    // Rebuilt from scratch so removing a row in the UI actually removes it.
+    stored.github_logins = settings
+        .github_logins
+        .into_iter()
+        .filter_map(|m| {
+            let login = m.login.trim().to_string();
+            let emails: Vec<String> = m
+                .emails
+                .into_iter()
+                .map(|e| e.trim().to_string())
+                .filter(|e| !e.is_empty())
+                .collect();
+            // A mapping with no login or no email attributes nothing; keeping it
+            // would show a row that silently does nothing.
+            if login.is_empty() || emails.is_empty() {
+                None
+            } else {
+                Some((login, emails))
+            }
+        })
+        .collect();
+
     stored.notifications = settings.notifications;
     // Clamp instead of trusting the caller: a volume outside 0-100 would either be
     // ignored by the audio path or overflow the gain arithmetic.
@@ -880,6 +920,39 @@ fn main() {
             }
             Err(e) => {
                 println!("SETTINGS FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Map a GitHub login to emails. The Settings page is the normal route; a test
+    // cannot fill in a form.
+    if let Some(i) = std::env::args().position(|a| a == "--map-login") {
+        let Some(login) = std::env::args().nth(i + 1) else {
+            println!("MAPPING FAILED: --map-login needs a login");
+            std::process::exit(2);
+        };
+        let emails: Vec<String> = std::env::args()
+            .skip(i + 2)
+            .take_while(|a| !a.starts_with("--"))
+            .map(|a| a.trim().to_string())
+            .filter(|a| !a.is_empty())
+            .collect();
+        if emails.is_empty() {
+            println!("MAPPING FAILED: --map-login needs at least one email");
+            std::process::exit(2);
+        }
+
+        let path = settings_path();
+        let mut stored = settings::Settings::load(&path);
+        stored.github_logins.insert(login.clone(), emails.clone());
+        match stored.save(&path) {
+            Ok(()) => {
+                println!("MAPPED {login} -> {}", emails.join(","));
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("MAPPING FAILED: {e}");
                 std::process::exit(1);
             }
         }

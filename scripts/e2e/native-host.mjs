@@ -66,6 +66,21 @@ function main() {
   const appData = path.join(scratch, "appdata");
   const dataDir = path.join(appData, "devchievements");
   fs.mkdirSync(dataDir, { recursive: true });
+  // Spec 7: the browser path attributes by login, so the mapping must exist before
+  // the companion will count anything the host forwards.
+  fs.writeFileSync(
+    path.join(dataDir, "settings.json"),
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        emails: ["browser@devchievements.local"],
+        githubLogins: { me: ["browser@devchievements.local"] },
+        onboardingCompleted: true,
+      },
+      null,
+      2,
+    ),
+  );
 
   const valid = {
     type: "devch:github_event",
@@ -76,6 +91,7 @@ function main() {
       activity: "commit",
       commit_sha: "abcdef0123456789abcdef0123456789abcdef01",
       occurred_ms: 1_700_000_000_000,
+      author_login: "me",
     },
   };
   const bogus = {

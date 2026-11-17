@@ -6,6 +6,7 @@ import {
   openDataFolder,
   saveSettings,
   type SettingsView,
+  type LoginMapping,
 } from "../ipc";
 
 export default function Settings() {
@@ -103,6 +104,60 @@ export default function Settings() {
       </ul>
       <button onClick={() => update({ emails: [...settings.emails, ""] })}>
         Add email
+      </button>
+
+      <h3>GitHub logins</h3>
+      <p className="muted">
+        The browser extension reports commits by GitHub account. A report only
+        counts when its login is mapped here to one of the emails above;
+        everything else is refused rather than assumed to be yours.
+      </p>
+      <ul className="list">
+        {(settings.githubLogins ?? []).map((mapping, index) => (
+          <li key={index} className="row">
+            <input
+              value={mapping.login}
+              placeholder="github-login"
+              onChange={(e) => {
+                const next = [...settings.githubLogins];
+                next[index] = { ...mapping, login: e.target.value };
+                update({ githubLogins: next });
+              }}
+            />
+            <span className="muted">→</span>
+            <input
+              value={mapping.emails.join(", ")}
+              placeholder="you@example.com"
+              onChange={(e) => {
+                const next = [...settings.githubLogins];
+                next[index] = {
+                  ...mapping,
+                  emails: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                };
+                update({ githubLogins: next });
+              }}
+            />
+            <button
+              className="ghost"
+              onClick={() =>
+                update({
+                  githubLogins: settings.githubLogins.filter((_, i) => i !== index),
+                })
+              }
+            >
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button
+        onClick={() =>
+          update({
+            githubLogins: [...(settings.githubLogins ?? []), { login: "", emails: [] }],
+          })
+        }
+      >
+        Add mapping
       </button>
 
       <h3>Privacy</h3>

@@ -366,3 +366,41 @@ an_event_without_an_author_is_not_blocked_by_the_gate
 
 那条测试现在叫 `an_event_without_an_author_is_refused_not_counted`，
 并额外断言 `event_count == 0`——拒绝必须意味着没写进去。
+
+## 13. 映射的设置界面（3a.9 补完）
+
+之前映射只能手改 `settings.json`，而它又是浏览器路径能用的前提。
+一个必须手改 JSON 才能启用的功能，等于没启用。
+
+### 界面
+
+Settings 页新增 **GitHub logins** 一组：每行一个「登录名 → 邮箱列表」，可增删改。
+
+保存时的两条规则：
+
+| 情况 | 处理 |
+| --- | --- |
+| 登录名为空或邮箱为空 | **丢弃该行**——留着只会显示一行默默不生效的配置 |
+| 删除某行 | 真的删除（整体重建映射表，不是增量合并） |
+
+「整体重建」是刻意的：增量合并会让「删掉一行」变成「没删掉」。
+
+### 端到端测试的关键在于成对
+
+`scripts/e2e/login-mapping.mjs`，7 项：
+
+```text
+ok  an unmapped login is refused
+ok  nothing was ingested from it
+ok  the mapping can be written
+ok  it is persisted in the settings file
+ok  the mapped login is accepted
+ok  and it is not refused
+ok  only the accepted report is in the database
+```
+
+**重点是「先拒后收」这一对。** 只测「映射后能计入」是有缺陷的测试：
+如果门禁对什么都放行，那条也会绿。
+
+最后一条同样重要：被拒绝的报告**没有**留在数据库里。
+「拒绝」必须意味着「没写进去」，而不只是「记了一条拒绝日志」。
