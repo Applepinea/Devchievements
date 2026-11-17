@@ -58,6 +58,23 @@ pub struct PopupStyle {
     pub opacity_percent: u32,
     /// How long it stays, in seconds.
     pub display_seconds: u32,
+    /// Entrance animation duration in milliseconds (spec 21).
+    ///
+    /// Zero means no animation. Stored in milliseconds because that is what a CSS
+    /// transition takes; storing seconds would force a lossy conversion at the edge.
+    #[serde(default = "default_animation_ms")]
+    pub animation_ms: u32,
+    /// Background blur radius in logical pixels (spec 21).
+    ///
+    /// Zero means no blur. A blurred background is a real cost on some GPUs, so it
+    /// is opt-in rather than part of the default look.
+    #[serde(default)]
+    pub background_blur: u32,
+}
+
+/// The default entrance animation duration.
+fn default_animation_ms() -> u32 {
+    240
 }
 
 impl Default for PopupStyle {
@@ -72,6 +89,8 @@ impl Default for PopupStyle {
             corner: Corner::BottomRight,
             opacity_percent: 94,
             display_seconds: 5,
+            animation_ms: 240,
+            background_blur: 0,
         }
     }
 }
@@ -117,6 +136,10 @@ pub mod limits {
     pub const DISPLAY_SECONDS: Range = Range { min: 1, max: 30 };
     /// Opacity.
     pub const OPACITY: Range = Range { min: 20, max: 100 };
+    /// Entrance animation duration in milliseconds.
+    pub const ANIMATION_MS: Range = Range { min: 0, max: 1000 };
+    /// Background blur radius.
+    pub const BLUR: Range = Range { min: 0, max: 24 };
 }
 
 impl PopupStyle {
@@ -134,6 +157,8 @@ impl PopupStyle {
         self.screen_margin = limits::MARGIN.clamp(self.screen_margin);
         self.opacity_percent = limits::OPACITY.clamp(self.opacity_percent);
         self.display_seconds = limits::DISPLAY_SECONDS.clamp(self.display_seconds);
+        self.animation_ms = limits::ANIMATION_MS.clamp(self.animation_ms);
+        self.background_blur = limits::BLUR.clamp(self.background_blur);
         self
     }
 
@@ -457,5 +482,59 @@ mod tests {
     #[test]
     fn crate_version_is_not_empty() {
         assert!(!CRATE_VERSION.is_empty());
+    }
+
+    #[test]
+    fn animation_and_blur_default_inside_their_ranges() {
+        let style = PopupStyle::default();
+        assert!(limits::ANIMATION_MS.contains(style.animation_ms));
+        assert!(limits::BLUR.contains(style.background_blur));
+    }
+
+    #[test]
+    fn an_overlong_animation_is_clamped() {
+        let style = PopupStyle {
+            animation_ms: 99_999,
+            ..PopupStyle::default()
+        }
+        .clamped();
+        assert_eq!(style.animation_ms, limits::ANIMATION_MS.max);
+    }
+
+    #[test]
+    fn a_zero_animation_is_allowed_because_it_means_no_animation() {
+        let style = PopupStyle {
+            animation_ms: 0,
+            ..PopupStyle::default()
+        }
+        .clamped();
+        assert_eq!(style.animation_ms, 0, "zero must not be clamped up");
+    }
+
+    #[test]
+    fn an_excessive_blur_is_clamped() {
+        let style = PopupStyle {
+            background_blur: 500,
+            ..PopupStyle::default()
+        }
+        .clamped();
+        assert_eq!(style.background_blur, limits::BLUR.max);
+    }
+
+    #[test]
+    fn a_theme_without_the_new_fields_still_loads() {
+        // An export or theme written before these properties existed must not break.
+        let json = r#"{
+            "schemaVersion": 1,
+            "name": "Old",
+            "popup": {
+                "width": 364, "height": null, "scalePercent": 100,
+                "iconSize": 52, "cornerRadius": 0, "screenMargin": 0,
+                "corner": "bottom_right", "opacityPercent": 94, "displaySeconds": 5
+            }
+        }"#;
+        let theme = parse_theme(json).expect("parse");
+        assert_eq!(theme.popup.animation_ms, 240);
+        assert_eq!(theme.popup.background_blur, 0);
     }
 }

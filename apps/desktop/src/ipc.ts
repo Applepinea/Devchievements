@@ -116,6 +116,8 @@ export interface PopupStyle {
   corner: "top_left" | "top_right" | "bottom_left" | "bottom_right";
   opacityPercent: number;
   displaySeconds: number;
+  animationMs: number;
+  backgroundBlur: number;
 }
 
 /** How a repository selector treats its list (spec 15). */

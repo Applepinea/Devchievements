@@ -325,6 +325,81 @@ export default function Settings() {
       </div>
 
       <div className="row">
+        <label className="field">
+          <span>Display seconds</span>
+          <input
+            type="range" min={1} max={30}
+            value={settings.popup.displaySeconds}
+            onChange={(e) =>
+              update({ popup: { ...settings.popup, displaySeconds: Number(e.target.value) } })
+            }
+          />
+          <span className="mono">{settings.popup.displaySeconds}s</span>
+        </label>
+        <label className="field">
+          <span>Corner radius</span>
+          <input
+            type="range" min={0} max={32}
+            value={settings.popup.cornerRadius}
+            onChange={(e) =>
+              update({ popup: { ...settings.popup, cornerRadius: Number(e.target.value) } })
+            }
+          />
+          <span className="mono">{settings.popup.cornerRadius}px</span>
+        </label>
+      </div>
+
+      <div className="row">
+        <label className="field">
+          <span>Icon size</span>
+          <input
+            type="range" min={32} max={160}
+            value={settings.popup.iconSize}
+            onChange={(e) =>
+              update({ popup: { ...settings.popup, iconSize: Number(e.target.value) } })
+            }
+          />
+          <span className="mono">{settings.popup.iconSize}px</span>
+        </label>
+        <label className="field">
+          <span>Opacity</span>
+          <input
+            type="range" min={20} max={100}
+            value={settings.popup.opacityPercent}
+            onChange={(e) =>
+              update({ popup: { ...settings.popup, opacityPercent: Number(e.target.value) } })
+            }
+          />
+          <span className="mono">{settings.popup.opacityPercent}%</span>
+        </label>
+      </div>
+
+      <div className="row">
+        <label className="field">
+          <span>Animation</span>
+          <input
+            type="range" min={0} max={1000} step={20}
+            value={settings.popup.animationMs}
+            onChange={(e) =>
+              update({ popup: { ...settings.popup, animationMs: Number(e.target.value) } })
+            }
+          />
+          <span className="mono">{settings.popup.animationMs}ms</span>
+        </label>
+        <label className="field">
+          <span>Background blur</span>
+          <input
+            type="range" min={0} max={24}
+            value={settings.popup.backgroundBlur}
+            onChange={(e) =>
+              update({ popup: { ...settings.popup, backgroundBlur: Number(e.target.value) } })
+            }
+          />
+          <span className="mono">{settings.popup.backgroundBlur}px</span>
+        </label>
+      </div>
+
+      <div className="row">
         <button onClick={() => void preview()}>Preview popup</button>
         <span className="notice">{previewNotice}</span>
       </div>

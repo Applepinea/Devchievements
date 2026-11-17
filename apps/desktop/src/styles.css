@@ -133,13 +133,16 @@ html, body { margin: 0; height: 100%; background: transparent; }
   gap: 12px;
   padding: 12px 14px;
   /* Deep grey, mostly opaque: over bright content a heavier scrim reads better. */
-  background: rgba(22, 24, 28, 0.94);
+  /* Falls back to the previous look when no style was supplied. */
+  background: rgba(22, 24, 28, var(--popup-opacity, 0.94));
   border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 0;
+  border-radius: var(--popup-radius, 0);
   overflow: hidden;
   animation:
-    popup-in 240ms cubic-bezier(.2, .8, .3, 1) both,
+    popup-in var(--popup-anim, 240ms) cubic-bezier(.2, .8, .3, 1) both,
     popup-out 420ms ease-in 4.4s both;
+  backdrop-filter: blur(var(--popup-blur, 0px));
+  -webkit-backdrop-filter: blur(var(--popup-blur, 0px));
 }
 
 /* The card cannot exceed the window, so text truncates rather than pushing it wider. */
@@ -147,8 +150,8 @@ html, body { margin: 0; height: 100%; background: transparent; }
 
 .popup-icon {
   flex: 0 0 auto;
-  width: 52px;
-  height: 52px;
+  width: var(--popup-icon, 52px);
+  height: var(--popup-icon, 52px);
   display: grid;
   place-items: center;
   background: linear-gradient(160deg, #2a2f38, #1b1e24);
@@ -206,3 +209,6 @@ button.danger { background: var(--danger); }
   object-fit: cover;
   border-radius: inherit;
 }
+
+.field { display: flex; align-items: center; gap: 8px; min-width: 220px; }
+.field > span:first-child { color: var(--muted); min-width: 96px; }

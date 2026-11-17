@@ -41,12 +41,51 @@ pub struct PopupPayload {
     pub rarity: String,
     /// Other achievements merged into this popup (spec 16.6 grouping).
     pub others: Vec<String>,
+    /// Appearance values the page must render with.
+    ///
+    /// Travels with the payload rather than being fetched: the popup is on screen for
+    /// a few seconds, and a second round trip would be visible as a flicker.
+    pub style: PopupRender,
     /// Asset URL for this achievement's icon, when a custom one was imported.
     ///
     /// Resolved here rather than in the page: the page must not be able to probe
     /// the filesystem, and a missing asset has to degrade to nothing rather than to
     /// a broken image.
     pub icon_url: Option<String>,
+}
+
+/// The subset of the style the page needs to draw itself.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PopupRender {
+    /// Corner radius in logical pixels.
+    pub radius: u32,
+    /// Icon box size in logical pixels.
+    pub icon_size: u32,
+    /// Background opacity in percent.
+    pub opacity: u32,
+    /// Entrance animation duration in milliseconds.
+    pub animation_ms: u32,
+    /// Background blur radius in logical pixels.
+    pub blur: u32,
+}
+
+impl From<&devchievements_themes::PopupStyle> for PopupRender {
+    fn from(style: &devchievements_themes::PopupStyle) -> Self {
+        PopupRender {
+            radius: style.corner_radius,
+            icon_size: style.icon_size,
+            opacity: style.opacity_percent,
+            animation_ms: style.animation_ms,
+            blur: style.background_blur,
+        }
+    }
+}
+
+impl Default for PopupRender {
+    fn default() -> Self {
+        PopupRender::from(&devchievements_themes::PopupStyle::default())
+    }
 }
 
 /// Look for an icon for this achievement.
@@ -94,7 +133,7 @@ pub fn show(app: &AppHandle, payload: &PopupPayload, counter: u64) -> Result<(),
 
     // The payload travels in the fragment so the page needs no IPC round trip before
     // it can draw; a popup that flashes empty is worse than one that appears late.
-    let encoded = serde_json::to_string(payload).map_err(|e| e.to_string())?;
+    let encoded = serde_json::to_string(&payload).map_err(|e| e.to_string())?;
     let url = format!("index.html#popup?data={}", urlencoding(&encoded));
 
     // Translucency is wanted (the popup floats over whatever the user is doing) but
@@ -103,9 +142,21 @@ pub fn show(app: &AppHandle, payload: &PopupPayload, counter: u64) -> Result<(),
     // Appearance comes from the user's settings (spec 21), already clamped by the
     // themes crate, so a hand-edited file cannot place the popup off-screen.
     let style = crate::settings::Settings::load(&crate::settings_path()).popup;
+    // Fill the appearance into the payload before it is serialised: the page reads
+    // everything from the fragment so it can draw on its first frame.
+    let mut payload = payload.clone();
+    payload.style = PopupRender::from(&style);
     println!(
         "POPUP icon_url={}",
         payload.icon_url.as_deref().unwrap_or("none")
+    );
+    println!(
+        "POPUP render radius={} icon={} opacity={} anim={} blur={}",
+        payload.style.radius,
+        payload.style.icon_size,
+        payload.style.opacity,
+        payload.style.animation_ms,
+        payload.style.blur
     );
 
     let (width, height) = style.window_size();
@@ -135,8 +186,11 @@ pub fn show(app: &AppHandle, payload: &PopupPayload, counter: u64) -> Result<(),
     // crashes still leaves a popup that disappears.
     let handle = app.clone();
     let label = label.clone();
+    // Spec 21 lets the user choose how long it stays. The constant is only the
+    // fallback when the style is unreadable, which show() cannot happen here.
+    let lifetime = std::time::Duration::from_secs(u64::from(style.display_seconds.max(1)));
     std::thread::spawn(move || {
-        std::thread::sleep(LIFETIME);
+        std::thread::sleep(lifetime);
         if let Some(window) = handle.get_webview_window(&label) {
             let _ = window.close();
         }

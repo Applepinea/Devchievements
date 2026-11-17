@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 interface Payload {
   title: string;
@@ -7,6 +7,16 @@ interface Payload {
   others: string[];
   /** Custom icon for this achievement, resolved by the app. */
   iconUrl?: string | null;
+  /** Appearance values, filled by the app from the saved style. */
+  style?: PopupRender | null;
+}
+
+interface PopupRender {
+  radius: number;
+  iconSize: number;
+  opacity: number;
+  animationMs: number;
+  blur: number;
 }
 
 // The payload travels in the URL fragment so the popup can draw on its first frame.
@@ -40,8 +50,21 @@ export default function Popup() {
 
   if (!payload) return <div className="popup" />;
 
+  // Inline custom properties rather than a stylesheet rewrite: the values change per
+  // notification, and a class-based approach would need one class per combination.
+  const style = payload.style;
+  const cssVars = style
+    ? ({
+        "--popup-radius": style.radius + "px",
+        "--popup-icon": style.iconSize + "px",
+        "--popup-opacity": String(style.opacity / 100),
+        "--popup-anim": style.animationMs + "ms",
+        "--popup-blur": style.blur + "px",
+      } as CSSProperties)
+    : undefined;
+
   return (
-    <div className="popup">
+    <div className="popup" style={cssVars}>
       <div className="popup-icon">
         {payload.iconUrl ? (
           // The image is decorative: the achievement name carries the meaning, so

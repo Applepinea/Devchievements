@@ -82,12 +82,16 @@ async function main() {
     width: 520,
     height: null,
     scalePercent: 100,
-    iconSize: 52,
-    cornerRadius: 0,
+    // Non-default values everywhere, so a field the app forgot to read shows up as
+    // a mismatch instead of quietly matching the default.
+    iconSize: 96,
+    cornerRadius: 18,
     screenMargin: 0,
     corner: "top_left",
-    opacityPercent: 94,
-    displaySeconds: 5,
+    opacityPercent: 60,
+    displaySeconds: 9,
+    animationMs: 500,
+    backgroundBlur: 12,
   };
   fs.writeFileSync(settingsPath, JSON.stringify(configured, null, 2));
 
@@ -118,6 +122,9 @@ async function main() {
   const log = fs.readFileSync(appLog, "utf8");
   check("a popup was created for the unlock", shown, log.slice(-600));
   check("the configured style was applied", /POPUP style width=520 corner=top_left/.test(log), log.slice(-600));
+
+  // The page renders from the payload, so the values must be in it.
+  check("the render values travel with the payload", /POPUP render radius=18 icon=96 opacity=60 anim=500 blur=12/.test(log), log.slice(-600));
 
   // The payload travels in the fragment; an icon URL there means the app resolved a
   // custom asset to this achievement instead of falling back to the monogram.

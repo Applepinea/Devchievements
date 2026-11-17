@@ -123,6 +123,10 @@ impl DeliverySink for DesktopSink {
                     body: copy.body.clone(),
                     rarity: format!("{:?}", popup.rarity),
                     others: popup.others.clone(),
+
+                    // Filled from the saved style inside popup::show, so a caller cannot get it wrong.
+
+                    style: Default::default(),
                     icon_url: popup::icon_for(&popup.primary_id),
                 };
                 let app = self.app.clone();
@@ -1308,6 +1312,10 @@ fn main() {
             body: "Common Day · 第 1 天".to_string(),
             rarity: "Uncommon".to_string(),
             others: vec![],
+
+            // Filled from the saved style inside popup::show, so a caller cannot get it wrong.
+
+            style: Default::default(),
             // Any imported achievement icon shows here too, so the demo is a real
             // check of the icon path rather than of a hardcoded placeholder.
             icon_url: popup::icon_for("preview"),
