@@ -71,6 +71,12 @@ pub struct ConfigDocument {
     pub muted: bool,
     /// Sound overrides, keyed as the sound crate expects.
     pub sound_overrides: std::collections::BTreeMap<String, String>,
+    /// User-defined achievements (spec 22).
+    ///
+    /// Defaulted so a document written before the field existed still loads: an
+    /// export is a promise and must not be broken by adding a field.
+    #[serde(default)]
+    pub user_achievements: Vec<devchievements_achievements::definition::UserAchievement>,
     /// Popup appearance.
     pub popup: devchievements_themes::PopupStyle,
 }
@@ -87,6 +93,7 @@ impl Default for ConfigDocument {
             volume: 80,
             muted: false,
             sound_overrides: std::collections::BTreeMap::new(),
+            user_achievements: Vec::new(),
             popup: devchievements_themes::PopupStyle::default(),
         }
     }

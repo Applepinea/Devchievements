@@ -117,3 +117,47 @@ e2e 5 项：无覆盖 → 覆盖后不同 → 覆盖值正确 → 静音仍然�
 另有一处夹具缺陷：git 子进程没有继承 `LOCALAPPDATA`，
 helper 因此判定 companion 不存在而静默退出（那是 §34.1 要求的正确行为）。
 **产品行为对，测试夹具错。**
+
+## 8. Achievement Builder 的 JSON 层（4a.8）
+
+`crates/achievements/src/definition.rs`，12 个测试；
+`scripts/e2e/achievement-builder.mjs`，12 项端到端。
+
+### 8.1 四条拒绝规则
+
+| 规则 | 为什么 |
+| --- | --- |
+| id 必须是 slug | 它会被写进存储和 URL，自由文本是隐患 |
+| **不得遮蔽内置成就** | §13.3 要求内置口径固定；覆盖会静默改变用户可能已解锁的结果 |
+| 不得与已有用户成就重名 | 否则「哪一个是我的」无法回答 |
+| 复杂度超限拒绝 | §22 的深度/条件数/步数上限 |
+
+第一条和第三条在拒绝时都**不写入任何东西**——e2e 最后一条专门验证「被拒的定义一个都没留下」。
+
+### 8.2 一个 JSON 形状陷阱
+
+我按直觉把规则写成嵌套的：
+
+````json`
+{ "op": "condition", "Condition": { "metric": "commits", "at_least": 10 } }
+`````
+
+实际 serde 的内部标签枚举把 newtype variant 的字段**内联**了：
+
+````json`
+{ "op": "condition", "metric": "commits", "at_least": 10 }
+`````
+
+报错是「missing field metric」——不会提「你多套了一层」。
+
+修法是从**实际序列化输出**里读出真实形状，而不是照文档推。
+并且加了一条测试 `the_wire_shape_is_flat_for_a_condition` 把它钉住：
+这个形状是用户要手写的，写错在文档或夹具里是静默陷阱。
+
+### 8.3 加字段不能破坏旧导出
+
+新增 `userAchievements` 后，三个 config 测试立刻失败——
+它们的夹具没有这个字段，而 serde 要求它。
+
+加了 `#[serde(default)]`。
+**导出是承诺**：加一个字段不应该让用户手里已有的文件失效。

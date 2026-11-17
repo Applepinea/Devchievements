@@ -300,8 +300,8 @@ ALL CHECKS PASSED
 | 4a.5 | Asset Manager 界面 | `Not Started` | |
 | 4a.6 | Popup Editor 实时预览 | `Not Started` | 约束层已就绪 |
 | 4a.7 | Event Filters 界面 | `Not Started` | 规则层已有 |
-| 4a.8 | Achievement Builder（JSON 模式） | `Not Started` | builder.rs 已有骨架 |
-| 4a.9 | 配置完整导入导出 | `Not Started` | |
+| 4a.8 | Achievement Builder（JSON 模式） | `Partially Implemented` | 定义校验与存储已测（12+12 项）；**表单界面未做** |
+| 4a.9 | 配置完整导入导出 | `Tested` | 11 个单元测试 + 18 项 e2e，含「失败不改变现状」 |
 
 ---
 

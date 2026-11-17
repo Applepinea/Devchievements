@@ -1033,6 +1033,52 @@ fn main() {
         }
     }
 
+    // Add a user-defined achievement from a JSON definition.
+    if let Some(i) = std::env::args().position(|a| a == "--add-achievement") {
+        let Some(source) = std::env::args().nth(i + 1) else {
+            println!("ACHIEVEMENT FAILED: --add-achievement needs a path");
+            std::process::exit(2);
+        };
+        let path = settings_path();
+        let mut stored = settings::Settings::load(&path);
+
+        let text = match std::fs::read_to_string(&source) {
+            Ok(text) => text,
+            Err(e) => {
+                println!("ACHIEVEMENT FAILED: {e}");
+                std::process::exit(1);
+            }
+        };
+
+        let existing: Vec<String> = stored
+            .user_achievements
+            .iter()
+            .map(|a| a.id.clone())
+            .collect();
+
+        match devchievements_achievements::definition::from_json(
+            &text,
+            &existing,
+            devchievements_achievements::builder::ComplexityLimits::default(),
+        ) {
+            Ok(achievement) => {
+                println!("ACHIEVEMENT OK id={}", achievement.id);
+                let id = achievement.id.clone();
+                stored.user_achievements.push(achievement);
+                if let Err(e) = stored.save(&path) {
+                    println!("ACHIEVEMENT FAILED: {e}");
+                    std::process::exit(1);
+                }
+                println!("ACHIEVEMENT STORED {id}");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("ACHIEVEMENT FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     if std::env::args().any(|a| a == "--capabilities") {
         let caps = current_capabilities();
         let report = serde_json::json!({

@@ -88,6 +88,12 @@ pub struct Settings {
     /// Sound overrides, keyed as the sound crate expects (spec 19).
     #[serde(default, rename = "soundOverrides")]
     pub sound_overrides: std::collections::BTreeMap<String, String>,
+    /// User-defined achievements (spec 22).
+    ///
+    /// Stored as the validated definitions, not the raw submissions: an invalid
+    /// document never reaches this list.
+    #[serde(default, rename = "userAchievements")]
+    pub user_achievements: Vec<devchievements_achievements::definition::UserAchievement>,
     /// Popup appearance (spec 21).
     #[serde(default)]
     pub popup: devchievements_themes::PopupStyle,
@@ -120,6 +126,7 @@ impl Default for Settings {
             muted: false,
             github_logins: std::collections::BTreeMap::new(),
             sound_overrides: std::collections::BTreeMap::new(),
+            user_achievements: Vec::new(),
             popup: devchievements_themes::PopupStyle::default(),
             onboarding_completed: false,
         }
@@ -181,6 +188,7 @@ impl Settings {
             volume: self.volume,
             muted: self.muted,
             sound_overrides: self.sound_overrides.clone(),
+            user_achievements: self.user_achievements.clone(),
             popup: self.popup.clone(),
         }
     }
@@ -198,6 +206,7 @@ impl Settings {
         self.volume = document.volume.min(100);
         self.muted = document.muted;
         self.sound_overrides = document.sound_overrides;
+        self.user_achievements = document.user_achievements;
         self.popup = document.popup;
     }
 }
