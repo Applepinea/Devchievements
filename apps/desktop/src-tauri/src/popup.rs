@@ -41,6 +41,48 @@ pub struct PopupPayload {
     pub rarity: String,
     /// Other achievements merged into this popup (spec 16.6 grouping).
     pub others: Vec<String>,
+    /// Asset URL for this achievement's icon, when a custom one was imported.
+    ///
+    /// Resolved here rather than in the page: the page must not be able to probe
+    /// the filesystem, and a missing asset has to degrade to nothing rather than to
+    /// a broken image.
+    pub icon_url: Option<String>,
+}
+
+/// Look for an icon for this achievement.
+///
+/// Naming convention: an imported file called `achievement-<id>.<ext>` overrides
+/// the monogram for that achievement. A convention rather than a mapping table
+/// keeps this stateless, and an id that is not a slug cannot match accidentally
+/// because slugs cannot contain path separators.
+pub fn icon_for(achievement_id: &str) -> Option<String> {
+    if !achievement_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+
+    let dir = crate::default_data_dir().join("assets");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return None;
+    };
+
+    let prefix = format!("achievement-{achievement_id}.");
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with(&prefix) {
+            continue;
+        }
+        // Only formats the webview can render; an SVG here went through the asset
+        // validator, so it contains no executable construct.
+        let ext = name.rsplit('.').next().unwrap_or_default();
+        if !matches!(ext, "png" | "jpg" | "jpeg" | "webp" | "svg") {
+            continue;
+        }
+        return Some(format!("asset://localhost/{}", entry.path().to_string_lossy().replace('\\', "/")));
+    }
+    None
 }
 
 /// Show a popup for one presentation.
@@ -61,6 +103,11 @@ pub fn show(app: &AppHandle, payload: &PopupPayload, counter: u64) -> Result<(),
     // Appearance comes from the user's settings (spec 21), already clamped by the
     // themes crate, so a hand-edited file cannot place the popup off-screen.
     let style = crate::settings::Settings::load(&crate::settings_path()).popup;
+    println!(
+        "POPUP icon_url={}",
+        payload.icon_url.as_deref().unwrap_or("none")
+    );
+
     let (width, height) = style.window_size();
     let size = (f64::from(width), f64::from(height));
 

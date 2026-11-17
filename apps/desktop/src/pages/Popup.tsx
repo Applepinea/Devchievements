@@ -5,6 +5,8 @@ interface Payload {
   body: string;
   rarity: string;
   others: string[];
+  /** Custom icon for this achievement, resolved by the app. */
+  iconUrl?: string | null;
 }
 
 // The payload travels in the URL fragment so the popup can draw on its first frame.
@@ -41,7 +43,20 @@ export default function Popup() {
   return (
     <div className="popup">
       <div className="popup-icon">
-        <span className="popup-monogram">{monogram(payload.title)}</span>
+        {payload.iconUrl ? (
+          // The image is decorative: the achievement name carries the meaning, so
+          // a failed load degrades silently rather than showing a broken icon.
+          <img
+            className="popup-image"
+            src={payload.iconUrl}
+            alt=""
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+            }}
+          />
+        ) : (
+          <span className="popup-monogram">{monogram(payload.title)}</span>
+        )}
       </div>
       <div className="popup-text">
         <div className="popup-label">成就已解锁</div>

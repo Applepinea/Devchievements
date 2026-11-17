@@ -463,6 +463,7 @@ pub fn show_popup_preview(app: tauri::AppHandle) -> Result<(), String> {
         body: "This is how your notifications will look".to_string(),
         rarity: "Rare".to_string(),
         others: vec![],
+        icon_url: crate::popup::icon_for("preview"),
     };
     let handle = app.clone();
     app.run_on_main_thread(move || {

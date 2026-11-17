@@ -8,7 +8,7 @@ description = "Devchievements Companion: Tauri 2 desktop shell over the companio
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset"] }
 # File pickers for importing custom assets (spec 20). The plugin is the supported
 # way to ask the OS; a hand-rolled dialog would be a second, unaudited one.
 tauri-plugin-dialog = "2"

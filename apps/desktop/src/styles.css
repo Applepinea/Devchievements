@@ -198,3 +198,11 @@ html, body { margin: 0; height: 100%; background: transparent; }
 
 .slider { accent-color: var(--accent); width: 220px; }
 button.danger { background: var(--danger); }
+
+/* A custom icon fills the icon box; object-fit keeps any aspect ratio sane. */
+.popup-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}

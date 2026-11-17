@@ -297,7 +297,7 @@ ALL CHECKS PASSED
 | 4a.2 | Popup Editor 约束与定位 | `Tested` | 15 个测试：范围钳制、四角定位、缩放 |
 | 4a.3 | 主题包校验与导入 | `Tested` | 拒绝含脚本/样式/javascript: 的主题；未来 schema 拒绝而非猜测 |
 | 4a.4 | Sound Manager | `Partially Implemented` | 覆盖生效已 e2e 验证（5 项）；**无独立管理界面**，需手改配置或导入 |
-| 4a.5 | Asset Manager | `Tested` | 设置页可导入/删除；`asset-import` e2e 9 项（伪装文件被拒） |
+| 4a.5 | Asset Manager | `Tested` | 导入/删除 + **接入弹窗渲染**；`asset-import` 9 项、`popup` 10 项 |
 | 4a.6 | Popup Editor | `Partially Implemented` | 约束 15 测试；设置页可调宽/缩放/角落/边距 + 实时预览按钮 |
 | 4a.7 | Event Filters 界面 | `Tested` | 设置页可编辑；9 项 e2e 含「不影响官方统计」 |
 | 4a.8 | Achievement Builder（JSON 模式） | `Partially Implemented` | 定义校验与存储已测（12+12 项）；**表单界面未做** |

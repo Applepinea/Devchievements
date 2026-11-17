@@ -91,6 +91,16 @@ async function main() {
   };
   fs.writeFileSync(settingsPath, JSON.stringify(configured, null, 2));
 
+  // Import an icon for the achievement this commit will unlock, using the naming
+  // convention the popup resolves. This is the link between "imported" and
+  // "actually used".
+  const assetsDir = path.join(dataRoot, "devchievements", "assets");
+  fs.mkdirSync(assetsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(assetsDir, "achievement-first_commit.png"),
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0, 0, 0, 0]),
+  );
+
   const ready = await waitFor(
     () => fs.existsSync(appLog) && fs.readFileSync(appLog, "utf8").includes("TRAY READY"),
     25000,
@@ -108,6 +118,10 @@ async function main() {
   const log = fs.readFileSync(appLog, "utf8");
   check("a popup was created for the unlock", shown, log.slice(-600));
   check("the configured style was applied", /POPUP style width=520 corner=top_left/.test(log), log.slice(-600));
+
+  // The payload travels in the fragment; an icon URL there means the app resolved a
+  // custom asset to this achievement instead of falling back to the monogram.
+  check("the imported icon was resolved", /icon_url/.test(log) || /asset:\/\/localhost/.test(log), log.slice(-600));
   check("it was not a failed creation", !/POPUP FAILED/.test(log), log.slice(-600));
 
   // The toast must no longer be part of the path at all.

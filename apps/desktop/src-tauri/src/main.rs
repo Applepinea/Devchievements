@@ -123,6 +123,7 @@ impl DeliverySink for DesktopSink {
                     body: copy.body.clone(),
                     rarity: format!("{:?}", popup.rarity),
                     others: popup.others.clone(),
+                    icon_url: popup::icon_for(&popup.primary_id),
                 };
                 let app = self.app.clone();
                 // Window creation has to happen on the main thread on Windows.
@@ -1307,6 +1308,9 @@ fn main() {
             body: "Common Day · 第 1 天".to_string(),
             rarity: "Uncommon".to_string(),
             others: vec![],
+            // Any imported achievement icon shows here too, so the demo is a real
+            // check of the icon path rather than of a hardcoded placeholder.
+            icon_url: popup::icon_for("preview"),
         };
         let result = tauri::Builder::default()
             .plugin(tauri_plugin_dialog::init())

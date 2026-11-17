@@ -9,7 +9,13 @@
   "app": {
     "windows": [],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$LOCALAPPDATA/devchievements/assets/**"
+        ]
+      }
     },
     "trayIcon": {
       "iconPath": "icons/tray.png",
