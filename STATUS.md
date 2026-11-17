@@ -55,7 +55,8 @@ ALL CHECKS PASSED
 | 3b.2 | 浏览器报告 → 本地判定 → 入库 | `Tested` | 同一 e2e：companion drain 后诊断显示 1 个提交 |
 | 3b.3 | 扩展侧转发 + 本地留痕 | `Tested` | `extension-load` 18 项：真实 `connectNative` 握手 + 本地存储 |
 | 3b.4 | Host 清单与浏览器注册（固定扩展 ID） | `Tested` | `register-native-host.mjs` 写清单 + HKCU 注册；ID 由提交的公钥推导并与加载一致 |
-| 3b.5 | 桌面弹窗呈现浏览器事件 | `Not Started` | 复用已有弹窗通道 |
+| 3b.5 | 桌面弹窗呈现浏览器事件 | `Tested` | `browser-to-popup` e2e 6 项：浏览器字节 → host → 桌面弹窗 |
+| 3b.6 | 注册与清理脚本 | `Tested` | `register-native-host.mjs` / `unregister-native-host.mjs`，只动 HKCU |
 
 ---
 

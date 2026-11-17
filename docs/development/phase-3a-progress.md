@@ -179,3 +179,51 @@ ok  the host acknowledges the report
 
 加上 `native-host` 的 11 项（含 companion 入库断言），
 以及 `companion_loop` 里那条浏览器事件必须被判定为提交的测试。
+
+## 8. 最后一环：浏览器报告触发桌面弹窗（3b.5）
+
+### 为什么必须端到端测
+
+前面的部件各自都有测试：
+
+| 部件 | 已有证据 |
+| --- | --- |
+| host 解析与落盘 | `native-host` 11 项 |
+| companion 判定浏览器事件 | `companion_loop` 1 项 |
+| 弹窗呈现 | `popup` 8 项 |
+| 浏览器真实握手 | `extension-load` 18 项 |
+
+但**它们能否串起来从没验证过**。断在「host 写了记录」与「companion 展示了它」之间的任何位置，
+上面每一项都仍然是绿的。
+
+`scripts/e2e/browser-to-popup.mjs` 补的正是这个空档：
+
+```text
+ok  the host accepted the browser report
+ok  the browser event reached the database
+ok  the desktop app opened a popup for it
+ok  the popup was not a failed creation
+ok  no system notification was attempted
+```
+
+**注意最后一条**：它同时守住了「不再走系统通知」这个决定（ADR-0015）。
+如果谁把通知路径加回去，这条会变红。
+
+### 清理
+
+注册脚本动的是真实的 `HKCU` 和 `%LOCALAPPDATA%`，
+所以补了 `unregister-native-host.mjs`。
+**一个测试如果在机器上留下痕迹却不清理，它就是在静默地改变环境。**
+
+## 9. Full Experience 的边界（诚实记录）
+
+现在能做的：
+
+- 扩展检测 GitHub 提交/发布 → 本地 host → 桌面判定 → 桌面弹窗。
+- 扩展同时保留本地副本，供浏览器内 Dashboard 显示。
+
+**不能做的**：
+
+- 没有桌面应用时，扩展**不解锁任何成就**。这是 ADR-0018 的自觉选择，
+  不是缺陷：判定规则只有一份，在 Rust 里。
+- 浏览器内没有设置页、没有图鉴。
