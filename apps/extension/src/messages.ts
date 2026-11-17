@@ -13,6 +13,8 @@ export interface PageFactsMessage {
   url: string;
   meta: Record<string, string>;
   text: Record<string, string>;
+  /** Attribute values by selector, e.g. an author link's href. */
+  attributes: Record<string, string>;
 }
 
 /** Response to a page report. */

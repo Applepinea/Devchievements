@@ -223,6 +223,20 @@ impl Identity {
             .map(|m| m.emails.as_slice())
     }
 
+    /// Whether a GitHub login maps to one of the configured emails.
+    ///
+    /// Spec 7: a login is only "me" when the user explicitly mapped it. Assuming
+    /// "the login looks like me" would attribute other people's work to the user.
+    pub fn owns_login(&self, login: &str) -> bool {
+        let Some(emails) = self.emails_for_login(login) else {
+            return false;
+        };
+        // The mapping is a statement of ownership; the emails on it must also be
+        // configured, otherwise the mapping would grant a wider identity than the
+        // user configured.
+        emails.iter().any(|email| self.owns_email(email))
+    }
+
     /// Add a login mapping, merging with an existing one instead of duplicating it.
     pub fn add_login_mapping(&mut self, login: impl Into<String>, emails: Vec<String>) {
         let login = login.into();

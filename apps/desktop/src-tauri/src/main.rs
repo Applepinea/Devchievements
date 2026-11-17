@@ -417,18 +417,16 @@ fn load_identity(data_dir: &std::path::Path) -> (Identity, IdentitySource) {
 /// newer build's file still loads.
 fn identity_from_settings(data_dir: &std::path::Path) -> Option<Identity> {
     let path = data_dir.join("settings.json");
-    let text = std::fs::read_to_string(path).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-
-    let mut identity = Identity::default();
-    if let Some(emails) = value.get("emails").and_then(|v| v.as_array()) {
-        for email in emails {
-            if let Some(email) = email.as_str() {
-                identity.add_email(email, EmailOrigin::UserConfigured);
-            }
-        }
+    // Parsed through the typed settings model rather than by hand: a hand-rolled
+    // reader silently ignored the GitHub login mappings, so every browser report was
+    // refused while the file looked perfectly correct.
+    let stored = settings::Settings::load(&path);
+    let identity = stored.to_identity();
+    if identity.is_configured() {
+        Some(identity)
+    } else {
+        None
     }
-    Some(identity)
 }
 
 // ---------------------------------------------------------------- UI commands

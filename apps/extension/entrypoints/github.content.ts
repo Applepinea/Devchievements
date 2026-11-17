@@ -29,7 +29,13 @@ export default defineContentScript({
       if (value) text[selector] = value;
     }
 
-    chrome.runtime.sendMessage({ type: "devch:page", url: location.href, meta, text }).catch(() => {
+    const attributes: Record<string, string> = {};
+    for (const selector of ['a[data-hovercard-type="user"]']) {
+      const value = document.querySelector(selector)?.getAttribute("href");
+      if (value) attributes[selector] = value;
+    }
+
+    chrome.runtime.sendMessage({ type: "devch:page", url: location.href, meta, text, attributes }).catch(() => {
       // The worker may be starting; a missed report must never break the page.
     });
   },

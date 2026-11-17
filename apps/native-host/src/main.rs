@@ -113,6 +113,10 @@ fn handle(raw: &[u8]) -> serde_json::Value {
             browser_event::BrowserActivity::Release { tag } => Some(tag.clone()),
         },
         "occurred_ms": report.occurred_ms,
+        // The attribution has to survive this hop. Dropping it here made the
+        // companion refuse every browser report, and the record looked perfectly
+        // well-formed from the host's point of view.
+        "author_login": report.author_login,
     })
     .to_string();
 

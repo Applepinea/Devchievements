@@ -68,11 +68,25 @@ pub fn check_identity(identity: &Identity, event: &Event) -> Result<(), IngestRe
         return Err(IngestRefusal::IdentityNotConfigured);
     }
 
-    // Events without an author in the payload (non-commit GitHub events) cannot be
-    // attributed by email; they are attributed by the account that produced them,
-    // which the browser path verifies. Do not block those here.
     let Some(author_email) = author_email_of(event) else {
-        return Ok(());
+        // No email in the payload. That is only acceptable when the payload says who
+        // did it and that account is one of ours (spec 7: the browser maps a GitHub
+        // login to the configured emails).
+        //
+        // Treating an unattributed browser event as "mine" would count commits made
+        // by other people on pages the user happened to open, which is worse than
+        // refusing: it silently inflates every statistic.
+        if let Some(login) = author_login_of(event) {
+            if identity.owns_login(&login) {
+                return Ok(());
+            }
+            return Err(IngestRefusal::NotTheUser {
+                author_email: format!("@{login}"),
+            });
+        }
+        return Err(IngestRefusal::NotTheUser {
+            author_email: "(no author on the event)".to_string(),
+        });
     };
 
     if identity.owns_email(&author_email) {
@@ -80,6 +94,15 @@ pub fn check_identity(identity: &Identity, event: &Event) -> Result<(), IngestRe
     } else {
         Err(IngestRefusal::NotTheUser { author_email })
     }
+}
+
+/// The GitHub login recorded in an event payload, if any.
+fn author_login_of(event: &Event) -> Option<String> {
+    let payload: serde_json::Value = serde_json::from_str(&event.payload).ok()?;
+    payload
+        .get("author_login")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 /// Classify a commit for the counting rules (spec 8.1).

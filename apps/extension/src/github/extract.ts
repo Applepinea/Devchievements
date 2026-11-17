@@ -31,6 +31,8 @@ export interface PageFacts {
   meta(name: string): string | null;
   /** Text of the first element matching a selector, or null. */
   text(selector: string): string | null;
+  /** Value of the FIRST element matching a selector, by attribute. */
+  attribute(selector: string, name: string): string | null;
 }
 
 /** Result of looking at a page. */
@@ -84,6 +86,13 @@ function commitEvent(facts: PageFacts, repo: RepositoryId, pathname: string): Ex
     return { kind: "ignored", reason: "commit page without a machine-readable date" };
   }
 
+  // Who made it. GitHub renders the author in the commit header; when the page
+  // does not state it, the login is left null and the desktop side refuses to
+  // attribute the commit rather than assuming it is the user's.
+  const authorLogin =
+    facts.attribute('a[data-hovercard-type="user"]', "href")?.replace(/^\//, "") ??
+    facts.meta("octolytics-dimension-user_login");
+
   const base = {
     canonicalRepositoryId: canonicalRepositoryId(repo),
     commitSha: sha,
@@ -100,6 +109,7 @@ function commitEvent(facts: PageFacts, repo: RepositoryId, pathname: string): Ex
       commitSha: sha,
       externalId: null,
       occurredAt,
+      authorLogin,
       localDate: localDateUtc(occurredAt),
       payload: JSON.stringify({ via: "content-script", page: "commit" }),
     },
@@ -118,6 +128,11 @@ function releaseEvent(facts: PageFacts, repo: RepositoryId, pathname: string): E
     return { kind: "ignored", reason: "release page without a machine-readable date" };
   }
 
+  // Same rule as commits: attribute only when the page says who did it.
+  const authorLogin =
+    facts.attribute('a[data-hovercard-type="user"]', "href")?.replace(/^\//, "") ??
+    facts.meta("octolytics-dimension-user_login");
+
   const base = {
     canonicalRepositoryId: canonicalRepositoryId(repo),
     commitSha: null,
@@ -134,6 +149,7 @@ function releaseEvent(facts: PageFacts, repo: RepositoryId, pathname: string): E
       commitSha: null,
       externalId: tag,
       occurredAt,
+      authorLogin,
       localDate: localDateUtc(occurredAt),
       payload: JSON.stringify({ via: "content-script", page: "release" }),
     },

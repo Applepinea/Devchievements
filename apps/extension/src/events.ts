@@ -30,6 +30,14 @@ export interface BrowserEvent {
   commitSha: string | null;
   externalId: string | null;
   occurredAt: number;
+  /**
+   * GitHub login of whoever produced the activity, when the page states it.
+   *
+   * Needed because the identity gate works by attribution (spec 7): without it a
+   * commit made by somebody else, on a page the user happened to open, would be
+   * counted as the user's.
+   */
+  authorLogin: string | null;
   localDate: string;
   payload: string;
 }

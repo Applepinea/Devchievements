@@ -27,6 +27,10 @@ async function handlePage(message: Extract<ExtensionMessage, { type: "devch:page
     url: message.url,
     meta: (name: string) => message.meta[name] ?? null,
     text: (selector: string) => message.text[selector] ?? null,
+    attribute: (selector: string, name: string) => {
+      const value = message.attributes?.[selector];
+      return name === "href" ? (value ?? null) : null;
+    },
   });
 
   if (extraction.kind === "ignored") {

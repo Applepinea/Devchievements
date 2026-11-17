@@ -83,6 +83,9 @@ export function forward(event: BrowserEvent): Promise<BridgeOutcome> {
         commit_sha: event.commitSha,
         external_id: event.externalId,
         occurred_ms: event.occurredAt,
+        // Who made it. The desktop side refuses to attribute a commit without
+        // this rather than counting somebody else's work (spec 7).
+        author_login: event.authorLogin,
       },
     });
   });

@@ -13,6 +13,7 @@ function event(overrides: Partial<BrowserEvent> = {}): BrowserEvent {
     commitSha: "abc1234",
     externalId: null,
     occurredAt: 1,
+    authorLogin: "someone",
     localDate: "2026-01-01",
     payload: "{}",
     ...overrides,

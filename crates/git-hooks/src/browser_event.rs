@@ -38,6 +38,8 @@ pub struct BrowserReport {
     pub activity: BrowserActivity,
     /// When it happened, in Unix milliseconds.
     pub occurred_ms: i64,
+    /// GitHub login of the author, when the page stated it.
+    pub author_login: Option<String>,
 }
 
 /// Parse a browser payload.
@@ -86,11 +88,18 @@ pub fn parse(payload: &serde_json::Value) -> Option<BrowserReport> {
         _ => return None,
     };
 
+    let author_login = payload
+        .get("author_login")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && s.len() <= 100);
+
     Some(BrowserReport {
         event_id,
         repository_id,
         activity,
         occurred_ms,
+        author_login,
     })
 }
 
@@ -122,6 +131,7 @@ pub fn to_event(report: &BrowserReport, ctx: &InjectedContext<'_>) -> Option<Eve
         payload: serde_json::json!({
             "kind": "browser_github",
             "via": "native_messaging",
+            "author_login": report.author_login,
         })
         .to_string(),
         schema_version: SchemaVersion(1),

@@ -498,6 +498,7 @@ async fn a_browser_report_is_ingested_as_a_commit() {
                 "commit_sha": "abcdef0123456789abcdef0123456789abcdef01",
                 "external_id": null,
                 "occurred_ms": now_ms() - 1_000,
+                "author_login": "me",
             })
             .to_string(),
         )
@@ -505,6 +506,9 @@ async fn a_browser_report_is_ingested_as_a_commit() {
 
     let mut id = Identity::default();
     id.add_email("browser@devchievements.local", EmailOrigin::UserConfigured);
+    // Spec 7: the browser path attributes by login, and only an explicit mapping
+    // makes a login the user's.
+    id.add_login_mapping("me", vec!["browser@devchievements.local".to_string()]);
 
     let report = fixture.companion().drain_once(&id).await.expect("drain");
 
@@ -567,16 +571,16 @@ async fn hook_and_browser_agree_on_one_repository() {
                 "commit_sha": "2222222222222222222222222222222222222222",
                 "external_id": null,
                 "occurred_ms": now_ms() - 500,
+                "author_login": "me",
             })
             .to_string(),
         )
         .expect("append");
 
-    let report = fixture
-        .companion()
-        .drain_once(&identity())
-        .await
-        .expect("drain");
+    let mut id = identity();
+    id.add_login_mapping("me", vec!["me@example.com".to_string()]);
+
+    let report = fixture.companion().drain_once(&id).await.expect("drain");
     assert_eq!(report.ingested, 2, "both must ingest: {report:?}");
 
     let repositories =
@@ -640,6 +644,97 @@ async fn a_repository_without_a_remote_stays_local() {
         repositories[0].alias.starts_with("local:"),
         "must stay a local identity, got {:?}",
         repositories[0].alias
+    );
+
+    fixture.cleanup();
+}
+
+/// Spec 7: an unattributed browser event must not count.
+///
+/// The page says nothing about who committed, so attributing it to the user would
+/// silently inflate every statistic with other people's work.
+#[tokio::test]
+async fn a_browser_report_without_attribution_is_refused() {
+    let fixture = Fixture::new("no-author").await;
+    let spool = Spool::open(&fixture.spool).expect("spool");
+    spool
+        .append(
+            "browser:github:o/r#anonymous",
+            &serde_json::json!({
+                "kind": "browser_github",
+                "event_id": "browser:github:o/r#anonymous",
+                "repository_id": "github:o/r",
+                "activity": "commit",
+                "commit_sha": "4444444444444444444444444444444444444444",
+                "external_id": null,
+                "occurred_ms": now_ms() - 1_000,
+            })
+            .to_string(),
+        )
+        .expect("append");
+
+    let report = fixture
+        .companion()
+        .drain_once(&identity())
+        .await
+        .expect("drain");
+
+    assert_eq!(
+        report.ingested, 0,
+        "an unattributed report must not count: {report:?}"
+    );
+    assert_eq!(
+        report.refused, 1,
+        "it must be refused, not silently dropped: {report:?}"
+    );
+
+    fixture.cleanup();
+}
+
+/// A login that maps to one of the configured emails counts; a stranger's does not.
+#[tokio::test]
+async fn only_a_mapped_login_is_the_user() {
+    let fixture = Fixture::new("mapped-login").await;
+    let spool = Spool::open(&fixture.spool).expect("spool");
+
+    for (id, sha, login) in [
+        ("mine", "5555555555555555555555555555555555555555", "me"),
+        (
+            "theirs",
+            "6666666666666666666666666666666666666666",
+            "stranger",
+        ),
+    ] {
+        spool
+            .append(
+                &format!("browser:github:o/r#{id}"),
+                &serde_json::json!({
+                    "kind": "browser_github",
+                    "event_id": format!("browser:github:o/r#{id}"),
+                    "repository_id": "github:o/r",
+                    "activity": "commit",
+                    "commit_sha": sha,
+                    "external_id": null,
+                    "occurred_ms": now_ms() - 1_000,
+                    "author_login": login,
+                })
+                .to_string(),
+            )
+            .expect("append");
+    }
+
+    let mut id = identity();
+    id.add_login_mapping("me", vec!["me@example.com".to_string()]);
+
+    let report = fixture.companion().drain_once(&id).await.expect("drain");
+
+    assert_eq!(
+        report.ingested, 1,
+        "only the mapped login counts: {report:?}"
+    );
+    assert_eq!(
+        report.refused, 1,
+        "the stranger must be refused: {report:?}"
     );
 
     fixture.cleanup();

@@ -79,6 +79,12 @@ pub struct Settings {
     /// Whether sound is muted entirely.
     #[serde(default)]
     pub muted: bool,
+    /// GitHub login to email mappings (spec 7).
+    ///
+    /// Required for the browser path: a report says who committed by login, and the
+    /// companion will not count it without an explicit mapping.
+    #[serde(default, rename = "githubLogins")]
+    pub github_logins: std::collections::BTreeMap<String, Vec<String>>,
     /// Whether the first-run wizard has been completed (spec 25).
     #[serde(default, rename = "onboardingCompleted")]
     pub onboarding_completed: bool,
@@ -106,6 +112,7 @@ impl Default for Settings {
             notifications: true,
             volume: 80,
             muted: false,
+            github_logins: std::collections::BTreeMap::new(),
             onboarding_completed: false,
         }
     }
@@ -130,5 +137,25 @@ impl Settings {
         }
         let text = serde_json::to_string_pretty(self).unwrap_or_default();
         std::fs::write(path, text + "\n")
+    }
+}
+
+impl Settings {
+    /// Build the identity model this file describes.
+    ///
+    /// One place, because a caller that remembered the emails but forgot the logins
+    /// would silently refuse every browser event.
+    pub fn to_identity(&self) -> devchievements_events::Identity {
+        let mut identity = devchievements_events::Identity::default();
+        for email in &self.emails {
+            identity.add_email(
+                email.clone(),
+                devchievements_events::EmailOrigin::UserConfigured,
+            );
+        }
+        for (login, emails) in &self.github_logins {
+            identity.add_login_mapping(login.clone(), emails.clone());
+        }
+        identity
     }
 }

@@ -9,11 +9,19 @@ import test from "node:test";
 
 import { extract, repositoryFromPath, type PageFacts } from "./extract.ts";
 
-function facts(url: string, opts: { meta?: Record<string, string>; text?: Record<string, string> } = {}): PageFacts {
+function facts(
+  url: string,
+  opts: {
+    meta?: Record<string, string>;
+    text?: Record<string, string>;
+    attribute?: Record<string, string>;
+  } = {},
+): PageFacts {
   return {
     url,
     meta: (name) => opts.meta?.[name] ?? null,
     text: (selector) => opts.text?.[selector] ?? null,
+    attribute: (selector) => opts.attribute?.[selector] ?? null,
   };
 }
 

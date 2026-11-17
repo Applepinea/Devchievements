@@ -267,13 +267,7 @@ pub async fn import_history(path: String) -> Result<devchievements_storage::hist
     }
 
     let stored = crate::settings::Settings::load(&settings_path());
-    let mut identity = devchievements_events::Identity::default();
-    for email in &stored.emails {
-        identity.add_email(
-            email.clone(),
-            devchievements_events::EmailOrigin::UserConfigured,
-        );
-    }
+    let identity = stored.to_identity();
     if !identity.is_configured() {
         return Err("configure a git email before importing (spec 11.2)".to_string());
     }

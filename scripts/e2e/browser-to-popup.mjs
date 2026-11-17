@@ -69,6 +69,9 @@ async function main() {
       {
         schemaVersion: 1,
         emails: ["browser@devchievements.local"],
+        // Spec 7: the browser path attributes by login, and only an explicit
+        // mapping makes a login the user's. Without this the report is refused.
+        githubLogins: { me: ["browser@devchievements.local"] },
         onboardingCompleted: true,
         notifications: true,
       },
@@ -87,6 +90,7 @@ async function main() {
       repository_id: "github:o/r",
       activity: "commit",
       commit_sha: SHA,
+      author_login: "me",
       occurred_ms: Date.now() - 2_000,
     },
   };

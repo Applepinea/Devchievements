@@ -292,3 +292,51 @@ ok  the event details survived too
 第二条和第一条同样重要。**过度合并比不合并更难发现**：
 两个不相干的本地仓库被合成一个，数字看起来还很正常。
 §6.1 明确禁止「轻率合并同名仓库」，这条测试就是守那条。
+
+## 12. 用户身份映射（3a.9）
+
+### 这是个更严重的问题
+
+仓库身份合并错了只是数字难看；**用户身份错了是在把别人的功劳记在你头上**。
+
+原来的 `check_identity` 里有一段注释，把这个漏洞当成了设计：
+
+> Events without an author in the payload ... are attributed by the account that
+> produced them, which the browser path verifies. Do not block those here.
+
+问题是 **browser path 从来没有 verify 过**。于是浏览器报告一律通过身份门禁。
+后果：别人在你关注的仓库里的提交，只要你恰好打开了那个页面，就算成你的。
+
+### 改法
+
+1. 扩展从页面读作者登录名（`a[data-hovercard-type="user"]`），随报告发送；
+2. 桌面侧新增 `Identity::owns_login`，只有**显式映射**的登录才算本人；
+3. 没有作者信息 → 拒绝计数，不再默认放行；
+4. 设置文件新增 `githubLogins`，把登录名映射到已配置邮箱。
+
+### 三个 bug，都在这一条链上
+
+**1. host 重塑 payload 时丢掉了 `author_login`。**
+
+host 校验通过、写库成功、日志正常——但作者信息在那一跳被丢了。
+下一个环节只能拒绝，而拒绝原因指向「作者不是已配置邮箱」，
+看起来像映射配错了，实际是数据在传输中丢失。
+
+**2. 桌面应用用手写 JSON 解析设置文件。**
+
+`identity_from_settings` 自己 `serde_json::from_str` 取 `emails`，
+**完全没读 `githubLogins`**。文件内容完全正确，程序就是看不见。
+
+改成走 `Settings::to_identity()`：一个类型化的入口，
+新增字段时不会再有「某个读取方忘了它」。
+
+**3. 两个旧测试的夹具没有作者。**
+
+它们之前能过，正是因为门禁形同虚设。现在被拒绝了——**这正是修复生效的证据**。
+
+### 测试
+
+| 测试 | 断言 |
+| --- | --- |
+| `a_browser_report_without_attribution_is_refused` | 无作者 → `refused: 1`，不是静默丢弃 |
+| `only_a_mapped_login_is_the_user` | 映射的登录计数，陌生登录拒绝 |
