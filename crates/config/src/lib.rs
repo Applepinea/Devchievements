@@ -82,6 +82,21 @@ pub struct ConfigDocument {
     pub filters: devchievements_filters::FilterSet,
     /// Popup appearance.
     pub popup: devchievements_themes::PopupStyle,
+    /// Whether a launch stays in the tray.
+    ///
+    /// Defaulted for the same reason as the fields above: an export written before
+    /// this existed must still import.
+    #[serde(default = "default_start_hidden")]
+    pub start_hidden: bool,
+    /// Whether Windows starts the companion at sign-in.
+    ///
+    /// Defaulted to false for the same reason it is off in the app: an import must
+    /// not silently add an autostart entry the user never asked for.
+    #[serde(default)]
+    pub start_with_windows: bool,
+    /// UI language: `system`, `en` or `zh-CN`.
+    #[serde(default = "default_language")]
+    pub language: String,
 }
 
 impl Default for ConfigDocument {
@@ -99,12 +114,25 @@ impl Default for ConfigDocument {
             user_achievements: Vec::new(),
             filters: devchievements_filters::FilterSet::default(),
             popup: devchievements_themes::PopupStyle::default(),
+            start_hidden: true,
+            start_with_windows: false,
+            language: default_language(),
         }
     }
 }
 
 fn default_privacy() -> String {
     "normal".to_string()
+}
+
+/// Missing means "behave like a companion": tray only until asked to open.
+fn default_start_hidden() -> bool {
+    true
+}
+
+/// Missing means "follow the operating system".
+fn default_language() -> String {
+    "system".to_string()
 }
 
 /// Accept any string, then normalise. Rejects nothing, because a preference with an
@@ -204,6 +232,31 @@ impl ConfigDocument {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_export_written_before_start_hidden_still_imports() {
+        // The field arrived with the "start hidden" setting. An export is a promise,
+        // so a document that predates the field must import with the companion
+        // default rather than failing validation.
+        //
+        // Built by removing the field from a real document rather than by hand-writing
+        // one: a hand-written fixture silently stops resembling the real format the
+        // moment another required field is added.
+        let text = ConfigDocument::default().to_json();
+        let mut value: serde_json::Value = serde_json::from_str(&text).expect("json");
+        let removed = value
+            .as_object_mut()
+            .expect("document is an object")
+            .remove("startHidden");
+        assert!(removed.is_some(), "the field is present before removal");
+
+        let older = serde_json::to_string(&value).expect("serialise");
+        let document = ConfigDocument::from_json(&older).expect("older export imports");
+        assert!(
+            document.start_hidden,
+            "a missing startHidden must default to tray-only"
+        );
+    }
 
     #[test]
     fn the_default_document_round_trips() {

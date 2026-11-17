@@ -319,8 +319,8 @@ pub fn show_with_aumid(_aumid: &str, _title: &str, _body: &str) -> Result<(), To
 /// different failures, and guessing which step failed has already cost time.
 pub fn selftest() -> Vec<String> {
     use windows::core::{HSTRING, PCWSTR};
-    use windows::UI::Notifications::{ToastNotificationManager, ToastTemplateType};
     use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+    use windows::UI::Notifications::{ToastNotificationManager, ToastTemplateType};
 
     let mut out = Vec::new();
 

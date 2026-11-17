@@ -9,7 +9,12 @@
 use serde::Serialize;
 use tauri::Manager;
 
-use crate::{current_capabilities, default_data_dir, settings_path};
+// Needed for creation_flags on Command: every process this binary starts on the
+// user's behalf must not open a console window.
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+use crate::{current_capabilities, default_data_dir, settings_path, update};
 
 /// A page's data plus the facts every page header needs.
 #[derive(Debug, Clone, Serialize)]
@@ -137,10 +142,7 @@ pub async fn get_gallery() -> Result<Vec<GalleryItem>, String> {
 
     // The catalogue comes from the rule set, so locked achievements appear as goals.
     let builtins = devchievements_achievements::builtin_achievements();
-    let ids: Vec<String> = builtins
-        .iter()
-        .map(|a| a.achievement_id.clone())
-        .collect();
+    let ids: Vec<String> = builtins.iter().map(|a| a.achievement_id.clone()).collect();
 
     let entries = devchievements_storage::read_models::gallery(&pool, &ids)
         .await
@@ -149,7 +151,9 @@ pub async fn get_gallery() -> Result<Vec<GalleryItem>, String> {
     Ok(entries
         .into_iter()
         .map(|entry| {
-            let meta = builtins.iter().find(|a| a.achievement_id == entry.achievement_id);
+            let meta = builtins
+                .iter()
+                .find(|a| a.achievement_id == entry.achievement_id);
             GalleryItem {
                 id: entry.achievement_id.clone(),
                 name: meta
@@ -179,7 +183,9 @@ pub async fn mark_achievements_viewed(ids: Vec<String>) -> Result<u64, String> {
 }
 
 #[tauri::command]
-pub async fn get_activity(limit: Option<i64>) -> Result<Vec<devchievements_storage::read_models::ActivityDay>, String> {
+pub async fn get_activity(
+    limit: Option<i64>,
+) -> Result<Vec<devchievements_storage::read_models::ActivityDay>, String> {
     let pool = pool().await?;
     devchievements_storage::read_models::activity(&pool, limit.unwrap_or(60))
         .await
@@ -187,7 +193,8 @@ pub async fn get_activity(limit: Option<i64>) -> Result<Vec<devchievements_stora
 }
 
 #[tauri::command]
-pub async fn get_repositories() -> Result<Vec<devchievements_storage::read_models::RepositoryEntry>, String> {
+pub async fn get_repositories(
+) -> Result<Vec<devchievements_storage::read_models::RepositoryEntry>, String> {
     let pool = pool().await?;
     devchievements_storage::read_models::repositories(&pool, devchievements_privacy::stable_alias)
         .await
@@ -260,7 +267,9 @@ pub async fn restore_database(path: String) -> Result<(), String> {
 /// Silent by construction: the storage layer suppresses per-commit notifications,
 /// so an import of ten thousand commits cannot flood the user.
 #[tauri::command]
-pub async fn import_history(path: String) -> Result<devchievements_storage::history_scan::ImportReport, String> {
+pub async fn import_history(
+    path: String,
+) -> Result<devchievements_storage::history_scan::ImportReport, String> {
     let repo_dir = std::path::PathBuf::from(&path);
     if !repo_dir.is_dir() {
         return Err(format!("not a directory: {path}"));
@@ -401,6 +410,164 @@ pub fn install_hooks(repo_path: String) -> Result<Vec<HookInstallResult>, String
     Ok(results)
 }
 
+/// Report a JS error to the process log.
+///
+/// Without this a renderer exception leaves a blank window and nothing else: the
+/// console of a webview is not something a user can open, and the Rust side sees
+/// only that no view was ever reported ready.
+#[tauri::command]
+pub fn ui_error(message: String) {
+    println!("UI ERROR {message}");
+}
+
+/// Open a URL in the user's default browser.
+///
+/// Only http(s) reaches the shell: the URL comes from the preflight report, but a
+/// renderer that has been compromised should not be able to launch `file:` or a
+/// custom scheme through this door (AGENTS.md 7.4: validate what crosses the bridge).
+#[tauri::command]
+pub fn open_external(url: String) -> Result<(), String> {
+    let lowered = url.trim().to_ascii_lowercase();
+    if !(lowered.starts_with("https://") || lowered.starts_with("http://")) {
+        return Err("only http and https links can be opened".to_string());
+    }
+    #[cfg(windows)]
+    {
+        // explorer.exe is the documented way to hand a URL to the shell without a
+        // second crate; it launches the default browser for http(s).
+        std::process::Command::new("explorer.exe")
+            .arg(url.trim())
+            .creation_flags(0x0800_0000)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        Err("opening links is only implemented on Windows".to_string())
+    }
+}
+
+/// Write a diagnostics document into the data directory and report where it went.
+///
+/// The window cannot silently choose the raw form: `raw` is a parameter the caller
+/// has to ask for, and the reply carries the sentence the UI shows afterwards.
+#[tauri::command]
+pub fn export_diagnostics(raw: bool) -> Result<serde_json::Value, String> {
+    let data_dir = default_data_dir();
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    let report = crate::diagnostics_report(&data_dir, raw)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let name = if raw {
+        format!("diagnostics-raw-{stamp}.json")
+    } else {
+        format!("diagnostics-{stamp}.json")
+    };
+    let path = data_dir.join(&name);
+    let text = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| e.to_string())?;
+    println!("DIAGNOSTICS EXPORTED path={} raw={raw}", path.display());
+    Ok(serde_json::json!({
+        "path": path.to_string_lossy(),
+        "raw": raw,
+    }))
+}
+
+/// Report which prerequisites this machine has (spec 25).
+///
+/// Advisory, never blocking: a missing Git is reported loudly, but the app still
+/// opens so the user can see what the product is before being sent to an
+/// installer.
+#[tauri::command]
+pub fn check_dependencies() -> crate::preflight::Preflight {
+    let report = crate::preflight::check();
+    for dependency in &report.dependencies {
+        println!(
+            "PREFLIGHT {} ok={} version={}",
+            dependency.id,
+            dependency.ok,
+            dependency.version.as_deref().unwrap_or("none")
+        );
+    }
+    report
+}
+
+/// Record which language the window actually rendered in.
+///
+/// The setting can say `system`; only the page can resolve that, because the answer
+/// lives in the webview's locale. Logging the resolved value makes "the UI is in the
+/// wrong language" diagnosable, and gives the end-to-end tests something to assert
+/// instead of trusting the setting file.
+///
+/// `sample` is one already-translated word. Sending it means the log shows the
+/// dictionary was actually consulted, which no assertion on the setting can prove.
+#[tauri::command]
+pub fn ui_language(lang: String, sample: String) {
+    println!("UI LANGUAGE lang={lang} sample={sample}");
+}
+
+/// Called by the popup page once its first frame has been painted (spec 44.4).
+///
+/// The latency budget for "commit to notification" ends here. Nothing in Rust can
+/// know when WebView2 painted, so the page says so, once, and the timestamp is
+/// taken on arrival: a page that never calls this makes the measurement fail
+/// rather than quietly reporting a number that stops at window creation.
+#[tauri::command]
+pub fn popup_painted() {
+    println!("POPUP painted at={}", crate::now_millis());
+}
+
+/// Report the update situation without pretending to have checked (spec 40.3).
+#[tauri::command]
+pub fn update_status() -> serde_json::Value {
+    update::status(update::ENDPOINTS.len())
+}
+
+/// Copy the database aside before an update installs (spec 40.3).
+///
+/// The UI calls this before handing control to the updater; without it a failed
+/// migration would have no way back.
+#[tauri::command]
+pub fn prepare_update() -> Result<serde_json::Value, String> {
+    let data_dir = default_data_dir();
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    let snapshot = update::snapshot_database(&data_dir)?;
+    println!(
+        "UPDATE prepared snapshot={}",
+        snapshot
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "none".to_string())
+    );
+    Ok(serde_json::json!({
+        "snapshot": snapshot.map(|p| p.to_string_lossy().to_string()),
+    }))
+}
+
+/// Drop the pre-update copy after the new version has proven itself.
+#[tauri::command]
+pub fn clear_update_snapshot() -> Result<(), String> {
+    update::clear_snapshot(&default_data_dir())
+}
+
+/// Clear the "setup done" flag so the wizard runs again.
+///
+/// Deliberately not a data reset: re-running setup is about identity and hooks, and
+/// an event that says so must not sound like it will delete history. The flag is
+/// the only thing this touches, and the caller reloads the window afterwards.
+#[tauri::command]
+pub fn reset_onboarding() -> Result<(), String> {
+    let path = settings_path();
+    let mut stored = crate::settings::Settings::load(&path);
+    stored.onboarding_completed = false;
+    stored.save(&path).map_err(|e| e.to_string())?;
+    println!("ONBOARDING reset");
+    Ok(())
+}
+
 /// Mark the wizard as done.
 #[tauri::command]
 pub fn complete_onboarding() -> Result<(), String> {
@@ -465,16 +632,13 @@ pub fn show_popup_preview(app: tauri::AppHandle) -> Result<(), String> {
         others: vec![],
 
         // Filled from the saved style inside popup::show, so a caller cannot get it wrong.
-
         style: Default::default(),
         icon_url: crate::popup::icon_for("preview"),
     };
     let handle = app.clone();
-    app.run_on_main_thread(move || {
-        match crate::popup::show(&handle, &payload, 1) {
-            Ok(()) => println!("POPUP preview shown"),
-            Err(e) => println!("POPUP preview failed: {e}"),
-        }
+    app.run_on_main_thread(move || match crate::popup::show(&handle, &payload, 1) {
+        Ok(()) => println!("POPUP preview shown"),
+        Err(e) => println!("POPUP preview failed: {e}"),
     })
     .map_err(|e| e.to_string())
 }
@@ -554,8 +718,8 @@ pub fn import_asset(path: String) -> Result<StoredAsset, String> {
         .map(|n| n.to_string_lossy().to_string())
         .ok_or_else(|| "the selected file has no name".to_string())?;
 
-    let accepted = devchievements_assets::accept(&name, &bytes, current)
-        .map_err(|e| e.to_string())?;
+    let accepted =
+        devchievements_assets::accept(&name, &bytes, current).map_err(|e| e.to_string())?;
 
     let destination = dir.join(&name);
     std::fs::write(&destination, &bytes).map_err(|e| e.to_string())?;
@@ -606,8 +770,8 @@ pub fn import_sound(path: String) -> Result<StoredAsset, String> {
         .map(|n| n.to_string_lossy().to_string())
         .ok_or_else(|| "the selected file has no name".to_string())?;
 
-    let accepted = devchievements_assets::accept(&name, &bytes, current)
-        .map_err(|e| e.to_string())?;
+    let accepted =
+        devchievements_assets::accept(&name, &bytes, current).map_err(|e| e.to_string())?;
 
     // A sound manager must not quietly accept an image.
     if accepted.format.is_image() {

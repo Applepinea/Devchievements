@@ -106,6 +106,26 @@ pub struct Settings {
     /// Whether the first-run wizard has been completed (spec 25).
     #[serde(default, rename = "onboardingCompleted")]
     pub onboarding_completed: bool,
+    /// Whether a normal launch stays in the tray instead of opening the window.
+    ///
+    /// Defaults to true because that is what a companion is: something that runs
+    /// quietly until it has something to say. A user who opens the window every
+    /// morning can turn it off, and then a launch behaves like any other app.
+    #[serde(default = "default_true", rename = "startHidden")]
+    pub start_hidden: bool,
+    /// Whether Windows starts the companion at sign-in.
+    ///
+    /// Off by default: installing software is a request to be present when asked,
+    /// not to run before the first login. Turning it on writes the Run key the
+    /// uninstaller already knows how to remove.
+    #[serde(default, rename = "startWithWindows")]
+    pub start_with_windows: bool,
+    /// UI language: `system`, `en` or `zh-CN`.
+    ///
+    /// Stored as a string rather than an enum so an unknown value from a newer
+    /// build degrades to "follow the system" instead of failing the whole file.
+    #[serde(default = "default_language", rename = "language")]
+    pub language: String,
 }
 
 fn default_true() -> bool {
@@ -118,6 +138,22 @@ fn default_volume() -> u8 {
 
 fn default_schema_version() -> u32 {
     SETTINGS_SCHEMA_VERSION
+}
+
+/// Keep the language value to the three the UI understands.
+///
+/// Anything else degrades to "follow the system": a value written by a newer build,
+/// or a hand-edited file, must not leave the window with no strings at all.
+pub fn normalize_language(value: &str) -> String {
+    match value {
+        "en" => "en".to_string(),
+        "zh-CN" => "zh-CN".to_string(),
+        _ => "system".to_string(),
+    }
+}
+
+fn default_language() -> String {
+    "system".to_string()
 }
 
 impl Default for Settings {
@@ -136,6 +172,9 @@ impl Default for Settings {
             filters: devchievements_filters::FilterSet::default(),
             popup: devchievements_themes::PopupStyle::default(),
             onboarding_completed: false,
+            start_hidden: true,
+            start_with_windows: false,
+            language: default_language(),
         }
     }
 }
@@ -198,6 +237,9 @@ impl Settings {
             user_achievements: self.user_achievements.clone(),
             filters: self.filters.clone(),
             popup: self.popup.clone(),
+            start_hidden: self.start_hidden,
+            start_with_windows: self.start_with_windows,
+            language: self.language.clone(),
         }
     }
 
@@ -217,5 +259,8 @@ impl Settings {
         self.user_achievements = document.user_achievements;
         self.filters = document.filters;
         self.popup = document.popup;
+        self.start_hidden = document.start_hidden;
+        self.start_with_windows = document.start_with_windows;
+        self.language = normalize_language(&document.language);
     }
 }

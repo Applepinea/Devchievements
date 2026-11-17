@@ -119,7 +119,10 @@ pub fn icon_for(achievement_id: &str) -> Option<String> {
         if !matches!(ext, "png" | "jpg" | "jpeg" | "webp" | "svg") {
             continue;
         }
-        return Some(format!("asset://localhost/{}", entry.path().to_string_lossy().replace('\\', "/")));
+        return Some(format!(
+            "asset://localhost/{}",
+            entry.path().to_string_lossy().replace('\\', "/")
+        ));
     }
     None
 }
@@ -181,6 +184,15 @@ pub fn show(app: &AppHandle, payload: &PopupPayload, counter: u64) -> Result<(),
     );
     place(&window, &style);
     let _ = window.show();
+
+    // Spec 44.4 measures "commit to notification" and needs a start and an end
+    // point that do not depend on an observer polling a log. `shown` is the window
+    // becoming visible; the page reports the painted frame separately, because only
+    // it knows when the first frame actually reached the screen.
+    // Deliberately not "POPUP shown": that string already means "one popup was
+    // presented" to the end-to-end tests, which count its occurrences, so a second
+    // line per popup would silently double every count.
+    println!("POPUP visible at={}", crate::now_millis());
 
     // Close from the Rust side: the page does not need a window API, and a page that
     // crashes still leaves a popup that disappears.
