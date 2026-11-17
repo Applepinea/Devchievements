@@ -22,6 +22,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::builder::{ComplexityLimits, RuleError, RuleExpr};
+use crate::StatisticsSnapshot;
 
 /// The longest name a user achievement may have.
 pub const MAX_NAME_LEN: usize = 60;
@@ -95,6 +96,58 @@ pub struct UserAchievement {
     pub rule: RuleExpr,
     /// Rule version, incremented by the caller when a rule changes meaning.
     pub version: u32,
+}
+
+impl UserAchievement {
+    /// Evaluate this achievement against the official statistics.
+    ///
+    /// Spec 22 lets a user rule read commits, merged pull requests, releases and the
+    /// longest streak; nothing else. The mapping lives here rather than at the call
+    /// site so a new metric cannot be silently fed a different number in the Engine
+    /// than in the editor's preview.
+    ///
+    /// A rule that runs out of its step budget reports `exhausted`; spec 22 requires it
+    /// to be treated as invalid and disabled, never as "not satisfied yet".
+    pub fn evaluate(&self, statistics: &StatisticsSnapshot) -> crate::builder::Evaluation {
+        let stats = crate::builder::UserStatistics {
+            commits: statistics.commit_count,
+            pull_requests_merged: statistics.pull_request_merged_count,
+            releases: statistics.release_count,
+            streak_days: statistics.longest_streak_days,
+        };
+        self.rule.evaluate(
+            &stats,
+            crate::builder::ComplexityLimits::default().max_steps,
+        )
+    }
+}
+
+/// Which user achievements became satisfied for the first time.
+///
+/// Already-unlocked ids are skipped before evaluation, not filtered afterwards: spec
+/// 22 (like spec 13.1 for built-ins) says an unlock is permanent, and an expensive
+/// rule that has already fired should not cost its budget on every commit.
+pub fn newly_satisfied(
+    achievements: &[UserAchievement],
+    statistics: &StatisticsSnapshot,
+    existing_unlocks: &[String],
+) -> Vec<String> {
+    achievements
+        .iter()
+        .filter(|a| !existing_unlocks.iter().any(|id| id == &a.id))
+        .filter(|a| {
+            let outcome = a.evaluate(statistics);
+            if outcome.exhausted {
+                // Visible rather than silent: the user is told the rule stopped working.
+                eprintln!(
+                    "user achievement {} exceeded its step budget and was skipped",
+                    a.id
+                );
+            }
+            outcome.satisfied && !outcome.exhausted
+        })
+        .map(|a| a.id.clone())
+        .collect()
 }
 
 /// Whether an id is a slug: lowercase alphanumerics and dashes, starting with a letter.
@@ -329,5 +382,88 @@ mod tests {
         let json = serde_json::to_string(&d).expect("serialise");
         println!("WIRE {json}");
         assert!(json.contains("\"op\""), "{json}");
+    }
+
+    #[test]
+    fn a_user_rule_unlocks_when_its_statistic_is_reached() {
+        let achievement = validate(&definition("ten-commits"), &[], ComplexityLimits::default())
+            .expect("valid rule");
+        let below = crate::StatisticsSnapshot {
+            commit_count: 9,
+            ..Default::default()
+        };
+        let reached = crate::StatisticsSnapshot {
+            commit_count: 10,
+            ..Default::default()
+        };
+        assert!(newly_satisfied(std::slice::from_ref(&achievement), &below, &[]).is_empty());
+        assert_eq!(
+            newly_satisfied(std::slice::from_ref(&achievement), &reached, &[]),
+            vec!["ten-commits".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_already_unlocked_user_rule_is_never_returned_again() {
+        let achievement = validate(&definition("ten-commits"), &[], ComplexityLimits::default())
+            .expect("valid rule");
+        let reached = crate::StatisticsSnapshot {
+            commit_count: 100,
+            ..Default::default()
+        };
+        let already = vec!["ten-commits".to_string()];
+        assert!(newly_satisfied(&[achievement], &reached, &already).is_empty());
+    }
+
+    #[test]
+    fn every_metric_a_user_rule_can_read_reaches_its_statistic() {
+        use crate::builder::{Condition, UserMetric};
+        use RuleExpr::Condition as Leaf;
+        let cases = [
+            (
+                UserMetric::Commits,
+                &crate::StatisticsSnapshot {
+                    commit_count: 5,
+                    ..Default::default()
+                },
+            ),
+            (
+                UserMetric::PullRequestsMerged,
+                &crate::StatisticsSnapshot {
+                    pull_request_merged_count: 5,
+                    ..Default::default()
+                },
+            ),
+            (
+                UserMetric::Releases,
+                &crate::StatisticsSnapshot {
+                    release_count: 5,
+                    ..Default::default()
+                },
+            ),
+            (
+                UserMetric::StreakDays,
+                &crate::StatisticsSnapshot {
+                    longest_streak_days: 5,
+                    ..Default::default()
+                },
+            ),
+        ];
+        for (metric, statistics) in cases {
+            let achievement = UserAchievement {
+                id: "metric-check".to_string(),
+                name: "Metric".to_string(),
+                description: String::new(),
+                rule: Leaf(Condition {
+                    metric,
+                    at_least: 5,
+                }),
+                version: 1,
+            };
+            assert!(
+                achievement.evaluate(statistics).satisfied,
+                "{metric:?} did not reach its statistic"
+            );
+        }
     }
 }

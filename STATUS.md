@@ -265,12 +265,14 @@ ALL CHECKS PASSED
 
 ## 已知问题（产品层面，未修）
 
-1. **自定义成就永远不会解锁。** `--add-achievement` 与设置页把定义写进
-   `settings.json` 的 `userAchievements`，但全仓没有任何代码把它交给 Engine：
-   `crates/achievements` 只导出「定义与校验」，`crates/core` 只评估内置成就。
-   于是用户做了成就、界面显示已保存、然后永远不触发。§22 要求它可用。
-   这是 2026-11-17 做性能夹具时发现的：本来想用 200 个阈值递增的自定义成就
-   产出 200 次通知，结果一条都没触发。**在修好之前不得宣传 Achievement Builder 可用。**
+1. ~~**自定义成就永远不会解锁。**~~ **已修复（2026-11-18）。** 原来的原因是：设置页把定义
+   写进 `settings.json` 的 `userAchievements`，但没有任何代码把它交给评估路径。
+   现在的链路是 `settings → CompanionConfig.user_rules → ingest_commit_with_rules`，
+   在同一事务内用**官方统计**判定，并复用内置成就的记录路径（解锁行、outbox、
+   导入时静默），所以两者不会出现语义分叉。GUI 在每次 drain 前重读规则，
+   删除的规则下一次提交就失效。回归由 `scripts/e2e/user-achievements.mjs` 守住：
+   真实 git 提交 → hook → helper → drain → 解锁。
+   **仍缺的**：Builder 的表单界面（目前只能写 JSON），所以状态仍是 `Partially Implemented`。
 1b. **渲染进程的异常现在会进日志。** 之前 UI 崩了只会得到空白窗口：webview 的控制台
    用户打不开，Rust 侧只知道「没有任何视图报告就绪」。已加 `ui_error` 命令与全局
    `error` / `unhandledrejection` 处理，异常会以 `UI ERROR ...` 出现在 companion.log。
@@ -316,6 +318,7 @@ ALL CHECKS PASSED
 | 日期 | 变更 |
 | --- | --- |
 | 2026-11-16（第一轮） | Phase 0 主体：环境勘察、隔离工具链、Monorepo、AGENTS/STATUS/spec 拆分/ADR、15 场景 Git 实验 + fixtures、WASM 验证、扩展构建 |
+| 2026-11-18（Phase 4b 第十二轮） | 修掉 §22 的功能缺口：自定义成就**真正会被评估**（同事务、官方统计、复用内置记录路径）；新增 `user-achievements` e2e；顺带让 headless companion 也读规则 |
 | 2026-11-18（Phase 4b 第十一轮） | 商店路线打通：MSIX 打包（真图标 / startupTask / 包内 bootstrapper）+ **helper 复制出包**，解决「hook 不能执行包内 exe」；`probe-packaged-app` 10 项实测通过 |
 | 2026-11-18（Phase 4b 第十轮） | 依赖检查前移到**安装期**：`installer-hooks.nsh` 校验 WebView2 磁盘文件、内嵌官方 bootstrapper、失败退出码 2 且不留任何文件；`webviewInstallMode` 改为 skip 避免双份逻辑；Git 缺失只警告 |
 | 2026-11-17（Phase 4b 第九轮） | 诊断导出补齐 §26.2 的「原始信息 + 明确警告」：`--export-diagnostics [--raw]` + 设置页入口，警告写进文件；WebView2 检测改为**校验磁盘文件**而非只读注册表（虚拟机已证实注册表会撒谎） |
@@ -344,7 +347,7 @@ ALL CHECKS PASSED
 | 4a.5 | Asset Manager | `Tested` | 导入/删除 + **接入弹窗渲染**；`asset-import` 9 项、`popup` 10 项 |
 | 4a.6 | Popup Editor | `Tested` | 宽/缩放/角落/边距/时长/圆角/图标尺寸/透明度/动画/模糊 + 实时预览；`popup` 11 项 |
 | 4a.7 | Event Filters 界面 | `Tested` | 设置页可编辑；9 项 e2e 含「不影响官方统计」 |
-| 4a.8 | Achievement Builder（JSON 模式） | `Partially Implemented` | 定义校验与存储已测（12+12 项）；**表单界面未做**；**且 `userAchievements` 从未被 Engine 评估，永远不会解锁**（2026-11-17 性能测试时发现，见下方已知问题） |
+| 4a.8 | Achievement Builder（JSON 模式） | `Partially Implemented`（仅缺表单界面） | 定义校验与存储 12+12 项；**用户规则现已接入评估**：`ingest_commit_with_rules` 在同一事务内用官方统计判定并复用内置成就的记录路径；`user-achievements` e2e 6 项（真实 git 提交 → hook → helper → drain → 解锁）；**表单界面仍未做** |
 | 4a.9 | 配置完整导入导出 | `Tested` | 11 个单元测试 + 18 项 e2e，含「失败不改变现状」 |
 
 ---

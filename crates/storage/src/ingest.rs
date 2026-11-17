@@ -170,6 +170,32 @@ pub async fn ingest_commit(
     identity: &Identity,
     ctx: &InjectedContext<'_>,
 ) -> StorageResult<IngestOutcome> {
+    ingest_commit_with_rules(pool, event, facts, now_ms, identity, ctx, &[]).await
+}
+
+/// Ingest a commit, also evaluating the user's own achievement rules (spec 22).
+///
+/// The rules come from the caller because they live in the settings document, not
+/// in the database: storage never reads the settings file, and the engine never
+/// reads the file system. Passing them here keeps both of those true.
+///
+/// # Why user unlocks are decided here and not in the Engine
+///
+/// The Engine contract is `(snapshot, event, context)`, and the snapshot carries
+/// the ids already unlocked but not the rules themselves. Rather than widen a
+/// contract every Golden Test depends on, the user rules are evaluated against the
+/// same official statistics, in the same transaction, immediately after the
+/// built-ins. Both kinds then share one code path for recording the unlock, which
+/// is what stops them drifting apart.
+pub async fn ingest_commit_with_rules(
+    pool: &SqlitePool,
+    event: &Event,
+    facts: &CommitFacts,
+    now_ms: i64,
+    identity: &Identity,
+    ctx: &InjectedContext<'_>,
+    user_rules: &[devchievements_core::achievements::definition::UserAchievement],
+) -> StorageResult<IngestOutcome> {
     ingest_commit_inner(
         pool,
         event,
@@ -178,6 +204,7 @@ pub async fn ingest_commit(
         identity,
         ctx,
         NotificationPolicy::Inform,
+        user_rules,
     )
     .await
 }
@@ -199,6 +226,7 @@ pub async fn ingest_import(
         identity,
         ctx,
         NotificationPolicy::Silent,
+        &[],
     )
     .await
 }
@@ -212,6 +240,7 @@ async fn ingest_commit_inner(
     identity: &Identity,
     ctx: &InjectedContext<'_>,
     policy: NotificationPolicy,
+    user_rules: &[devchievements_core::achievements::definition::UserAchievement],
 ) -> StorageResult<IngestOutcome> {
     // Spec 7 precondition, checked FIRST and before any write: with no configured
     // email there is no way to decide whether this commit is the user's, and
@@ -295,12 +324,53 @@ async fn ingest_commit_inner(
 
     let output = Engine.evaluate_commit(&snapshot, facts, event.event_id.as_str(), ctx);
 
+    // Spec 22: the user's own rules are judged against the same official statistics
+    // the built-ins use, and inside the same transaction, so a rule can never unlock
+    // without the commit that caused it being recorded.
+    let user_unlocks = if user_rules.is_empty() {
+        Vec::new()
+    } else {
+        let statistics = devchievements_core::achievements::StatisticsSnapshot {
+            commit_count: crate::projections::repository_commit_count(
+                pool,
+                event.canonical_repository_id.as_str(),
+            )
+            .await
+            .unwrap_or(0)
+            .saturating_add(1),
+            ..Default::default()
+        };
+        let already = crate::projections::unlocked_achievement_ids(pool).await?;
+        devchievements_core::achievements::definition::newly_satisfied(
+            user_rules,
+            &statistics,
+            &already,
+        )
+    };
+
     // ---- apply projection changes ----
     projections::apply_state_changes(&mut tx, event, &output.state_changes, now_ms).await?;
 
     // ---- queue intents ----
+    // User rules produce the same intent shape as built-ins, so the recording code
+    // below -- unlock row, outbox row, silent-during-import rule -- is shared rather
+    // than duplicated for a second achievement system.
+    let mut intents = output.side_effect_intents.clone();
+    for achievement_id in user_unlocks {
+        intents.push(devchievements_core::SideEffectIntent {
+            notification_id: format!("ach:{achievement_id}:{}", event.event_id.as_str()),
+            kind: devchievements_core::SideEffectKind::AchievementUnlocked {
+                achievement_id,
+                source: if policy == NotificationPolicy::Silent {
+                    devchievements_core::UnlockSourceTag::Import
+                } else {
+                    devchievements_core::UnlockSourceTag::Realtime
+                },
+            },
+        });
+    }
     let mut queued = Vec::new();
-    for intent in &output.side_effect_intents {
+    for intent in &intents {
         let (kind, payload) = match &intent.kind {
             SideEffectKind::CommitRecorded => ("commit_recorded", "{}".to_string()),
             SideEffectKind::DailyRankUpgrade { rank } => (

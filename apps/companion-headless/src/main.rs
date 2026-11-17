@@ -114,7 +114,23 @@ async fn run() -> Result<ExitCode, Box<dyn std::error::Error>> {
     let pool = devchievements_storage::open(&data_dir.join("companion.db")).await?;
     devchievements_storage::ingest::migrate(&pool).await?;
 
-    let config = CompanionConfig::new(data_dir.join("spool"), "Asia/Taipei");
+    let mut config = CompanionConfig::new(data_dir.join("spool"), "Asia/Taipei");
+    // Spec 22: the user's own rules live in the settings document. The GUI refreshes
+    // them before every drain; the headless companion reads them once, because it is
+    // short-lived by design.
+    config.user_rules = std::fs::read_to_string(data_dir.join("settings.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|value| {
+            serde_json::from_value(
+                value
+                    .get("userAchievements")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+            )
+            .ok()
+        })
+        .unwrap_or_default();
     let companion = Companion::new(pool.clone(), config);
     let processor = OutboxProcessor::new(pool.clone());
 

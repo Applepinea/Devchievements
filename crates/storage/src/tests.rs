@@ -534,3 +534,77 @@ async fn data_survives_closing_and_reopening_the_database() {
     );
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// Spec 22 end to end: a user's own rule must unlock on the commit that satisfies it.
+///
+/// This is the test that would have caught the product shipping a Builder whose
+/// achievements could be created, stored, and never unlocked: nothing above the
+/// storage layer reads the rules, so the wiring has to be proven here.
+#[tokio::test]
+async fn a_user_rule_unlocks_at_its_threshold_and_only_once() {
+    use devchievements_core::achievements::builder::{Condition, RuleExpr, UserMetric};
+    use devchievements_core::achievements::definition::UserAchievement;
+
+    let rule = UserAchievement {
+        id: "three-commits".to_string(),
+        name: "Three Commits".to_string(),
+        description: "Reach three commits".to_string(),
+        rule: RuleExpr::Condition(Condition {
+            metric: UserMetric::Commits,
+            at_least: 3,
+        }),
+        version: 1,
+    };
+    let rules = [rule];
+
+    let pool = temp_pool("user-rule").await;
+    let facts = ingest::commit_facts(1, false);
+    let mut fx = fixture();
+    let ctx = fx.ctx();
+    let identity = configured_identity();
+
+    for (index, sha_byte) in ["c", "d"].iter().enumerate() {
+        let event = commit_event(&sha_byte.repeat(40), 1_794_787_200_000, "2026-11-16");
+        let outcome =
+            ingest::ingest_commit_with_rules(&pool, &event, &facts, 0, &identity, &ctx, &rules)
+                .await
+                .expect("ingest");
+        assert!(matches!(outcome, IngestOutcome::Ingested { .. }));
+        assert!(
+            !projections::unlocked_achievement_ids(&pool)
+                .await
+                .expect("ids")
+                .contains(&"three-commits".to_string()),
+            "unlocked after only {} commits",
+            index + 1
+        );
+    }
+
+    let third = commit_event(&"e".repeat(40), 1_794_787_200_000, "2026-11-16");
+    ingest::ingest_commit_with_rules(&pool, &third, &facts, 0, &identity, &ctx, &rules)
+        .await
+        .expect("ingest");
+    assert!(
+        projections::unlocked_achievement_ids(&pool)
+            .await
+            .expect("ids")
+            .contains(&"three-commits".to_string()),
+        "the third commit must unlock the user rule"
+    );
+
+    // A fourth commit must not queue a second celebration for the same achievement.
+    let fourth = commit_event(&"f".repeat(40), 1_794_787_200_000, "2026-11-16");
+    ingest::ingest_commit_with_rules(&pool, &fourth, &facts, 0, &identity, &ctx, &rules)
+        .await
+        .expect("ingest");
+    let queued: Vec<(String,)> =
+        sqlx::query_as("SELECT payload FROM outbox WHERE kind = 'achievement_unlocked'")
+            .fetch_all(&pool)
+            .await
+            .expect("outbox");
+    let celebrations = queued
+        .iter()
+        .filter(|(payload,)| payload.contains("three-commits"))
+        .count();
+    assert_eq!(celebrations, 1, "one unlock, one celebration");
+}

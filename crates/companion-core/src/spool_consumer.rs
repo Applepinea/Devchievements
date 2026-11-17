@@ -40,6 +40,11 @@ pub struct CompanionConfig {
     pub timezone: String,
     /// Day boundary in minutes from local midnight (spec 12).
     pub day_start_minutes: u16,
+    /// The user's own achievement rules (spec 22).
+    ///
+    /// They live in the settings document, which the storage layer never reads and
+    /// the Engine never receives, so they arrive through the caller that owns both.
+    pub user_rules: Vec<devchievements_achievements::definition::UserAchievement>,
 }
 
 impl CompanionConfig {
@@ -49,6 +54,7 @@ impl CompanionConfig {
             spool_dir: spool_dir.into(),
             timezone: timezone.into(),
             day_start_minutes: 0,
+            user_rules: Vec::new(),
         }
     }
 }
@@ -97,6 +103,18 @@ impl Companion {
     /// The configuration in force.
     pub fn config(&self) -> &CompanionConfig {
         &self.config
+    }
+
+    /// Swap in the user's current achievement rules.
+    ///
+    /// Rules are edited while the app runs, so the drain asks for them each time
+    /// rather than taking a snapshot at startup: a rule the user just deleted must
+    /// stop firing on the very next commit.
+    pub fn replace_user_rules(
+        &mut self,
+        rules: Vec<devchievements_achievements::definition::UserAchievement>,
+    ) {
+        self.config.user_rules = rules;
     }
 
     /// Drain the Spool once.
@@ -194,7 +212,16 @@ impl Companion {
 
         let _ = Engine; // the Engine is invoked inside ingest_commit
 
-        match ingest::ingest_commit(&self.pool, &event, &facts, now_millis(), identity, &ctx).await
+        match ingest::ingest_commit_with_rules(
+            &self.pool,
+            &event,
+            &facts,
+            now_millis(),
+            identity,
+            &ctx,
+            &self.config.user_rules,
+        )
+        .await
         {
             Ok(IngestOutcome::Ingested {
                 queued_notifications,

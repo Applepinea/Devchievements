@@ -640,6 +640,11 @@ fn spawn_drain_loop(app: tauri::AppHandle) {
                 pool.clone(),
                 CompanionConfig::new(data_dir.join("spool"), "Asia/Taipei"),
             );
+            // Spec 22: the user's own achievement rules live in the settings
+            // document, so they are read fresh before every drain rather than once
+            // at startup: a rule created five seconds ago must be able to fire on
+            // the next commit, and one deleted must stop firing immediately.
+            let mut companion = companion;
             let processor = OutboxProcessor::new(pool);
             let mut sink = DesktopSink { app: app.clone() };
 
@@ -647,6 +652,9 @@ fn spawn_drain_loop(app: tauri::AppHandle) {
             let _ = processor.recover_after_crash().await;
 
             loop {
+                companion.replace_user_rules(
+                    settings::Settings::load(&settings_path()).user_achievements,
+                );
                 match companion.drain_once(&identity).await {
                     Ok(report) if report.refused > 0 => {
                         // Visibility matters: a silent refusal looks like a broken app.
