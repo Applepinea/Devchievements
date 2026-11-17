@@ -7,7 +7,7 @@
 >
 > **不可混淆的五件事**（AGENTS.md §10）：代码已写 / 构建已过 / 自动化测试已过 / 实际运行测试已过 / 平台兼容性已验证。
 >
-> 最后更新：2026-11-16 —— **Phase 0 结束（第二轮：回填遗漏交付物 + 解除两项阻塞）**
+> 最后更新：2026-11-17 —— **Phase 4b 进行中（安装包打通、更新机制接入、发布流水线就位）**
 
 ---
 
@@ -20,14 +20,21 @@ node scripts/verify.mjs
 当前结果（真实执行，非推测）：
 
 ```text
-PASS  fmt                       174 ms
-PASS  clippy                    822 ms
-PASS  test                ~11.7 s   237 tests passed, 0 failed
-PASS  build                    3982 ms
-PASS  build-wasm                396 ms
-PASS  extension-build         10371 ms
+PASS  fmt                      1245 ms
+PASS  clippy                   3876 ms
+PASS  test                    15657 ms   440 tests, 48 suites, 0 failed
+PASS  build                    1664 ms
+PASS  build-wasm                548 ms
+PASS  desktop-ui-build         2476 ms
+PASS  desktop-build           11184 ms
+PASS  extension-build         10234 ms
+PASS  extension-test            218 ms
 ALL CHECKS PASSED
 ```
+
+桌面应用是**独立**的 cargo 工程（不能用 workspace 的 GNU 工具链），所以它的测试不在
+`verify.mjs` 里，要单独跑：`scripts/dev/build-desktop.bat test`（当前 6 个测试，
+覆盖更新前的数据库快照/回滚与公钥漂移检查）。
 
 原始日志与机器可读摘要：`.verify/`
 
@@ -226,8 +233,11 @@ ALL CHECKS PASSED
 | WASM 实例化 | 0.606 ms | — | ✅ |
 | native ↔ wasm 输出一致性 | 逐字节相同 | 相同 | ✅ |
 | SQLite 真实往返测试 | 5 个通过 | — | ✅ |
-| Commit → 通知 p95 | **未测量** | < 500 ms | ⏸ 无 Companion |
-| 空闲 CPU | **未测量** | < 1% | ⏸ 无 Companion |
+| **Hook 耗时（出货 helper，p95，n=200）** | **10.81 ms**（p50 9.35） | < 50 ms | ✅ 2026-11-17 实测 |
+| **Commit → 通知 p95（n=200，声音起播）** | **274 / 328 ms**（两次独立运行，p50 ≈ 261） | < 500 ms | ✅ 修掉 500 ms 轮询后 |
+| Commit → 弹窗首帧（n=1） | 387–424 ms | < 500 ms | 🟡 样本太少，不作结论 |
+| **空闲 CPU（仅托盘，45 s）** | **0.12% 整机 / 2.40% 单核** | < 1% | ✅ 整机口径；**开窗口未测** |
+| 修轮询前的 Commit → 通知 p95 | 1004 ms（p50 737） | < 500 ms | ❌ 已修 |
 
 > 每个数字都能在 `.verify/` 或 `scripts/**/.out/*.json` 找到原始样本。未实测的格子明确标注「未测量」。
 
@@ -250,6 +260,29 @@ ALL CHECKS PASSED
 | 沙箱禁止浏览器启动 | MV3 CSP、扩展端到端、Native Messaging 联调 | 沙箱外运行，或手动加载扩展验证 |
 | 沙箱禁止 `sh.exe` | shell 钩子链式执行、`git submodule add` | 中立环境复测 |
 | 无 GitHub 仓库 | CI 从未运行；多 Git 版本矩阵无法执行 | 用户创建仓库并授权 |
+
+---
+
+## 已知问题（产品层面，未修）
+
+1. **自定义成就永远不会解锁。** `--add-achievement` 与设置页把定义写进
+   `settings.json` 的 `userAchievements`，但全仓没有任何代码把它交给 Engine：
+   `crates/achievements` 只导出「定义与校验」，`crates/core` 只评估内置成就。
+   于是用户做了成就、界面显示已保存、然后永远不触发。§22 要求它可用。
+   这是 2026-11-17 做性能夹具时发现的：本来想用 200 个阈值递增的自定义成就
+   产出 200 次通知，结果一条都没触发。**在修好之前不得宣传 Achievement Builder 可用。**
+1b. **渲染进程的异常现在会进日志。** 之前 UI 崩了只会得到空白窗口：webview 的控制台
+   用户打不开，Rust 侧只知道「没有任何视图报告就绪」。已加 `ui_error` 命令与全局
+   `error` / `unhandledrejection` 处理，异常会以 `UI ERROR ...` 出现在 companion.log。
+   **这是被一次真实事故逼出来的**：向导里把 `useState` 写在依赖它的 `useEffect` 之后，
+   压缩后变成 TDZ（`Cannot access 'y' before initialization`），窗口全白。
+2. **成就名与等级名尚未本地化。** 界面已中英双语（4b.6），但内置成就目录
+   （`First Commit`、`Common Day`…）和隐私模式通用文案来自 Rust 侧，仍是英文。
+   **等成就列表定稿后再做**：现在就翻会在目录变动时白改一轮（用户 2026-11-17 决定）。
+   补齐方式是让 Rust 也读语言设置、在生成文案时选语言。
+3. **一个坏字段会重置整份设置。** `settings.json` 解析失败时整体回退到默认值，
+   所以手改文件时把 `popup` 写成 `{"displaySeconds":1}`（缺必填字段）会连 `emails` 一起丢，
+   应用随后退化成「从 git config 猜身份」。同一现象在做性能夹具时踩到。
 
 ---
 
@@ -283,6 +316,15 @@ ALL CHECKS PASSED
 | 日期 | 变更 |
 | --- | --- |
 | 2026-11-16（第一轮） | Phase 0 主体：环境勘察、隔离工具链、Monorepo、AGENTS/STATUS/spec 拆分/ADR、15 场景 Git 实验 + fixtures、WASM 验证、扩展构建 |
+| 2026-11-17（Phase 4b 第九轮） | 诊断导出补齐 §26.2 的「原始信息 + 明确警告」：`--export-diagnostics [--raw]` + 设置页入口，警告写进文件；WebView2 检测改为**校验磁盘文件**而非只读注册表（虚拟机已证实注册表会撒谎） |
+| 2026-11-17（Phase 4b 第八轮） | 修「UI 白屏即可无从诊断」：加 `ui_error` 与全局错误上报（这次就是靠它定位到 TDZ 崩溃）；补无 WebView2 时的原生消息框兜底（`exit(2)`，CLI 豁免）；`webviewInstallMode` 由默认改为显式 |
+| 2026-11-17（Phase 4b 第七轮） | 向导改为七步：新增依赖预检（WebView2 注册表 + Git）与浏览器扩展引导；`open_external` 只放行 http(s) 且不弹控制台；修掉「Repositories 页可装 hook」这句不实承诺 |
+| 2026-11-17（Phase 4b 第六轮） | 多语言：英文原文作 key + 中文词典（178 条全覆盖），设置页语言选择、`system` 跟随系统；弹窗写死中文的问题一并修掉；新增 `check-i18n.mjs` 与 e2e 语言断言 |
+| 2026-11-17（Phase 4b 第五轮） | 修「首启不走向导」：两个 builder 命令清单漂移（真实启动缺 `onboarding_status`/`install_hooks`），改为单一宏；`wizard` e2e 增加真实启动路径与重置流程（18 项）；新增设置页「Re-run setup」与 `--reset-onboarding` |
+| 2026-11-17（Phase 4b 第四轮） | 新增「开机自启动」设置：写 `HKCU\...\Run`（卸载器同款名字）、启动时校准、改开关即时生效、`--autostart status/on/off`；判定逻辑测试通过，注册表写入受沙箱限制未验证 |
+| 2026-11-17（Phase 4b 第三轮） | 修 release 无控制台启动即崩（日志重定向到 `companion.log`）、内置音效未打包；新增「启动时隐藏到托盘」设置（含配置导出兼容）；桌面启动器改为无终端窗口 |
+| 2026-11-17（Phase 4b 第二轮） | §44.1 性能实测：hook p95 10.81 ms、commit→通知 p95 274/328 ms、空闲 CPU 0.12% 整机；修掉 500 ms 轮询导致的超预算（p95 1004 → 274）；顺带发现「自定义成就永不评估」并改记已知问题 |
+| 2026-11-17（Phase 4b 第一轮） | 安装包打通（NSIS 工具集预置，签名产物 `.sig`）+ `installer` 真机 e2e；Tauri Updater 接入与数据库快照/回滚（6 个测试）；`release.yml` 发布流水线与工作流 linter |
 | 2026-11-16（第二轮） | 补齐 §48.3 风险分析与 §48.5 实施计划；**解除 SQLite/SQLx 与 gix 两项阻塞**；ADR-0002 改为三方案实测；新增 `scripts/verify.mjs` 一键验证（42 测试全绿） |
 
 ---
@@ -300,8 +342,32 @@ ALL CHECKS PASSED
 | 4a.5 | Asset Manager | `Tested` | 导入/删除 + **接入弹窗渲染**；`asset-import` 9 项、`popup` 10 项 |
 | 4a.6 | Popup Editor | `Tested` | 宽/缩放/角落/边距/时长/圆角/图标尺寸/透明度/动画/模糊 + 实时预览；`popup` 11 项 |
 | 4a.7 | Event Filters 界面 | `Tested` | 设置页可编辑；9 项 e2e 含「不影响官方统计」 |
-| 4a.8 | Achievement Builder（JSON 模式） | `Partially Implemented` | 定义校验与存储已测（12+12 项）；**表单界面未做** |
+| 4a.8 | Achievement Builder（JSON 模式） | `Partially Implemented` | 定义校验与存储已测（12+12 项）；**表单界面未做**；**且 `userAchievements` 从未被 Engine 评估，永远不会解锁**（2026-11-17 性能测试时发现，见下方已知问题） |
 | 4a.9 | 配置完整导入导出 | `Tested` | 11 个单元测试 + 18 项 e2e，含「失败不改变现状」 |
+
+---
+
+## Phase 4b 任务表（产品化与发布准备）
+
+> 用户以「继续做phase4b」批准进入。详细过程见
+> [phase-4b-progress.md](docs/development/phase-4b-progress.md)。
+
+| # | 任务 | 状态 | 证据 / 缺口 |
+| --- | --- | --- | --- |
+| 4b.1 | Windows 安装包（NSIS） | `Tested` | 构建出安装包并签名；`scripts/e2e/installer.mjs` 真机装/跑/卸，含「卸载不删数据」 |
+| 4b.2 | 更新机制（Tauri Updater，§40.3） | `Partially Implemented` | 插件+公钥+签名产物就位；数据库快照/回滚 6 个测试；**无发布 feed、设置页未接按钮、真实下载安装未验证** |
+| 4b.3 | 发布流水线（§40.2） | `Platform Unverified` | `.github/workflows/release.yml` + 工作流 linter；本机无法执行 GitHub Actions，从未真正跑过 |
+| 4b.4 | 平台签名（§40.4） | `Blocked` | 无 Authenticode 证书 → 安装包没有代码签名，SmartScreen 会警告；**更新签名（`.sig`）已做，两者不可互相替代** |
+| 4b.5 | 数据迁移（§26.4） | `In Progress` | 更新前后快照/还原路径已测；数据库迁移兼容旧版本尚未做 |
+| 4b.6 | 多语言（§40.1） | `Tested` | 英文原文当 key + 简体中文字典（178/178）；`system` 跟随 webview locale；`UI LANGUAGE lang=… sample=…` 由 e2e 断言查表真的发生；`check-i18n.mjs` 守漏译 |
+| 4b.7 | 性能优化（§40.1 / §44.1） | `Partially Implemented` | 三个目标已实测达标（hook p95 10.81 ms、commit→通知 p95 280 ms、空闲 CPU 0.12% 整机），并修掉一处 500 ms 轮询导致的超预算；**开窗口时的空闲 CPU、以及 §44.3 的并发/损坏场景未测** |
+| 4b.8 | 错误恢复（§40.1） | `Partially Implemented` | 崩溃恢复、更新失败回滚已测；其余错误路径未逐一评估 |
+| 4b.9 | 完整隐私设置（§40.1） | `Tested` | 隐私模式/托盘开关/日志脱敏；诊断导出默认脱敏、`--raw` 与设置页勾选才含真实仓库名，**警告写进文件本身**；`diagnostics-export` e2e 9 项 |
+| 4b.10 | 启动行为：可选隐藏到托盘 | `Tested` | 设置页开关 + `startHidden`（默认 true）；`STARTUP hidden=` 日志对两种取值都有断言；配置导出对旧文件兼容 |
+| 4b.11 | 首次运行向导可达性 | `Tested` | 根因：两个 builder 的命令清单漂移，`onboarding_status`/`install_hooks` 在真实启动里缺失；已收进单一宏 `app_commands!()`。`wizard` e2e 18 项，含**真实启动路径**断言与「重跑向导」 |
+| 4b.14 | 无 WebView2 的原生兜底 | `Partially Implemented` | 建窗口前检查运行库，缺失则弹原生中英双语消息框（含下载入口）并 `exit(2)`；CLI 模式豁免；`--webview2-prompt` 可人工验证。**真正的缺运行库机器未验证** |
+| 4b.13 | 启动前置检查 + 扩展引导（§25） | `Partially Implemented` | 向导七步，新增 `checks`（WebView2 注册表 + Git 双路径探测）与 `extension` 引导；`dependencies` e2e 5 项；**缺依赖时的提示文字本机无法验证** |
+| 4b.12 | 开机自启动 | `Partially Implemented` | 默认关；写 `HKCU\...\Run\Devchievements`（与卸载器删除的名字一致）；判定逻辑 4 个测试 + `--autostart` 命令；**注册表写入在本环境的沙箱内被拒绝（WIN32_ERROR(5)），真机行为未验证** |
 
 ---
 
