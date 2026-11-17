@@ -10,6 +10,8 @@ import {
   type FilterSet,
   type StoredAsset,
   importAsset,
+  importSound,
+  availableSounds,
   listAssets,
   removeAsset,
   showPreview,
@@ -45,7 +47,7 @@ function AddExclusion({ onAdd }: { onAdd: (id: string) => void }) {
  * The dialog plugin's JS API is a separate package; calling the command it exposes
  * keeps this file free of another dependency.
  */
-async function openFileDialog(): Promise<string | null> {
+async function openFileDialog(extensions: string[] = ["png", "jpg", "jpeg", "webp", "svg", "wav", "mp3", "ogg"]): Promise<string | null> {
   const w = window as unknown as {
     __TAURI_INTERNALS__?: { invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> };
   };
@@ -55,7 +57,7 @@ async function openFileDialog(): Promise<string | null> {
     const picked = await api.invoke<{ path?: string } | null>("plugin:dialog|open", {
       options: {
         multiple: false,
-        filters: [{ name: "Image or sound", extensions: ["png", "jpg", "jpeg", "webp", "svg", "wav", "mp3", "ogg"] }],
+        filters: [{ name: "Supported files", extensions }],
       },
     });
     // The plugin returns a string on some versions and { path } on others.
@@ -75,7 +77,29 @@ export default function Settings() {
   const [backupNotice, setBackupNotice] = useState<string>("");
   const [previewNotice, setPreviewNotice] = useState<string>("");
   const [assetNotice, setAssetNotice] = useState<string>("");
+  const [soundNotice, setSoundNotice] = useState<string>("");
+
+  const pickSound = async () => {
+    const chosen = await openFileDialog(["wav"]);
+    if (!chosen) return;
+    try {
+      await importSound(chosen);
+      setSoundNotice("Imported.");
+      await refreshSounds();
+    } catch (e) {
+      setSoundNotice("Refused: " + (e instanceof Error ? e.message : String(e)));
+    }
+  };
   const [assets, setAssets] = useState<StoredAsset[]>([]);
+  const [sounds, setSounds] = useState<string[]>([]);
+
+  const refreshSounds = useCallback(async () => {
+    try {
+      setSounds(await availableSounds());
+    } catch {
+      // Cosmetic; a failure must not break the page.
+    }
+  }, []);
 
   const refreshAssets = useCallback(async () => {
     try {
@@ -151,7 +175,8 @@ export default function Settings() {
   useEffect(() => {
     void load();
     void refreshAssets();
-  }, [load, refreshAssets]);
+    void refreshSounds();
+  }, [load, refreshAssets, refreshSounds]);
 
   const save = async () => {
     if (!settings) return;
@@ -403,6 +428,18 @@ export default function Settings() {
         <button onClick={() => void preview()}>Preview popup</button>
         <span className="notice">{previewNotice}</span>
       </div>
+
+      <h3>Sounds</h3>
+      <p className="muted">
+        Available sounds. Import a WAV to replace one: a file named after a slot
+        (for example commitment) becomes selectable, and an override pointing at it
+        is what actually changes playback.
+      </p>
+      <div className="row">
+        <button onClick={() => void pickSound()}>Import sound…</button>
+        <span className="notice">{soundNotice}</span>
+      </div>
+      <p className="tiny">{sounds.join(" · ") || "No sounds found."}</p>
 
       <h3>Custom assets</h3>
       <p className="muted">

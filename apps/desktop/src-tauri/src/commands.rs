@@ -579,6 +579,61 @@ pub fn remove_asset(name: String) -> Result<(), String> {
     std::fs::remove_file(path).map_err(|e| e.to_string())
 }
 
+/// Import a sound file into the assets directory.
+///
+/// Same validation as any asset: the bytes decide the type, so a renamed document
+/// is refused. Only audio formats are accepted here, because this command is the
+/// one the Sound Manager calls.
+#[tauri::command]
+pub fn import_sound(path: String) -> Result<StoredAsset, String> {
+    let source = std::path::Path::new(&path);
+    let bytes = std::fs::read(source).map_err(|e| e.to_string())?;
+
+    let dir = assets_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let current: u64 = std::fs::read_dir(&dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|e| e.metadata().ok().map(|m| m.len()))
+                .sum()
+        })
+        .unwrap_or(0);
+
+    let name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| "the selected file has no name".to_string())?;
+
+    let accepted = devchievements_assets::accept(&name, &bytes, current)
+        .map_err(|e| e.to_string())?;
+
+    // A sound manager must not quietly accept an image.
+    if accepted.format.is_image() {
+        return Err(format!("{name} is an image, not a sound"));
+    }
+
+    let destination = dir.join(&name);
+    std::fs::write(&destination, &bytes).map_err(|e| e.to_string())?;
+
+    println!("SOUND imported name={name}");
+    Ok(StoredAsset {
+        name,
+        format: accepted.format.extension().to_string(),
+        bytes: accepted.bytes as i64,
+    })
+}
+
+/// Import a sound from a path, for the CLI and tests.
+///
+/// Also reports which sound ids are now available, so a caller can see the effect.
+/// The dialog is the normal route; a test cannot click one.
+#[tauri::command]
+pub fn available_sounds() -> Vec<String> {
+    crate::audio::available_sound_ids()
+}
+
 /// Open the settings window (used by the dashboard shortcut).
 #[tauri::command]
 pub fn open_window(app: tauri::AppHandle) -> Result<(), String> {

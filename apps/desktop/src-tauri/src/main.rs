@@ -1113,6 +1113,24 @@ fn main() {
         }
     }
 
+    // Import a sound from a path. The dialog only produces the path this takes.
+    if let Some(i) = std::env::args().position(|a| a == "--import-sound") {
+        let Some(path) = std::env::args().nth(i + 1) else {
+            println!("SOUND FAILED: --import-sound needs a path");
+            std::process::exit(2);
+        };
+        match commands::import_sound(path) {
+            Ok(asset) => {
+                println!("SOUND OK name={} format={}", asset.name, asset.format);
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("SOUND FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     if std::env::args().any(|a| a == "--capabilities") {
         let caps = current_capabilities();
         let report = serde_json::json!({
@@ -1245,6 +1263,8 @@ fn main() {
             commands::list_assets,
             commands::import_asset,
             commands::remove_asset,
+            commands::import_sound,
+            commands::available_sounds,
             commands::open_data_folder,
             commands::clear_data,
             commands::onboarding_status,
@@ -1254,6 +1274,8 @@ fn main() {
             commands::list_assets,
             commands::import_asset,
             commands::remove_asset,
+            commands::import_sound,
+            commands::available_sounds,
             commands::open_data_folder,
             commands::clear_data,
             commands::restore_database,

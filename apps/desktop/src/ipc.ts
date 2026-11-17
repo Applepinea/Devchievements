@@ -236,4 +236,6 @@ export interface StoredAsset {
 export const listAssets = () => invoke<StoredAsset[]>("list_assets");
 export const importAsset = (path: string) => invoke<StoredAsset>("import_asset", { path });
 export const removeAsset = (name: string) => invoke<void>("remove_asset", { name });
+export const importSound = (path: string) => invoke<StoredAsset>("import_sound", { path });
+export const availableSounds = () => invoke<string[]>("available_sounds");
 export const uiReady = (view: string) => invoke<void>("ui_ready", { view });

@@ -25,18 +25,46 @@ fn sounds_dir() -> PathBuf {
         .join("sounds")
 }
 
+/// Where imported sounds live.
+///
+/// Separate from the built-in sounds next to the executable: updates replace the
+/// built-in set, and user files must survive that.
+fn custom_sounds_dir() -> PathBuf {
+    crate::default_data_dir().join("assets")
+}
+
+/// Every sound file, from both the built-in and the user directory.
+fn sound_dirs() -> [PathBuf; 2] {
+    [custom_sounds_dir(), sounds_dir()]
+}
+
+/// Resolve a sound id to a file, preferring the user's imported copy.
+///
+/// User files win: an import is an explicit statement of preference, and the
+/// built-in of the same name is what the user wanted to replace.
+fn sound_path(id: &str) -> Option<PathBuf> {
+    for dir in sound_dirs() {
+        let candidate = dir.join(format!("{id}.wav"));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 /// The ids that actually resolved to a file on disk.
 fn available() -> std::collections::BTreeSet<String> {
-    let dir = sounds_dir();
     let mut set = std::collections::BTreeSet::new();
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return set;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("wav") {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                set.insert(stem.to_string());
+    for dir in sound_dirs() {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("wav") {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    set.insert(stem.to_string());
+                }
             }
         }
     }
@@ -177,10 +205,11 @@ pub fn play_for_with(
     }
     // The user's Sound Manager choices decide which file plays (spec 19).
     let selection = select(request, overrides, &available());
-    let file = sounds_dir().join(format!("{}.wav", selection.sound));
-    if !file.exists() {
+    // sound_path only returns a file it has already stat-ed, so a missing file
+    // degrades silently instead of failing the notification (spec 19).
+    let Some(file) = sound_path(&selection.sound) else {
         return Some(selection);
-    }
+    };
     let Ok(bytes) = std::fs::read(&file) else {
         return Some(selection);
     };
