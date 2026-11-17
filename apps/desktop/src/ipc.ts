@@ -225,4 +225,13 @@ export const completeOnboarding = () => invoke<void>("complete_onboarding");
 export const showPreview = () => invoke<void>("show_popup_preview");
 export const openDataFolder = () => invoke<void>("open_data_folder");
 export const clearData = () => invoke<void>("clear_data");
+export interface StoredAsset {
+  name: string;
+  format: string;
+  bytes: number;
+}
+
+export const listAssets = () => invoke<StoredAsset[]>("list_assets");
+export const importAsset = (path: string) => invoke<StoredAsset>("import_asset", { path });
+export const removeAsset = (name: string) => invoke<void>("remove_asset", { name });
 export const uiReady = (view: string) => invoke<void>("ui_ready", { view });

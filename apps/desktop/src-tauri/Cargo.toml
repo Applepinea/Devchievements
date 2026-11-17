@@ -9,6 +9,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# File pickers for importing custom assets (spec 20). The plugin is the supported
+# way to ask the OS; a hand-rolled dialog would be a second, unaudited one.
+tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 devchievements-companion-core = { path = "../../../crates/companion-core" }
@@ -23,6 +26,7 @@ devchievements-platform = { path = "../../../crates/platform" }
 devchievements-config = { path = "../../../crates/config" }
 devchievements-filters = { path = "../../../crates/filters" }
 devchievements-themes = { path = "../../../crates/themes" }
+devchievements-assets = { path = "../../../crates/assets" }
 devchievements-git-hooks = { path = "../../../crates/git-hooks" }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-async-std", "sqlite", "migrate"] }
 async-std = { version = "1", features = ["attributes"] }

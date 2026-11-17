@@ -8,6 +8,10 @@ import {
   type SettingsView,
   type LoginMapping,
   type FilterSet,
+  type StoredAsset,
+  importAsset,
+  listAssets,
+  removeAsset,
   showPreview,
 } from "../ipc";
 
@@ -35,6 +39,33 @@ function AddExclusion({ onAdd }: { onAdd: (id: string) => void }) {
   );
 }
 
+/**
+ * Ask the OS for a file path.
+ *
+ * The dialog plugin's JS API is a separate package; calling the command it exposes
+ * keeps this file free of another dependency.
+ */
+async function openFileDialog(): Promise<string | null> {
+  const w = window as unknown as {
+    __TAURI_INTERNALS__?: { invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> };
+  };
+  const api = w.__TAURI_INTERNALS__;
+  if (!api) return null;
+  try {
+    const picked = await api.invoke<{ path?: string } | null>("plugin:dialog|open", {
+      options: {
+        multiple: false,
+        filters: [{ name: "Image or sound", extensions: ["png", "jpg", "jpeg", "webp", "svg", "wav", "mp3", "ogg"] }],
+      },
+    });
+    // The plugin returns a string on some versions and { path } on others.
+    if (typeof picked === "string") return picked;
+    return picked?.path ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export default function Settings() {
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +74,39 @@ export default function Settings() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [backupNotice, setBackupNotice] = useState<string>("");
   const [previewNotice, setPreviewNotice] = useState<string>("");
+  const [assetNotice, setAssetNotice] = useState<string>("");
+  const [assets, setAssets] = useState<StoredAsset[]>([]);
+
+  const refreshAssets = useCallback(async () => {
+    try {
+      setAssets(await listAssets());
+    } catch {
+      // The list is cosmetic; a failure here must not break the page.
+    }
+  }, []);
+
+  const pickAsset = async () => {
+    // The dialog picks a path; validation happens in Rust.
+    const chosen = await openFileDialog();
+    if (!chosen) return;
+    try {
+      await importAsset(chosen);
+      setAssetNotice("Imported.");
+      await refreshAssets();
+    } catch (e) {
+      setAssetNotice("Refused: " + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
+  const dropAsset = async (name: string) => {
+    try {
+      await removeAsset(name);
+      setAssetNotice("Removed.");
+      await refreshAssets();
+    } catch (e) {
+      setAssetNotice("Could not remove: " + (e instanceof Error ? e.message : String(e)));
+    }
+  };
 
   const preview = async () => {
     if (!settings) return;
@@ -86,7 +150,8 @@ export default function Settings() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    void refreshAssets();
+  }, [load, refreshAssets]);
 
   const save = async () => {
     if (!settings) return;
@@ -263,6 +328,34 @@ export default function Settings() {
         <button onClick={() => void preview()}>Preview popup</button>
         <span className="notice">{previewNotice}</span>
       </div>
+
+      <h3>Custom assets</h3>
+      <p className="muted">
+        Images and sounds you import. Each file is checked against its actual bytes
+        before it is stored: a renamed document is refused, and an SVG that could
+        run code is rejected rather than sanitised.
+      </p>
+      <div className="row">
+        <button onClick={() => void pickAsset()}>Import file…</button>
+        <span className="notice">{assetNotice}</span>
+      </div>
+      {assets.length === 0 ? (
+        <p className="tiny">No custom assets yet.</p>
+      ) : (
+        <ul className="list">
+          {assets.map((asset) => (
+            <li key={asset.name} className="row spread">
+              <span className="mono">{asset.name}</span>
+              <span className="muted">
+                {asset.format} · {(asset.bytes / 1024).toFixed(1)} KB
+              </span>
+              <button className="ghost" onClick={() => void dropAsset(asset.name)}>
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
 
       <h3>Event filters</h3>
       <p className="muted">

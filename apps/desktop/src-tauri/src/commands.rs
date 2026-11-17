@@ -474,6 +474,106 @@ pub fn show_popup_preview(app: tauri::AppHandle) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------- assets
+//
+// Imported files are untrusted input (spec 20). The dialog picks a path; the
+// bytes are validated by the assets crate before anything is stored, so a file
+// cannot enter the app on the strength of its name.
+
+/// One stored asset.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredAsset {
+    /// File name inside the assets directory.
+    pub name: String,
+    /// Detected format.
+    pub format: String,
+    /// Size in bytes.
+    pub bytes: i64,
+}
+
+/// Where user assets live.
+fn assets_dir() -> std::path::PathBuf {
+    default_data_dir().join("assets")
+}
+
+/// Everything currently stored, newest name last.
+#[tauri::command]
+pub fn list_assets() -> Vec<StoredAsset> {
+    let dir = assets_dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut assets: Vec<StoredAsset> = entries
+        .flatten()
+        .filter(|e| e.path().is_file())
+        .filter_map(|e| {
+            let path = e.path();
+            let bytes = std::fs::read(&path).ok()?;
+            let format = devchievements_assets::detect(&bytes)?;
+            Some(StoredAsset {
+                name: e.file_name().to_string_lossy().to_string(),
+                format: format.extension().to_string(),
+                bytes: bytes.len() as i64,
+            })
+        })
+        .collect();
+    assets.sort_by(|a, b| a.name.cmp(&b.name));
+    assets
+}
+
+/// Import one file into the assets directory.
+///
+/// The dialog provides the path; the bytes decide whether it is accepted.
+#[tauri::command]
+pub fn import_asset(path: String) -> Result<StoredAsset, String> {
+    let source = std::path::Path::new(&path);
+    let bytes = std::fs::read(source).map_err(|e| e.to_string())?;
+
+    let dir = assets_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    // Quota is checked against what is already stored, so the total cannot creep
+    // past the limit one file at a time.
+    let current: u64 = std::fs::read_dir(&dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|e| e.metadata().ok().map(|m| m.len()))
+                .sum()
+        })
+        .unwrap_or(0);
+
+    let name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .ok_or_else(|| "the selected file has no name".to_string())?;
+
+    let accepted = devchievements_assets::accept(&name, &bytes, current)
+        .map_err(|e| e.to_string())?;
+
+    let destination = dir.join(&name);
+    std::fs::write(&destination, &bytes).map_err(|e| e.to_string())?;
+
+    println!("ASSET imported name={name} format={:?}", accepted.format);
+    Ok(StoredAsset {
+        name,
+        format: accepted.format.extension().to_string(),
+        bytes: accepted.bytes as i64,
+    })
+}
+
+/// Remove a stored asset.
+#[tauri::command]
+pub fn remove_asset(name: String) -> Result<(), String> {
+    // Only a bare file name is accepted: a path would let the UI delete anything.
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err("asset name must be a plain file name".to_string());
+    }
+    let path = assets_dir().join(&name);
+    std::fs::remove_file(path).map_err(|e| e.to_string())
+}
+
 /// Open the settings window (used by the dashboard shortcut).
 #[tauri::command]
 pub fn open_window(app: tauri::AppHandle) -> Result<(), String> {

@@ -202,3 +202,45 @@ ok  the official repository list is unchanged
 | Popup Editor | 有基本调节与预览，缺透明度、动画速度、多显示器选择 |
 
 这三项都依赖 Tauri 的文件对话框插件，属于新增依赖，我没有擅自加。
+
+## 10. 资产导入（4a.5）
+
+引入 `tauri-plugin-dialog`（经用户批准）。设置页现在可以「导入文件…」，
+但**对话框只负责给出路径**——决定收不收的是字节。
+
+### 10.1 端到端 9 项
+
+```text
+ok  a real PNG is accepted
+ok  it was stored
+ok  a renamed script document is refused
+ok  the refusal says why
+ok  it was not stored          <-- 拒绝必须意味着没写进去
+ok  a plain SVG is accepted
+ok  an SVG containing a script is refused
+ok  the refusal names the construct
+ok  only the accepted files are present
+```
+
+第 5 条和第 9 条是重点：**被拒的文件不能在磁盘上留下痕迹**。
+只断言「返回了错误」是不够的——错误路径里可能先写了再检查。
+
+### 10.2 新增依赖的代价
+
+| 项 | 变化 |
+| --- | --- |
+| `Cargo.toml` | 新增 `tauri-plugin-dialog` |
+| `capabilities/default.json` | 新增 `dialog:allow-open` |
+| 前端 | 直接调用 `plugin:dialog|open` 命令，不引入 JS 包 |
+
+capability 文件此前不存在，是这次新建的。**权限声明从此成为需要维护的东西**：
+以后任何新的 plugin 命令都要在这里加，否则调用会静默失败。
+
+### 10.3 仍然没做
+
+- 音效的独立管理页（换音效仍要改配置）
+- 资产在弹窗/图鉴里的实际使用（导入的文件目前只是存下来）
+- 裁剪、缩放、恢复默认
+
+第二点尤其要说明：**现在导入的资产还没有被任何渲染路径使用**。
+这一步只完成「能安全地把它收进来」，不等于「它已经生效」。

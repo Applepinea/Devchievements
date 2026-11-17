@@ -1089,6 +1089,25 @@ fn main() {
         }
     }
 
+    // Import one asset from a path. The dialog is the normal route; a test cannot
+    // click one, and the dialog only produces the path this command takes.
+    if let Some(i) = std::env::args().position(|a| a == "--import-asset") {
+        let Some(path) = std::env::args().nth(i + 1) else {
+            println!("ASSET FAILED: --import-asset needs a path");
+            std::process::exit(2);
+        };
+        match commands::import_asset(path) {
+            Ok(asset) => {
+                println!("ASSET OK name={} format={} bytes={}", asset.name, asset.format, asset.bytes);
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("ASSET FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     if std::env::args().any(|a| a == "--capabilities") {
         let caps = current_capabilities();
         let report = serde_json::json!({
@@ -1200,6 +1219,7 @@ fn main() {
         });
 
         let result = tauri::Builder::default()
+            .plugin(tauri_plugin_dialog::init())
             .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,
@@ -1217,12 +1237,18 @@ fn main() {
             commands::install_hooks,
             commands::complete_onboarding,
             commands::show_popup_preview,
+            commands::list_assets,
+            commands::import_asset,
+            commands::remove_asset,
             commands::open_data_folder,
             commands::clear_data,
             commands::onboarding_status,
             commands::install_hooks,
             commands::complete_onboarding,
             commands::show_popup_preview,
+            commands::list_assets,
+            commands::import_asset,
+            commands::remove_asset,
             commands::open_data_folder,
             commands::clear_data,
             commands::restore_database,
@@ -1283,6 +1309,7 @@ fn main() {
             others: vec![],
         };
         let result = tauri::Builder::default()
+            .plugin(tauri_plugin_dialog::init())
             .setup(move |app| {
                 let handle = app.handle().clone();
                 // Let the event loop start before creating a window.
@@ -1338,6 +1365,7 @@ fn main() {
     }
 
     tauri::Builder::default()
+            .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,
