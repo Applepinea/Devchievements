@@ -17,6 +17,10 @@
 !define DEVCH_WEBVIEW2_GUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 !define DEVCH_WEBVIEW2_URL "https://developer.microsoft.com/microsoft-edge/webview2/"
 !define DEVCH_GIT_URL "https://git-scm.com/download/win"
+; Pinned to a release that exists, not to "latest": a build must fetch a file,
+; not a redirect that could become an HTML page. Git for Windows keeps every
+; published release asset at this path.
+!define DEVCH_GIT_INSTALLER "https://github.com/git-for-windows/git/releases/download/v2.56.1.windows.1/Git-2.56.1-64-bit.exe"
 
 Var DevchWebViewVersion
 Var DevchWebViewOk
@@ -75,6 +79,34 @@ Function DevchCheckGit
   ${EndIf}
 FunctionEnd
 
+; Install Git for Windows from the installer Microsoft publishes for it.
+;
+; winget first: it is present on current Windows and handles signatures, proxies
+; and the per-user location itself. The standalone installer is the fallback for
+; machines without the App Installer, and /CURRENTUSER keeps it working without
+; administrator rights, which this installer does not request.
+Function DevchInstallGit
+  DetailPrint "Installing Git for Windows..."
+  ; The App Installer needs agreements accepted; without these flags it waits for
+  ; a prompt that a silent install can never answer.
+  ExecWait 'winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements' $0
+  Call DevchCheckGit
+  ${If} $DevchGitOk = 0
+    DetailPrint "Falling back to the standalone Git installer."
+    SetOutPath "$TEMP"
+    NSISdl::download_quiet "${DEVCH_GIT_INSTALLER}" "$TEMP\DevchGitSetup.exe"
+    Pop $0
+    ${If} $0 == "success"
+      ExecWait '"$TEMP\DevchGitSetup.exe" /VERYSILENT /NORESTART /NOCANCEL /SP- /SUPPRESSMSGBOXES /CURRENTUSER' $1
+      Delete "$TEMP\DevchGitSetup.exe"
+      DetailPrint "Git installer exit code: $1"
+    ${Else}
+      DetailPrint "Git download failed: $0"
+    ${EndIf}
+    Call DevchCheckGit
+  ${EndIf}
+FunctionEnd
+
 !macro NSIS_HOOK_PREINSTALL
   ; Test hook: force the abort path without uninstalling a runtime from the build
   ; machine. It skips the repair step too, so the check cannot quietly pass.
@@ -105,9 +137,21 @@ FunctionEnd
 
   Call DevchCheckGit
   ${If} $DevchGitOk = 0
-    ${IfNot} ${Silent}
-      MessageBox MB_ICONEXCLAMATION|MB_OK "Git for Windows was not found.$\r$\n$\r$\nDevchievements can be installed and started, but it cannot record commits without Git. Install it from:$\r$\n${DEVCH_GIT_URL}$\r$\n"
+    ; Test hook, symmetric with the WebView2 one: proves the failure branch on a
+    ; machine that already has Git.
+    ReadEnvStr $0 "DEVCH_FORCE_NO_GIT"
+    ${If} $0 == "1"
+      StrCpy $DevchGitOk 0
+    ${Else}
+      Call DevchInstallGit
     ${EndIf}
-    DetailPrint "Git for Windows not found; the app will run without commit capture."
+  ${EndIf}
+
+  ${If} $DevchGitOk = 0
+    ; Git is not a gate: the app installs and runs, it just has nothing to read.
+    ${IfNot} ${Silent}
+      MessageBox MB_ICONEXCLAMATION|MB_OK "Git for Windows could not be installed automatically.$\r$\n$\r$\nDevchievements is installed, but it cannot record commits until Git is available. Install it from:$\r$\n${DEVCH_GIT_URL}$\r$\n"
+    ${EndIf}
+    DetailPrint "Git for Windows not available; the app will run without commit capture."
   ${EndIf}
 !macroend

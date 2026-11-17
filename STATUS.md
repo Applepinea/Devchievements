@@ -366,7 +366,7 @@ ALL CHECKS PASSED
 | 4b.9 | 完整隐私设置（§40.1） | `Tested` | 隐私模式/托盘开关/日志脱敏；诊断导出默认脱敏、`--raw` 与设置页勾选才含真实仓库名，**警告写进文件本身**；`diagnostics-export` e2e 9 项 |
 | 4b.10 | 启动行为：可选隐藏到托盘 | `Tested` | 设置页开关 + `startHidden`（默认 true）；`STARTUP hidden=` 日志对两种取值都有断言；配置导出对旧文件兼容 |
 | 4b.11 | 首次运行向导可达性 | `Tested` | 根因：两个 builder 的命令清单漂移，`onboarding_status`/`install_hooks` 在真实启动里缺失；已收进单一宏 `app_commands!()`。`wizard` e2e 18 项，含**真实启动路径**断言与「重跑向导」 |
-| 4b.15 | 安装期依赖检查（§25） | `Tested` | NSIS `PREINSTALL` 钩子：校验 `msedgewebview2.exe` 真实存在（不再信注册表），缺失则用**内嵌的官方 bootstrapper** 安装，仍失败则退出码 2 且**一个文件都不装**；Git 只警告；`installer` e2e 19 项含强制缺失分支 |
+| 4b.15 | 安装期依赖安装（§25） | `Tested` | NSIS `PREINSTALL` 钩子：校验 `msedgewebview2.exe` 真实存在（不再信注册表）；缺 WebView2 用内嵌官方 bootstrapper 安装，仍失败则退出码 2 且不装任何文件；缺 Git 先走 `winget`、再下载固定版本官方安装器（`/CURRENTUSER`），失败仅警告；`DEVCH_FORCE_NO_*` 可分别强制两条分支 |
 | 4b.14 | 无 WebView2 的原生兜底 | `Partially Implemented` | 建窗口前检查运行库，缺失则弹原生中英双语消息框（含下载入口）并 `exit(2)`；CLI 模式豁免；`--webview2-prompt` 可人工验证。**真正的缺运行库机器未验证** |
 | 4b.13 | 启动前置检查 + 扩展引导（§25） | `Partially Implemented` | 向导七步，新增 `checks`（WebView2 注册表 + Git 双路径探测）与 `extension` 引导；`dependencies` e2e 5 项；**缺依赖时的提示文字本机无法验证** |
 | 4b.12 | 开机自启动 | `Partially Implemented` | 默认关；写 `HKCU\...\Run\Devchievements`（与卸载器删除的名字一致）；判定逻辑 4 个测试 + `--autostart` 命令；**注册表写入在本环境的沙箱内被拒绝（WIN32_ERROR(5)），真机行为未验证** |

@@ -817,4 +817,36 @@ ${If} $4 == "" ... 才去下载/安装 WebView2
 内嵌的 `MicrosoftEdgeWebView2Setup.exe` 来自微软官方下载，**Authenticode 签名校验通过**
 （`CN=Microsoft Corporation`），1.9 MB，安装包从 4.96 MB 变成 6.45 MB。
 
+### 12.5 改为「直接装」，不是「告诉用户去装」（用户要求）
+
+第一版只是**检查**：缺了就用 bootstrapper 装 WebView2，Git 缺了只给个提示。
+用户要求改成**安装过程中直接把缺的组件装上**。现在两条都装：
+
+| 组件 | 安装方式 | 失败后 |
+| --- | --- | --- |
+| WebView2 | 内嵌官方 bootstrapper，`/silent /install` | 退出码 2，一个文件都不装 |
+| Git | 先 `winget install --id Git.Git -e --silent`，失败再下载**固定版本**官方安装器，`/VERYSILENT /CURRENTUSER` | 警告后继续装（没有 Git 程序仍能运行，只是没有提交可记） |
+
+三个决定值得记下来：
+
+1. **Git 用 `winget` 优先**：它自己处理签名、代理和用户级路径，是微软维护的更新通道；
+   没有 App Installer 的机器才回退到独立安装器。
+2. **URL 固定版本，不跟 `latest`**：`git-scm.com/download/win` 是网页不是文件，
+   GitHub 的 `latest` 重定向也可能变成 HTML。写死 `v2.56.1.windows.1` 的资产地址，
+   每次构建拿到的都是**同一个二进制**。
+3. **`/CURRENTUSER`**：我们的安装器是 `currentUser` 模式、不请求管理员权限，
+   Git 安装器默认往 Program Files 装会失败。
+
+静默安装下这条链会真的去下载 63 MB 的 Git——只在缺的时候。测试用
+`DEVCH_FORCE_NO_GIT=1` / `DEVCH_FORCE_NO_WEBVIEW2=1` 分别强制两条分支，
+不必把 Git 从构建机上卸掉。
+
+实测：
+
+| 场景 | 退出码 | 结果 |
+| --- | --- | --- |
+| 依赖齐全 | 0 | 安装成功 |
+| 强制缺 Git | 0 | 安装成功 + 提示（Git 不是门禁） |
+| 强制缺 WebView2 | 2 | 未安装任何文件 |
+
 ---
