@@ -104,3 +104,33 @@ MV3 worker 刚被唤醒时，**第一条消息会丢**（监听器还没注册�
 - 身份映射 GitHub Login → Git Email
 - **Service Worker 回收后的恢复没有实测**：数据在 IndexedDB 里，
   重启后理论上还在，但「强制停掉 worker 再读」这一步没做过，所以不算验证。
+
+## 6. 浏览器 Dashboard（3a.6 部分）
+
+弹窗现在是真界面：统计、最近活动、空状态，全部来自 service worker 读 IndexedDB。
+
+### 三个断言
+
+```text
+ok  the dashboard lists the recorded commit
+ok  it shows the repository
+ok  the commit count is rendered
+```
+
+### 两个教训
+
+**1. 我把挂载入口覆盖了。**
+
+重写弹窗时，我把 `entrypoints/popup/main.tsx` 整个换成了组件，
+连 `createRoot` 一起删掉了。构建和类型检查全过，页面却是一片空白——
+因为**没有任何东西会去挂载组件**。
+
+诊断靠的是读 `document.getElementById('root').childElementCount`：
+页面加载完成、脚本和样式都在、root 是 0。这比「白屏」三个字有用得多。
+
+现在 `main.tsx` 只做挂载，`App.tsx` 才是界面。
+
+**2. 数据是测试先写、页面后开的。**
+
+弹窗在事件写入**之前**就打开了，读到的是空状态。
+测试里刷新一次再读，顺带证明了数据是**从 IndexedDB 读回来的**，不是页面内存里的残留。

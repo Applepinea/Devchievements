@@ -55,7 +55,7 @@ ALL CHECKS PASSED
 | 3a.3 | GitHub 活动识别（Commit/Release） | `Tested` | 9 个单元测试（URL/日期/去重键）+ `extension-load` 端到端入库 |
 | 3a.4 | IndexedDB 持久化 + 独立 Outbox | `Partially Implemented` | IndexedDB 存储与去重已端到端验证；**Outbox 队列尚未实现** |
 | 3a.5 | 浏览器通知与音效 | `Not Started` | |
-| 3a.6 | 浏览器端设置/Dashboard/图鉴 | `Not Started` | |
+| 3a.6 | 浏览器端设置/Dashboard/图鉴 | `Partially Implemented` | Dashboard 读 IndexedDB 并渲染（端到端 3 项）；**设置与图鉴未做** |
 | 3a.7 | 身份映射 GitHub Login → Git Email | `Not Started` | |
 | 3a.8 | Service Worker 回收后状态恢复 | `Not Started` | |
 

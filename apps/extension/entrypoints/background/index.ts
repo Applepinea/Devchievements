@@ -12,7 +12,12 @@
 
 import { extract } from "../../src/github/extract.ts";
 import { IndexedDbEventStore } from "../../src/storage/idb.ts";
-import type { ExtensionMessage, PageFactsResult, StatsResult } from "../../src/messages.ts";
+import type {
+  ExtensionMessage,
+  EventsResult,
+  PageFactsResult,
+  StatsResult,
+} from "../../src/messages.ts";
 
 const store = new IndexedDbEventStore();
 
@@ -31,6 +36,10 @@ async function handlePage(message: Extract<ExtensionMessage, { type: "devch:page
   return { stored, event: extraction.event, reason: stored ? undefined : "already recorded" };
 }
 
+async function handleEvents(): Promise<EventsResult> {
+  return { events: await store.all() };
+}
+
 async function handleStats(): Promise<StatsResult> {
   const counts = await store.counts();
   return {
@@ -47,7 +56,9 @@ export default defineBackground(() => {
         ? handlePage(message)
         : message?.type === "devch:stats"
           ? handleStats()
-          : Promise.resolve({ stored: false, reason: "unknown message" });
+          : message?.type === "devch:events"
+            ? handleEvents()
+            : Promise.resolve({ stored: false, reason: "unknown message" });
 
     // Returning true keeps the response channel open for the async work.
     work.then(sendResponse, (error) => sendResponse({ stored: false, reason: String(error) }));

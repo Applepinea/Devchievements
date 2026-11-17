@@ -254,6 +254,42 @@ async function main() {
     const statsValue = stats?.result?.value;
     check("the worker reports one stored event", statsValue?.events === 1, JSON.stringify(statsValue));
     check("it is counted as a commit", statsValue?.commits === 1, JSON.stringify(statsValue));
+
+    // ---- the dashboard must render those numbers, not its own guesses ----
+    // The page was opened before any data existed, so reload it: this also proves
+    // the data outlives the page and is read back from IndexedDB.
+    await cdp.send("Page.reload", {}, pageSession);
+    await sleep(1200);
+    const dashboard = await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `document.body.innerText || document.body.textContent || ""`,
+        returnByValue: true,
+      },
+      pageSession,
+    );
+    const text = String(dashboard?.result?.value ?? "");
+    if (!/commit/.test(text)) {
+      const diag = await cdp.send(
+        "Runtime.evaluate",
+        {
+          expression: `JSON.stringify({
+            title: document.title,
+            ready: document.readyState,
+            root: document.getElementById('root')?.childElementCount ?? -1,
+            bodyLen: document.body?.innerHTML?.length ?? -1,
+            scripts: [...document.scripts].map((s) => s.src.split('/').pop()),
+            links: [...document.querySelectorAll('link')].map((l) => l.href.split('/').pop())
+          })`,
+          returnByValue: true,
+        },
+        pageSession,
+      );
+      console.log("  info dashboard diag: " + String(diag?.result?.value));
+    }
+    check("the dashboard lists the recorded commit", /commit/.test(text), JSON.stringify(text.slice(0, 300)));
+    check("it shows the repository", /applepinea\/devchievements/.test(text), JSON.stringify(text.slice(0, 300)));
+    check("the commit count is rendered", /(^|\D)1(\D|$)/.test(text), JSON.stringify(text.slice(0, 300)));
   } finally {
     cdp?.close();
     child.kill();

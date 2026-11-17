@@ -1,0 +1,22 @@
+:root { color-scheme: dark; }
+body {
+  margin: 0;
+  width: 360px;
+  background: #14161a;
+  color: #e6e8ea;
+  font: 13px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+}
+.popup-shell { padding: 14px 16px 18px; }
+h1 { margin: 0 0 10px; font-size: 15px; }
+h2 { margin: 16px 0 6px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #9aa3ad; }
+.muted { color: #9aa3ad; }
+.error { color: #f05252; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+.stats div { background: #1b1e24; border-radius: 6px; padding: 8px; text-align: center; }
+.stats dt { color: #9aa3ad; font-size: 11px; }
+.stats dd { margin: 2px 0 0; font-size: 18px; font-weight: 600; }
+.events { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.events li { display: grid; grid-template-columns: 56px 1fr auto; gap: 6px; align-items: baseline; }
+.kind { color: #9aa3ad; font-size: 11px; }
+.repo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.id, .date { color: #9aa3ad; font-family: ui-monospace, Consolas, monospace; font-size: 11px; }

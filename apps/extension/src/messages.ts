@@ -34,4 +34,14 @@ export interface StatsResult {
   releases: number;
 }
 
-export type ExtensionMessage = PageFactsMessage | StatsMessage;
+/** Ask the service worker for the stored events. */
+export interface EventsMessage {
+  type: "devch:events";
+}
+
+/** What the service worker reports. */
+export interface EventsResult {
+  events: BrowserEvent[];
+}
+
+export type ExtensionMessage = PageFactsMessage | StatsMessage | EventsMessage;
