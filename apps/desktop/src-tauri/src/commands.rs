@@ -348,10 +348,10 @@ pub fn onboarding_status() -> OnboardingStatus {
     let identity = devchievements_git_hooks::gitread::config_read::suggest_identity(&home);
     let suggested: Vec<String> = identity.emails.into_iter().map(|e| e.email).collect();
 
-    let helper_available = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(|p| p.join("devch-helper.exe").is_file()))
-        .unwrap_or(false);
+    // Available if it can be synced or is already there: the wizard must not offer
+    // an install it cannot complete.
+    let helper_available = crate::local_helper::packaged_helper().is_some()
+        || crate::local_helper::managed_helper(&default_data_dir()).is_file();
 
     OnboardingStatus {
         completed: stored.onboarding_completed,
@@ -380,14 +380,12 @@ pub fn install_hooks(repo_path: String) -> Result<Vec<HookInstallResult>, String
         return Err(format!("not a git repository: {repo_path}"));
     }
 
-    let helper = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .parent()
-        .map(|p| p.join("devch-helper.exe"))
-        .ok_or_else(|| "cannot locate the companion directory".to_string())?;
-    if !helper.is_file() {
-        return Err("devch-helper.exe is missing next to the app".to_string());
-    }
+    // The hook runs from git, not from this app. A helper inside an installed
+    // package cannot be executed that way (measured: access denied under
+    // WindowsApps), so hooks always point at the copy in the data directory.
+    let data_dir_for_helper = default_data_dir();
+    std::fs::create_dir_all(&data_dir_for_helper).map_err(|e| e.to_string())?;
+    let helper = crate::local_helper::ensure(&data_dir_for_helper)?;
 
     let site = devchievements_git_hooks::hooks::HookSite::resolve(&git_dir, None);
     let mut results = Vec::new();

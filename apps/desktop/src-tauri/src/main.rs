@@ -192,6 +192,7 @@ mod output_streams {
 pub(crate) mod audio;
 mod autostart;
 mod commands;
+mod local_helper;
 pub(crate) mod popup;
 mod preflight;
 mod settings;
@@ -508,6 +509,22 @@ pub(crate) fn now_millis() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// Whether this process was started as an installed MSIX package.
+///
+/// Windows installs packages under `%ProgramFiles%\WindowsApps`, and the Store
+/// build behaves differently in two places: startup is owned by a manifest
+/// `startupTask` rather than a Run key, and the helper has to be copied out of the
+/// package before git can execute it.
+pub(crate) fn is_packaged() -> bool {
+    std::env::current_exe()
+        .map(|exe| {
+            exe.to_string_lossy()
+                .to_ascii_lowercase()
+                .contains("\\windowsapps\\")
+        })
+        .unwrap_or(false)
 }
 
 fn default_data_dir() -> std::path::PathBuf {
@@ -1043,8 +1060,13 @@ fn diagnostics_report(
 /// drawn by the runtime that is absent. A message box is the only thing left that
 /// can still be shown, and exiting with a distinct code keeps it out of the
 /// "started and then vanished" category.
+///
+/// The button installs the runtime when the app ships the bootstrapper. It has to be
+/// copied out of the package before it can run: an executable inside WindowsApps
+/// cannot be started by anything without the package identity (measured on
+/// 2026-11-17), the same restriction that forces the Git hook helper out.
 #[cfg(windows)]
-fn prompt_missing_webview() -> ! {
+fn prompt_missing_webview() {
     use windows::core::HSTRING;
     use windows::Win32::UI::WindowsAndMessaging::{
         MessageBoxW, IDYES, MB_ICONERROR, MB_SETFOREGROUND, MB_YESNO,
@@ -1064,6 +1086,12 @@ fn prompt_missing_webview() -> ! {
             MB_YESNO | MB_ICONERROR | MB_SETFOREGROUND,
         )
     };
+    if answer == IDYES && preflight::install_bundled_runtime() {
+        // The runtime is there now; the caller retries instead of dying on a machine
+        // it just repaired.
+        println!("WEBVIEW2 installed: continuing");
+        return;
+    }
     if answer == IDYES {
         let _ = std::process::Command::new("explorer.exe")
             .arg(preflight::WEBVIEW2_URL)
@@ -1072,11 +1100,9 @@ fn prompt_missing_webview() -> ! {
     println!("WEBVIEW2 missing: prompting and exiting");
     std::process::exit(2);
 }
-
 #[cfg(not(windows))]
-fn prompt_missing_webview() -> ! {
+fn prompt_missing_webview() {
     eprintln!("WebView2 runtime is required and missing.");
-    std::process::exit(2);
 }
 
 fn main() {
@@ -1114,6 +1140,11 @@ fn main() {
             || preflight::must_stop_for_missing_webview(webview2.as_deref()))
     {
         prompt_missing_webview();
+        // Returning means the user let us install the runtime; re-check rather than
+        // trusting that, and only then continue to build the window.
+        if preflight::webview2_version().is_none() {
+            std::process::exit(2);
+        }
     }
 
     // A probe entry point, used by scripts/e2e/toast.mjs. It runs the SAME code path
@@ -2011,6 +2042,12 @@ fn main() {
             // Keep the registry in step with the setting, so an app that moved (or an
             // entry deleted by hand) ends up correct rather than stale.
             autostart::reconcile(stored_now.start_with_windows);
+            // An updated package must not leave commits invoking last version's
+            // helper, so the copy is refreshed on every start.
+            match local_helper::ensure(&default_data_dir()) {
+                Ok(path) => println!("HELPER ready at {}", path.display()),
+                Err(e) => println!("HELPER unavailable: {e}"),
+            }
 
             spawn_drain_loop(app.handle().clone());
             Ok(())

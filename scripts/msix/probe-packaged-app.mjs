@@ -100,7 +100,18 @@ function main() {
   check("the packaged app can install a Git hook", installed.status === 0 && hookWritten, installed.stdout || installed.stderr);
 
   const hookBody = hookWritten ? fs.readFileSync(hookPath, "utf8") : "";
-  check("the hook calls the helper inside the package", hookBody.includes(helper.replace(/\\/g, "/")), hookBody);
+  // The copy is the whole point: a hook cannot execute anything inside WindowsApps.
+  const managed = path.join(dataRoot, "devchievements", "bin", "devch-helper.exe");
+  check(
+    "the app copied the helper out of the package",
+    fs.existsSync(managed),
+    managed,
+  );
+  check(
+    "the hook calls the copy, not the packaged file",
+    hookBody.includes(managed.replace(/\\/g, "/")) && !hookBody.includes("WindowsApps"),
+    hookBody,
+  );
 
   // 3. Run the hook the way git would: the helper must produce a spool record.
   //
@@ -144,12 +155,12 @@ function main() {
       "}",
     ].join("\r\n"),
   );
-  const executed = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcher, "-Exe", helper, "-WorkDir", scratch, "-DataDir", dataRoot], {
+  const executed = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcher, "-Exe", managed, "-WorkDir", scratch, "-DataDir", dataRoot], {
     windowsHide: true,
     encoding: "utf8",
   });
   const outcome = (executed.stdout || "").trim();
-  check("the helper runs from inside the package", outcome.includes("STARTED exit=0"), outcome || executed.stderr);
+  check("the helper runs from the managed copy", outcome.includes("STARTED exit=0"), outcome || executed.stderr);
 
   // 4. Where the data actually lives: users must be able to find and keep it.
   console.log("  info data directory: " + dataDir);

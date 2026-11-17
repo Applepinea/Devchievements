@@ -242,6 +242,58 @@ pub fn simulate_missing_webview() -> bool {
 /// Where the WebView2 runtime comes from.
 pub const WEBVIEW2_URL: &str = "https://developer.microsoft.com/microsoft-edge/webview2/";
 
+/// The runtime installer shipped next to the app, if this build carries one.
+///
+/// The .exe route embeds it in the installer instead, so this is normally `None`
+/// there and the prompt falls back to opening the download page.
+pub fn bundled_runtime_installer() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let candidate = exe.parent()?.join("webview2-setup.exe");
+    candidate.is_file().then_some(candidate)
+}
+
+/// Install the runtime from the bundled bootstrapper. Returns whether it worked.
+///
+/// The bootstrapper is copied out of the package before it runs: a file inside
+/// `WindowsApps` cannot be executed by a process without the package identity
+/// (measured on 2026-11-17), which is also why the Git hook helper is copied.
+pub fn install_bundled_runtime() -> bool {
+    let Some(installer) = bundled_runtime_installer() else {
+        println!("WEBVIEW2 install: no bundled bootstrapper; opening the download page");
+        return false;
+    };
+    let data_dir = crate::default_data_dir();
+    let bin = data_dir.join(crate::local_helper::BIN_DIR);
+    if let Err(e) = std::fs::create_dir_all(&bin) {
+        println!("WEBVIEW2 install: cannot create {}: {e}", bin.display());
+        return false;
+    }
+    let runnable = bin.join("webview2-setup.exe");
+    if let Err(e) = std::fs::copy(&installer, &runnable) {
+        println!("WEBVIEW2 install: cannot copy the bootstrapper: {e}");
+        return false;
+    }
+
+    println!("WEBVIEW2 install: running the bundled bootstrapper");
+    let status = std::process::Command::new(&runnable)
+        .args(["/silent", "/install"])
+        .status();
+    match status {
+        Ok(status) => println!("WEBVIEW2 install: bootstrapper exit {status}"),
+        Err(e) => {
+            println!("WEBVIEW2 install: cannot start the bootstrapper: {e}");
+            return false;
+        }
+    }
+    let _ = std::fs::remove_file(&runnable);
+
+    // Trust the measurement, not the exit code: the question is whether the runtime
+    // is now usable, and the check is the same one that asked for the install.
+    let installed = webview2_version().is_some();
+    println!("WEBVIEW2 install: runtime present={installed}");
+    installed
+}
+
 /// Whether the app must stop because it cannot draw anything.
 ///
 /// Only WebView2 is fatal: Git missing means no data, which the in-app preflight can

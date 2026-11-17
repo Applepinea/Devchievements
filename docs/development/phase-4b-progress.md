@@ -899,4 +899,62 @@ BLOCKED MethodInvocationException: 对“Start”的调用引发异常：拒绝�
 
 这条结论现在有实测支撑，不再是猜测；相关脚本保留在 `scripts/msix/`，将来立场变化时可以直接重跑。
 
+## 14. 商店路线（MSIX）：从「不可行」到「跑得通」
+
+§13 的结论是 MSIX 不可行，卡在 hook 无法执行包内的 helper。用户决定走商店路线后，
+找到了绕法并**实测通过**。
+
+### 14.1 绕法：把 helper 复制出包
+
+```text
+包内（WindowsApps）                数据目录（可写）
+devch-helper.exe  ──复制──▶  %LOCALAPPDATA%\devchievements\bin\devch-helper.exe
+                                      ▲
+                                      └── hook 指向这里
+```
+
+依据是同一次测量：**同一个二进制**在包内执行被拒绝，复制到用户目录后 `exit 0` 并正常投递记录。
+
+实现要点（`src-tauri/src/local_helper.rs`）：
+
+- 路径固定为 `<data>/bin/devch-helper.exe`，**不随版本变化**，所以升级不会让已装的 hook 失效；
+- 每次启动比对「长度 + 修改时间」，不同才覆盖；
+- **先写 `.tmp` 再改名**：半截的可执行文件被 commit 撞上，比没有 helper 更糟；
+- `install_hooks` 与启动都走同一个函数，两条入口不可能给出不同路径。
+
+### 14.2 打包侧
+
+| 项 | 做法 |
+| --- | --- |
+| 真图标 | 从 `icon.ico` 生成 5 个 Store 尺寸（Pillow），**不再是纯色占位** |
+| 开机自启 | manifest 里 `windows.startupTask`（属于 `<Application>` 的扩展，不是包级），默认 `Enabled="false"` |
+| 自启逻辑 | 打包运行时 `autostart::reconcile` **不写 Run 键**，改为记 `AUTOSTART packaged=true managed_by=manifest` |
+| WebView2 缺失 | bootstrapper 随包分发（`webview2-setup.exe`），原生框选「是」→ **先复制出包再运行** → 重新探测 → 成功则继续启动，不必重启 |
+| 数据目录 | 包外（`%LOCALAPPDATA%\devchievements`），卸载不删 |
+
+### 14.3 实测（`scripts/msix/probe-packaged-app.mjs`，10 项全过）
+
+```text
+ok  the package is installed
+ok  the payload is complete
+ok  the package folder is read-only
+ok  the packaged app can install a Git hook
+ok  the app copied the helper out of the package
+ok  the hook calls the copy, not the packaged file
+ok  a commit still succeeds with the packaged helper
+ok  the hook delivered a record
+ok  the helper runs from the managed copy
+ok  the data directory is outside the package
+```
+
+### 14.4 仍未验证 / 已知缺口
+
+| 项 | 状态 |
+| --- | --- |
+| 商店审核是否接受「写入用户 Git 仓库 + 复制可执行文件到用户目录」 | **未验证**，属于审核判断 |
+| 图标质量 | 源 `icon.ico` 只有 32×32，放大到 310 会糊；**需要真正的美术资源** |
+| 无 WebView2 的机器上「一键安装」全流程 | 本机有运行库，**只能在你的虚拟机验** |
+| `fixedRuntime`（把 130MB 运行时打进包） | 未做；当前用 bootstrapper 按需安装，包体保持 6.5MB |
+| 打包后的 GUI 启动日志 | 通过 `shell:AppsFolder` 启动时没有写入 `companion.log`，进程确实在跑；原因未查（CLI 模式正常） |
+
 ---

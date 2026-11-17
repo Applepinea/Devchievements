@@ -170,6 +170,14 @@ pub fn is_enabled() -> bool {
 
 /// Make the registry agree with the setting, once at startup.
 pub fn reconcile(enabled: bool) {
+    // A packaged app does not own its startup entry: the manifest declares a
+    // startupTask and Windows shows it in Settings and Task Manager. Writing a Run
+    // key as well would produce two switches for one behaviour, and the one in
+    // Settings would not match this value.
+    if crate::is_packaged() {
+        println!("AUTOSTART packaged=true managed_by=manifest requested={enabled}");
+        return;
+    }
     #[cfg(windows)]
     {
         let exe = current_exe();

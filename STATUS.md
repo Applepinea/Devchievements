@@ -316,6 +316,7 @@ ALL CHECKS PASSED
 | 日期 | 变更 |
 | --- | --- |
 | 2026-11-16（第一轮） | Phase 0 主体：环境勘察、隔离工具链、Monorepo、AGENTS/STATUS/spec 拆分/ADR、15 场景 Git 实验 + fixtures、WASM 验证、扩展构建 |
+| 2026-11-18（Phase 4b 第十一轮） | 商店路线打通：MSIX 打包（真图标 / startupTask / 包内 bootstrapper）+ **helper 复制出包**，解决「hook 不能执行包内 exe」；`probe-packaged-app` 10 项实测通过 |
 | 2026-11-18（Phase 4b 第十轮） | 依赖检查前移到**安装期**：`installer-hooks.nsh` 校验 WebView2 磁盘文件、内嵌官方 bootstrapper、失败退出码 2 且不留任何文件；`webviewInstallMode` 改为 skip 避免双份逻辑；Git 缺失只警告 |
 | 2026-11-17（Phase 4b 第九轮） | 诊断导出补齐 §26.2 的「原始信息 + 明确警告」：`--export-diagnostics [--raw]` + 设置页入口，警告写进文件；WebView2 检测改为**校验磁盘文件**而非只读注册表（虚拟机已证实注册表会撒谎） |
 | 2026-11-17（Phase 4b 第八轮） | 修「UI 白屏即可无从诊断」：加 `ui_error` 与全局错误上报（这次就是靠它定位到 TDZ 崩溃）；补无 WebView2 时的原生消息框兜底（`exit(2)`，CLI 豁免）；`webviewInstallMode` 由默认改为显式 |
@@ -359,7 +360,7 @@ ALL CHECKS PASSED
 | 4b.2 | 更新机制（Tauri Updater，§40.3） | `Partially Implemented` | 插件+公钥+签名产物就位；数据库快照/回滚 6 个测试；**无发布 feed、设置页未接按钮、真实下载安装未验证** |
 | 4b.3 | 发布流水线（§40.2） | `Platform Unverified` | `.github/workflows/release.yml` + 工作流 linter；本机无法执行 GitHub Actions，从未真正跑过 |
 | 4b.4 | 平台签名（§40.4） | `Blocked` | 无 Authenticode 证书 → 安装包没有代码签名，SmartScreen 会警告；**更新签名（`.sig`）已做，两者不可互相替代** |
-| 4b.16 | 微软商店（MSIX）可行性 | `Platform Unverified` → **实测否定** | 打出真实 MSIX 并装机验证：包能装、程序能起、能写 Git hook，但**hook 无法执行包内的 `devch-helper.exe`（拒绝访问）**——WindowsApps 的执行限制在 ACL 之上。见 phase-4b-progress §13 |
+| 4b.16 | 微软商店（MSIX） | `Tested`（本机） | `scripts/msix/` 打真实 MSIX 并装机：安装/AOT 图标/startupTask/数据包外；**helper 复制到 `%LOCALAPPDATA%\bin` 后 hook 可执行并投递记录**（10 项探测全过）。当前用 bootstrapper 按需装 WebView2；商店审核口径与无运行库真机流程**未验证**。见 §13–§14 |
 | 4b.5 | 数据迁移（§26.4） | `In Progress` | 更新前后快照/还原路径已测；数据库迁移兼容旧版本尚未做 |
 | 4b.6 | 多语言（§40.1） | `Tested` | 英文原文当 key + 简体中文字典（178/178）；`system` 跟随 webview locale；`UI LANGUAGE lang=… sample=…` 由 e2e 断言查表真的发生；`check-i18n.mjs` 守漏译 |
 | 4b.7 | 性能优化（§40.1 / §44.1） | `Partially Implemented` | 三个目标已实测达标（hook p95 10.81 ms、commit→通知 p95 280 ms、空闲 CPU 0.12% 整机），并修掉一处 500 ms 轮询导致的超预算；**开窗口时的空闲 CPU、以及 §44.3 的并发/损坏场景未测** |
