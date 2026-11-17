@@ -287,6 +287,13 @@ ALL CHECKS PASSED
 
 ---
 
+## 检查点 C
+
+Phase 3a / 3b 的工作已完成为可验收状态，验收材料见
+[checkpoint-c-acceptance.md](docs/development/checkpoint-c-acceptance.md)。
+
+**状态：等待用户验收。** 按 §38，未获明确确认不进入 Phase 4a。
+
 ## 支持范围
 
 **只支持 Windows**（10/11）。macOS 与 Linux 不在支持范围内，
