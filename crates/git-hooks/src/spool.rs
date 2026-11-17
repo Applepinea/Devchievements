@@ -30,7 +30,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
 /// Default cap on total Spool bytes (spec 10.5: must be bounded, never silently dropped).
@@ -288,8 +288,43 @@ impl Spool {
                 source: e,
             })?;
             bytes += meta.len();
-            let text = fs::read_to_string(&path).unwrap_or_default();
-            records += text.lines().filter(|l| !l.trim().is_empty()).count();
+
+            // A queue may approach the 16 MiB spool limit. Count its records with
+            // fixed-size buffered reads so every Hook does not allocate a String as
+            // large as each pending file just to enforce the queue limits.
+            let file = fs::File::open(&path).map_err(|e| SpoolError::Io {
+                path: path.clone(),
+                source: e,
+            })?;
+            let mut reader = BufReader::new(file);
+            let mut line_has_content = false;
+            loop {
+                let chunk = reader.fill_buf().map_err(|e| SpoolError::Io {
+                    path: path.clone(),
+                    source: e,
+                })?;
+                if chunk.is_empty() {
+                    break;
+                }
+
+                for byte in chunk {
+                    if *byte == b'\n' {
+                        if line_has_content {
+                            records += 1;
+                            line_has_content = false;
+                        }
+                    } else if !byte.is_ascii_whitespace() {
+                        line_has_content = true;
+                    }
+                }
+
+                let consumed = chunk.len();
+                reader.consume(consumed);
+            }
+
+            if line_has_content {
+                records += 1;
+            }
         }
         Ok((bytes, records))
     }

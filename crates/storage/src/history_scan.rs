@@ -36,8 +36,6 @@ pub struct ScannedCommit {
     pub author_email: String,
     /// Committer timestamp in milliseconds.
     pub committed_at_ms: i64,
-    /// Subject line, for diagnostics only.
-    pub subject: String,
 }
 
 /// How an import behaves.
@@ -89,9 +87,10 @@ pub struct ImportReport {
 pub fn scan_repository(repo_dir: &Path) -> Result<Vec<ScannedCommit>, String> {
     use std::process::Command;
 
-    // 0x1f separates fields, 0x1e separates records. Neither appears in a subject in
-    // practice, and %s is a single line by definition.
-    let format = "--format=%H%x1f%P%x1f%ae%x1f%ct%x1f%s%x1e";
+    // 0x1f separates fields and 0x1e separates records. The subject is deliberately
+    // omitted: importing does not use it, and it needlessly enlarges Git's output for
+    // large histories.
+    let format = "--format=%H%x1f%P%x1f%ae%x1f%ct%x1e";
     let output = Command::new("git")
         .current_dir(repo_dir)
         .args([
@@ -122,8 +121,7 @@ pub fn scan_repository(repo_dir: &Path) -> Result<Vec<ScannedCommit>, String> {
             continue;
         }
         let mut fields = record.split('\u{1f}');
-        let (Some(sha), Some(parents), Some(email), Some(seconds), Some(subject)) = (
-            fields.next(),
+        let (Some(sha), Some(parents), Some(email), Some(seconds)) = (
             fields.next(),
             fields.next(),
             fields.next(),
@@ -141,7 +139,6 @@ pub fn scan_repository(repo_dir: &Path) -> Result<Vec<ScannedCommit>, String> {
             parent_count: parents.split_whitespace().count(),
             author_email: email.trim().to_string(),
             committed_at_ms: seconds.saturating_mul(1000),
-            subject: subject.to_string(),
         });
     }
 
@@ -169,72 +166,60 @@ pub async fn import_repository(
     };
 
     // Spec 11.2: only commits authored by a configured email are imported.
-    let matched: Vec<&ScannedCommit> = scanned
-        .iter()
-        .filter(|c| identity.owns_email(&c.author_email))
-        .collect();
-    report.matched = matched.len();
-
     let batch_size = options.batch_size.max(1);
-    for (index, chunk) in matched.chunks(batch_size).enumerate() {
-        if cancel.load(Ordering::SeqCst) {
+    report.matched = scanned
+        .iter()
+        .filter(|commit| identity.owns_email(&commit.author_email))
+        .count();
+
+    // Keep only one bounded chunk of references. The source scan remains a Vec for
+    // now, but avoids an additional allocation proportional to the user's history.
+    let mut batch = Vec::with_capacity(batch_size);
+    let mut batch_index = 0usize;
+    for commit in scanned
+        .iter()
+        .filter(|commit| identity.owns_email(&commit.author_email))
+    {
+        if batch.is_empty() && cancel.load(Ordering::SeqCst) {
             report.cancelled = true;
             break;
         }
-
-        let batch_id = format!("import:{repository_id}:{index}");
-        begin_batch(pool, &batch_id, repository_id, ctx.clock.now_unix_millis())
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let mut outcome = BatchOutcome::default();
-
-        for commit in chunk {
-            let imported = crate::history_import::ImportCommit {
-                sha: commit.sha.clone(),
-                author_email: commit.author_email.clone(),
-                committed_at_ms: commit.committed_at_ms,
-                parent_count: commit.parent_count,
-                // The tree comparison is not available from a log walk; false means
-                // "not known to be empty", which keeps a commit that might be empty.
-                // Empty commits are excluded from counting by the engine, not here.
-                tree_equals_parent: false,
-            };
-            let Some(event) = build_import_event(
-                repository_id,
-                &imported,
-                &options.timezone,
-                options.day_start_minutes,
-                ctx,
-            ) else {
-                // A commit outside the supported date range is skipped rather than
-                // given an invented date (spec 12).
-                continue;
-            };
-
-            let facts = ingest::commit_facts(commit.parent_count, false);
-            let now = ctx.clock.now_unix_millis();
-            match ingest::ingest_import(pool, &event, &facts, now, identity, ctx).await {
-                Ok(IngestOutcome::Ingested { .. }) | Ok(IngestOutcome::IngestedSilently) => {
-                    report.ingested += 1;
-                    outcome.imported += 1;
-                }
-                Ok(IngestOutcome::Duplicate) => {
-                    report.duplicates += 1;
-                    outcome.duplicates += 1;
-                }
-                Ok(IngestOutcome::Refused(_)) => report.refused += 1,
-                Ok(IngestOutcome::Rejected(reason)) => {
-                    return Err(format!("ingest rejected {}: {reason}", commit.sha));
-                }
-                Err(e) => return Err(format!("ingest failed for {}: {e}", commit.sha)),
-            }
+        batch.push(commit);
+        if batch.len() < batch_size {
+            continue;
         }
 
-        finish_batch(pool, &batch_id, &outcome, ctx.clock.now_unix_millis())
-            .await
-            .map_err(|e| e.to_string())?;
-        report.batches += 1;
+        import_batch(
+            pool,
+            repository_id,
+            &batch,
+            batch_index,
+            identity,
+            options,
+            ctx,
+            &mut report,
+        )
+        .await?;
+        batch_index += 1;
+        batch.clear();
+    }
+
+    if !report.cancelled && !batch.is_empty() {
+        if cancel.load(Ordering::SeqCst) {
+            report.cancelled = true;
+        } else {
+            import_batch(
+                pool,
+                repository_id,
+                &batch,
+                batch_index,
+                identity,
+                options,
+                ctx,
+                &mut report,
+            )
+            .await?;
+        }
     }
 
     // Spec 11.2: rebuild projections once the import finishes, so backfill and the live
@@ -244,4 +229,70 @@ pub async fn import_repository(
         .map_err(|e| e.to_string())?;
 
     Ok(report)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn import_batch(
+    pool: &SqlitePool,
+    repository_id: &str,
+    commits: &[&ScannedCommit],
+    index: usize,
+    identity: &Identity,
+    options: &ImportOptions,
+    ctx: &InjectedContext<'_>,
+    report: &mut ImportReport,
+) -> Result<(), String> {
+    let batch_id = format!("import:{repository_id}:{index}");
+    begin_batch(pool, &batch_id, repository_id, ctx.clock.now_unix_millis())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let mut outcome = BatchOutcome::default();
+    for commit in commits {
+        let imported = crate::history_import::ImportCommit {
+            sha: commit.sha.clone(),
+            author_email: commit.author_email.clone(),
+            committed_at_ms: commit.committed_at_ms,
+            parent_count: commit.parent_count,
+            // The tree comparison is not available from a log walk; false means
+            // "not known to be empty", which keeps a commit that might be empty.
+            // Empty commits are excluded from counting by the engine, not here.
+            tree_equals_parent: false,
+        };
+        let Some(event) = build_import_event(
+            repository_id,
+            &imported,
+            &options.timezone,
+            options.day_start_minutes,
+            ctx,
+        ) else {
+            // A commit outside the supported date range is skipped rather than
+            // given an invented date (spec 12).
+            continue;
+        };
+
+        let facts = ingest::commit_facts(commit.parent_count, false);
+        let now = ctx.clock.now_unix_millis();
+        match ingest::ingest_import(pool, &event, &facts, now, identity, ctx).await {
+            Ok(IngestOutcome::Ingested { .. }) | Ok(IngestOutcome::IngestedSilently) => {
+                report.ingested += 1;
+                outcome.imported += 1;
+            }
+            Ok(IngestOutcome::Duplicate) => {
+                report.duplicates += 1;
+                outcome.duplicates += 1;
+            }
+            Ok(IngestOutcome::Refused(_)) => report.refused += 1,
+            Ok(IngestOutcome::Rejected(reason)) => {
+                return Err(format!("ingest rejected {}: {reason}", commit.sha));
+            }
+            Err(e) => return Err(format!("ingest failed for {}: {e}", commit.sha)),
+        }
+    }
+
+    finish_batch(pool, &batch_id, &outcome, ctx.clock.now_unix_millis())
+        .await
+        .map_err(|e| e.to_string())?;
+    report.batches += 1;
+    Ok(())
 }

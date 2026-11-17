@@ -662,13 +662,11 @@ fn spawn_drain_loop(app: tauri::AppHandle) {
                 }
                 let _ = processor.deliver_pending(&mut sink, 3).await;
 
-                // Spec 44.1 budgets 500 ms from commit to notification. Sleeping in
-                // 50 slices of 10 ms put a full 500 ms of waiting inside that budget,
-                // and measured p95 was 1004 ms -- the wait alone was over. Five
-                // slices keep the worst-case wait near 50 ms (Windows rounds a 10 ms
-                // sleep up to the timer tick, so it is not exactly 50) while still
-                // honouring a tray request within one slice.
-                for _ in 0..5 {
+                // A 100 ms idle interval cuts repeated empty spool and outbox scans
+                // while leaving most of the 500 ms notification budget for ingestion
+                // and presentation. The tray can still interrupt the wait in 10 ms
+                // slices. Re-measure the end-to-end p95 when changing this cadence.
+                for _ in 0..10 {
                     if DRAIN_NOW.swap(false, Ordering::SeqCst) {
                         break;
                     }
