@@ -12,6 +12,10 @@ tauri = { version = "2", features = ["tray-icon", "image-png", "protocol-asset"]
 # File pickers for importing custom assets (spec 20). The plugin is the supported
 # way to ask the OS; a hand-rolled dialog would be a second, unaudited one.
 tauri-plugin-dialog = "2"
+# Spec 40.3: updates come through Tauri's updater, which verifies the signature
+# of every artifact it installs. Shipping a hand-rolled downloader would mean
+# re-implementing that verification badly.
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 devchievements-companion-core = { path = "../../../crates/companion-core" }
@@ -32,7 +36,7 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-async-s
 async-std = { version = "1", features = ["attributes"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["UI_Notifications", "Data_Xml_Dom", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Foundation", "Win32_System_Variant", "Win32_Media_Audio"] }
+windows = { version = "0.62", features = ["UI_Notifications", "Data_Xml_Dom", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Foundation", "Win32_System_Variant", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Media_Audio"] }
 
 [profile.release]
 lto = true

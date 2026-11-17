@@ -22,11 +22,36 @@
       "iconAsTemplate": false
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU4M0Q4ODZFMUE1QURFNTAKUldSUTNsb2Fib2c5V0IwZmdjK2Nka21tR0JMVGZRd2RxbndPNExJSWRiR0NZVTZiNGFPRkd2TUYK",
+      "endpoints": []
+    }
+  },
   "bundle": {
-    "active": false,
-    "targets": "all",
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "../../../target/release/devch-helper.exe": "./devch-helper.exe",
+      "../assets/sounds/*.wav": "sounds/"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "English"
+        ]
+      }
+    }
   }
 }
