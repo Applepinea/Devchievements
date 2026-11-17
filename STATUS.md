@@ -359,6 +359,7 @@ ALL CHECKS PASSED
 | 4b.2 | 更新机制（Tauri Updater，§40.3） | `Partially Implemented` | 插件+公钥+签名产物就位；数据库快照/回滚 6 个测试；**无发布 feed、设置页未接按钮、真实下载安装未验证** |
 | 4b.3 | 发布流水线（§40.2） | `Platform Unverified` | `.github/workflows/release.yml` + 工作流 linter；本机无法执行 GitHub Actions，从未真正跑过 |
 | 4b.4 | 平台签名（§40.4） | `Blocked` | 无 Authenticode 证书 → 安装包没有代码签名，SmartScreen 会警告；**更新签名（`.sig`）已做，两者不可互相替代** |
+| 4b.16 | 微软商店（MSIX）可行性 | `Platform Unverified` → **实测否定** | 打出真实 MSIX 并装机验证：包能装、程序能起、能写 Git hook，但**hook 无法执行包内的 `devch-helper.exe`（拒绝访问）**——WindowsApps 的执行限制在 ACL 之上。见 phase-4b-progress §13 |
 | 4b.5 | 数据迁移（§26.4） | `In Progress` | 更新前后快照/还原路径已测；数据库迁移兼容旧版本尚未做 |
 | 4b.6 | 多语言（§40.1） | `Tested` | 英文原文当 key + 简体中文字典（178/178）；`system` 跟随 webview locale；`UI LANGUAGE lang=… sample=…` 由 e2e 断言查表真的发生；`check-i18n.mjs` 守漏译 |
 | 4b.7 | 性能优化（§40.1 / §44.1） | `Partially Implemented` | 三个目标已实测达标（hook p95 10.81 ms、commit→通知 p95 280 ms、空闲 CPU 0.12% 整机），并修掉一处 500 ms 轮询导致的超预算；**开窗口时的空闲 CPU、以及 §44.3 的并发/损坏场景未测** |

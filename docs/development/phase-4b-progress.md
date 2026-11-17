@@ -849,4 +849,54 @@ ${If} $4 == "" ... 才去下载/安装 WebView2
 | 强制缺 Git | 0 | 安装成功 + 提示（Git 不是门禁） |
 | 强制缺 WebView2 | 2 | 未安装任何文件 |
 
+## 13. MSIX 实测：商店路线对「执行打包内的 exe」是硬阻塞
+
+为了回答「MSIX 上商店是否可行」，我打了一个真实 MSIX 并装在本机测（不是推测）。
+
+### 13.1 做了什么
+
+`scripts/msix/build-msix.mjs`：
+
+- 手写 `AppxManifest.xml`（`Windows.FullTrustApplication` + `runFullTrust`，并声明 `zh-cn`）；
+- 载荷与 NSIS 包一致：主程序、`devch-helper.exe`、`sounds/`；
+- `makeappx pack` → `signtool` 用自签证书签 → 提权信任证书并 `Add-AppxPackage`；
+- `scripts/msix/probe-packaged-app.mjs` 逐项验证。
+
+### 13.2 结果
+
+| 检查 | 结果 |
+| --- | --- |
+| 包能打出来、能签名、能安装 | ✅ 装到 `C:\Program Files\WindowsApps\...` |
+| 打包目录只读（数据必须搬出安装目录） | ✅ 确认 |
+| 打包后的程序能被启动 | ✅ 进程起来了，托盘存在 |
+| 程序能往用户仓库写 Git hook | ✅ `.git/hooks/post-commit` 写入成功 |
+| **hook 能否执行包内的 `devch-helper.exe`** | ❌ **拒绝访问** |
+
+最后一条是决定性的：
+
+```text
+BLOCKED MethodInvocationException: 对“Start”的调用引发异常：拒绝访问
+```
+
+`Program Files\WindowsApps` 下的可执行文件**只能由包身份启动**，普通进程（包括 git 拉起的 hook）
+执行它会被拒绝。而本产品的核心机制恰恰就是「git → hook → helper」。
+
+这不是权限没配好：ACL 里 `BUILTIN\Users` 有 `RX`，但 WindowsApps 的执行限制在 ACL 之上，
+属于包模型本身。
+
+### 13.3 结论
+
+**MSIX 路线在当前架构下不可行**，除非改动产品核心：
+
+| 可能的绕法 | 是否可接受 |
+| --- | --- |
+| hook 直接调用主程序而不是 helper | 仍是被打包的程序，同样被拒 |
+| hook 里内联采集逻辑（不调 exe） | 等于放弃 Rust helper，重写采集，且无法复用已测代码 |
+| 把 helper 复制到包外再调用 | 包内程序可以复制自身到 `%LOCALAPPDATA%` 再执行——**这是唯一可能的路，但等于把 helper 装到包外**，商店审核是否接受需要再确认 |
+
+所以**商店（MSIX）与「Git hook 型产品」存在结构性冲突**。若将来真要上商店，唯一有希望的方向是第三条，
+且需要先确认审核口径。
+
+这条结论现在有实测支撑，不再是猜测；相关脚本保留在 `scripts/msix/`，将来立场变化时可以直接重跑。
+
 ---

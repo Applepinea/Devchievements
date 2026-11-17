@@ -1,0 +1,17 @@
+WARNING: Do not remove or modify this file while a packaged build is installed.
+
+Devchievements keeps its data here, next to the application package.
+Everything in this folder belongs to the user, not to the installer:
+
+  companion.db    commit history, achievements, outbox
+  settings.json   identity, language, autostart preference, sound and popup style
+  spool/          records written by the git hook, waiting to be read
+  assets/         images and sounds the user imported
+  webview/        the WebView2 profile for the window
+  companion.log   what the app printed at launch
+
+Uninstalling the package leaves this folder alone, which is the point:
+uninstalling an app must not delete a year of history.
+
+To remove it manually, delete this folder.
+
