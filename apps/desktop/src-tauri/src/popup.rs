@@ -237,15 +237,26 @@ fn build_window(
         .build()
 }
 
-/// Put the popup in the requested corner of the usable area.
+/// Put the popup in the requested corner of the usable area of the right monitor.
 ///
-/// "Usable" means the work area, which excludes the taskbar. Using the whole monitor
-/// put a popup with a zero margin behind the taskbar, where it looked like nothing had
-/// happened at all -- exactly the report this fixes.
+/// Two bugs lived here. The first: the full monitor size was used instead of the work
+/// area, so a bottom-right popup with a zero margin sat behind the taskbar. The second,
+/// reported as "the preview does nothing at all": the monitor came from the popup
+/// window, which is invisible when it is asked, so on a multi-monitor desk the
+/// notification could appear on a screen nobody was looking at. The monitor under the
+/// cursor is the best available answer to "where is the user looking" (spec 29.2).
 fn place(window: &tauri::WebviewWindow, style: &devchievements_themes::PopupStyle) {
-    let Ok(Some(monitor)) = window.current_monitor() else {
+    let app = window.app_handle();
+
+    // The cursor decides which monitor, and falls back to the window's own monitor.
+    let cursor = app.cursor_position().ok();
+    let monitor = cursor
+        .and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten())
+        .or_else(|| window.current_monitor().ok().flatten());
+    let Some(monitor) = monitor else {
         return;
     };
+
     let origin = monitor.position();
     let scale = monitor.scale_factor();
 
@@ -265,18 +276,18 @@ fn place(window: &tauri::WebviewWindow, style: &devchievements_themes::PopupStyl
     );
     let _ = window.set_position(target);
     // Logged because "the preview did nothing" is otherwise indistinguishable from
-    // "the preview appeared under the taskbar": the numbers settle it.
+    // "it appeared under the taskbar" or "it appeared on the other screen": the
+    // numbers settle it.
     println!(
-        "POPUP placed at={},{} usable={}x{} scale={scale}",
-        target.x, target.y, usable_width, usable_height
+        "POPUP placed at={},{} usable={}x{} monitor_origin={},{} scale={scale}",
+        target.x, target.y, usable_width, usable_height, origin.x, origin.y
     );
 }
 
 /// The part of the monitor that windows may occupy, in physical pixels.
 ///
-/// The taskbar is subtracted. `SPI_GETWORKAREA` covers the primary monitor, which is
-/// where a notification belongs when the app has no opinion; a multi-monitor setup
-/// still gets the primary work area rather than an area that includes the taskbar.
+/// The taskbar is subtracted. `SPI_GETWORKAREA` describes the primary monitor only, so
+/// it is used as the fallback when the popup is on another one.
 #[cfg(windows)]
 fn work_area(fallback: tauri::PhysicalSize<u32>) -> (u32, u32) {
     use windows::Win32::Foundation::RECT;
