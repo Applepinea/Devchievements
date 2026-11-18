@@ -9,9 +9,11 @@ import "./styles.css";
 // webview console is not something a user can open, and the Rust side only knows
 // that no view was ever reported ready. Reporting the message turns "the UI does
 // not load" into a line in companion.log.
-function report(message: string) {
+export function uiError(message: string) {
   invoke("ui_error", { message }).catch(() => undefined);
 }
+
+const report = uiError;
 window.addEventListener("error", (event) => {
   report(event.error instanceof Error ? event.error.stack ?? event.error.message : event.message);
 });

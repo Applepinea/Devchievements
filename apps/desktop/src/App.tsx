@@ -8,6 +8,7 @@ import Repositories from "./pages/Repositories";
 import About from "./pages/About";
 import Settings from "./pages/Settings";
 import Welcome from "./pages/Welcome";
+import { uiError } from "./main";
 
 // Labels are resolved at render time, so switching the language is a reload rather
 // than a state machine. Page ids stay English: they are the URL contract used by the
@@ -88,6 +89,28 @@ export default function App() {
     if (!onboarded) return;
     void uiReady(current);
   }, [onboarded, current, languageReady]);
+
+  // After the page has had time to load its data, look for placeholder text on
+  // screen and report it through the same channel as an exception.
+  //
+  // This exists because the dashboard printed `undefined d` and `Invalid Date` for a
+  // released build and no test noticed: the values were wrong on the wire, and every
+  // assertion checked the data source rather than what a person would read.
+  useEffect(() => {
+    if (onboarded !== true) return;
+    const timer = window.setTimeout(() => {
+      const text = document.body.innerText;
+      const found = ["undefined", "NaN", "Invalid Date", "[object Object]"].filter((bad) =>
+        text.includes(bad),
+      );
+      if (found.length > 0) {
+        void uiError(`UI PLACEHOLDER ${found.join(",")} on page ${current}`);
+      } else {
+        void uiError(`UI PLACEHOLDER none on page ${current}`);
+      }
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [onboarded, current]);
 
   if (onboarded === null || !languageReady) {
     return <p className="muted">{t("Starting...")}</p>;

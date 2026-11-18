@@ -2053,8 +2053,15 @@ fn main() {
                 None
             };
             if let Some(reason) = reason {
-                match open_main_window(app.handle()) {
-                    Ok(()) => println!("WINDOW opened reason={reason}"),
+                // The page comes from --page, so a launcher or a screenshot run can open
+                // a specific page. Without it this argument was silently ignored and
+                // every capture showed the dashboard.
+                let page = std::env::args()
+                    .position(|a| a == "--page")
+                    .and_then(|i| std::env::args().nth(i + 1))
+                    .unwrap_or_else(|| "dashboard".to_string());
+                match open_main_window_at(app.handle(), &page) {
+                    Ok(()) => println!("WINDOW opened reason={reason} page={page}"),
                     Err(e) => println!("WINDOW FAILED error={e}"),
                 }
             }

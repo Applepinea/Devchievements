@@ -321,6 +321,7 @@ ALL CHECKS PASSED
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-11-18（首屏缺陷） | 修掉 READ-ONLY 数据跨 IPC 的**线格式不一致**：`Statistics`/`StorageHealth`/`ActivityDay`/`RepositoryEntry`/`Capabilities` 缺 `rename_all = "camelCase"`，导致 `undefined 天`、`schema vundefined`、`Invalid Date`，以及 **About 页白屏**；补 5 个线格式测试 + 页面自检 + `ui-pages` e2e（6 页 × 2 断言） |
 | 2026-11-18（性能优化跟进，已并入 main） | Spool 计数改为定长缓冲读取；历史导入去掉未使用的提交主题与全量匹配引用副本；扩展统计改走 IndexedDB 索引。托盘扫描周期试过 100 ms，**实测 p95 437 ms（预算 87%）后回退 50 ms** |
 | 2026-11-16（第一轮） | Phase 0 主体：环境勘察、隔离工具链、Monorepo、AGENTS/STATUS/spec 拆分/ADR、15 场景 Git 实验 + fixtures、WASM 验证、扩展构建 |
 | 2026-11-18（Phase 4b 第十二轮） | 修掉 §22 的功能缺口：自定义成就**真正会被评估**（同事务、官方统计、复用内置记录路径）；新增 `user-achievements` e2e；顺带让 headless companion 也读规则 |
@@ -368,6 +369,7 @@ ALL CHECKS PASSED
 | 4b.2 | 更新机制（Tauri Updater，§40.3） | `Partially Implemented` | 插件+公钥+签名产物就位；数据库快照/回滚 6 个测试；**无发布 feed、设置页未接按钮、真实下载安装未验证** |
 | 4b.3 | 发布流水线（§40.2） | `Platform Unverified` | `.github/workflows/release.yml` + 工作流 linter；本机无法执行 GitHub Actions，从未真正跑过 |
 | 4b.4 | 平台签名（§40.4） | `Blocked` | 无 Authenticode 证书 → 安装包没有代码签名，SmartScreen 会警告；**更新签名（`.sig`）已做，两者不可互相替代** |
+| 4b.17 | 界面数据正确性（§44.2） | `Tested` | 5 个线格式测试钉住 IPC 键名；页面自检把 `undefined`/`Invalid Date` 写进日志；`ui-pages` e2e 逐页打开真实窗口并断言「请求的页 = 渲染的页」且无占位文本（12 项） |
 | 4b.16 | 微软商店（MSIX） | `Tested`（本机） | `scripts/msix/` 打真实 MSIX 并装机：安装/AOT 图标/startupTask/数据包外；**helper 复制到 `%LOCALAPPDATA%\bin` 后 hook 可执行并投递记录**（10 项探测全过）。当前用 bootstrapper 按需装 WebView2，认证备注见 `docs/development/store-certification-notes.md`；商店审核口径与无运行库真机流程**未验证**。见 §13–§14 |
 | 4b.5 | 数据迁移（§26.4） | `In Progress` | 更新前后快照/还原路径已测；数据库迁移兼容旧版本尚未做 |
 | 4b.6 | 多语言（§40.1） | `Tested` | 英文原文当 key + 简体中文字典（178/178）；`system` 跟随 webview locale；`UI LANGUAGE lang=… sample=…` 由 e2e 断言查表真的发生；`check-i18n.mjs` 守漏译 |

@@ -958,4 +958,35 @@ ok  the data directory is outside the package
 | `fixedRuntime`（把 130MB 运行时打进包） | 未做；当前用 bootstrapper 按需安装，包体保持 6.5MB |
 | 打包后的 GUI 启动日志 | 通过 `shell:AppsFolder` 启动时没有写入 `companion.log`，进程确实在跑；原因未查（CLI 模式正常） |
 
+
+## 15. 首屏三个 `undefined`：线格式与 TypeScript 类型不一致
+
+做商店截图时发现的，而且**已经存在于发出去的构建里**：
+
+| 位置 | 现象 | 原因 |
+| --- | --- | --- |
+| 最长连续 | `undefined 天` | `Statistics` 序列化成 `longest_streak`，界面读 `longestStreak` |
+| 存储 | `schema vundefined` | `StorageHealth` 同样是 snake_case |
+| 最早的事件 | `Invalid Date` | `oldest_event_at` 读不到，`new Date(undefined)` |
+| About 页 | **整页白屏** | `Capabilities` 也是 snake_case，`channel(undefined)` 里 `.replace` 抛异常 |
+
+共同原因：这些结构体直接跨 IPC 边界，但只有外层 DTO 加了 `rename_all = "camelCase"`，
+内部的领域模型没加。**没有任何测试比对过 JSON 键名和另一侧的期望**，所以一路绿到最后。
+
+修法：给 `ActivityDay`、`Statistics`、`StorageHealth`、`RepositoryEntry`、`Capabilities`
+加 `rename_all = "camelCase"`，并补 5 个线格式测试（断言 JSON 的键集合，而不是字段值）。
+
+### 15.1 加了什么守卫
+
+1. **线格式测试**：Rust 侧断言导出的键名集合，与 TS 接口逐字段对齐；键一改，测试红。
+2. **页面自检**：界面在 2.5 秒后扫一次 `document.body.innerText`，发现
+   `undefined` / `Invalid Date` / `[object Object]` 就通过 `ui_error` 写进 `companion.log`，
+   并打印 `UI PLACEHOLDER none on page <id>` 表示干净。
+3. **`scripts/e2e/ui-pages.mjs`**：逐页打开真实窗口，断言「打开的是请求的那一页」且日志里
+   有 `UI PLACEHOLDER none`。这条同时验证了 `--open-window --page` 参数真的生效
+   （之前被静默忽略，所以每次截图都是仪表盘）。
+
+第 2 条立刻就抓到第 4 行那个白屏：本轮第一次跑就报
+`UI ERROR TypeError: Cannot read properties of undefined (reading 'replace')`。
+
 ---

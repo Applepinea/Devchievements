@@ -90,7 +90,12 @@ pub enum FullscreenOutcome {
 }
 
 /// Everything the product needs to know about the host.
+///
+/// Serialised in camelCase because this struct crosses into the webview, where the
+/// TypeScript interface reads `desktopPopup`. It was snake_case on the wire while the
+/// UI expected camelCase, so the About page read `undefined.replace(...)` and crashed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     /// A borderless transparent popup window.
     pub desktop_popup: CapabilityState,
@@ -321,5 +326,26 @@ mod tests {
         let s = c.summary();
         assert!(s.contains("popup=notification-fallback"));
         assert!(s.contains("notification=unverified"));
+    }
+
+    #[test]
+    fn capabilities_are_camel_case_on_the_wire() {
+        // The About page crashed on `undefined.replace(...)` because these names did
+        // not match the TypeScript interface. Nothing compared them until this test.
+        let json = serde_json::to_value(Capabilities::default()).expect("serialise");
+        let mut keys: Vec<String> = json.as_object().expect("object").keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec![
+                "desktopPopup",
+                "doNotDisturbDetection",
+                "dpiScaling",
+                "multiMonitor",
+                "systemNotification",
+                "tray",
+                "wasm",
+            ]
+        );
     }
 }

@@ -33,6 +33,7 @@ pub struct GalleryEntry {
 
 /// One day of activity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ActivityDay {
     /// Local date, already frozen at ingestion time (spec 12).
     pub local_date: String,
@@ -44,6 +45,7 @@ pub struct ActivityDay {
 
 /// One repository in the manager.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RepositoryEntry {
     /// Stable alias, never the raw identifier (spec 26.2).
     pub alias: String,
@@ -57,6 +59,7 @@ pub struct RepositoryEntry {
 
 /// Aggregate statistics.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Statistics {
     /// Total events recorded.
     pub events: i64,
@@ -76,6 +79,7 @@ pub struct Statistics {
 
 /// Health of the database file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StorageHealth {
     /// Path, already redacted by the caller.
     pub path: String,
@@ -399,5 +403,92 @@ mod tests {
     fn a_malformed_date_is_not_treated_as_consecutive() {
         assert!(!is_next_day("not-a-date", "2026-01-02"));
         assert!(!is_next_day("2026-01-01", "2026-13-40"));
+    }
+}
+
+#[cfg(test)]
+mod wire_tests {
+    //! The IPC boundary.
+    //!
+    //! These models travel to the webview and are read by TypeScript interfaces that
+    //! expect camelCase. They used to be serialised with snake_case field names, and
+    //! the only symptom was `undefined` printed on the dashboard -- no test noticed,
+    //! because nothing compared the JSON keys to what the other side expects.
+
+    use super::*;
+
+    fn keys<T: serde::Serialize>(value: &T) -> Vec<String> {
+        let json = serde_json::to_value(value).expect("serialise");
+        let mut keys: Vec<String> = json
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    #[test]
+    fn statistics_are_camel_case_on_the_wire() {
+        let value = Statistics {
+            events: 1,
+            commits: 2,
+            repositories: 3,
+            achievements: 4,
+            unviewed_achievements: 5,
+            longest_streak: 6,
+            active_days: 7,
+        };
+        assert_eq!(
+            keys(&value),
+            vec![
+                "achievements",
+                "activeDays",
+                "commits",
+                "events",
+                "longestStreak",
+                "repositories",
+                "unviewedAchievements",
+            ]
+        );
+    }
+
+    #[test]
+    fn storage_health_is_camel_case_on_the_wire() {
+        let value = StorageHealth {
+            path: "C:/data".to_string(),
+            bytes: 1,
+            schema_version: 2,
+            oldest_event_at: Some(3),
+        };
+        assert_eq!(
+            keys(&value),
+            vec!["bytes", "oldestEventAt", "path", "schemaVersion"]
+        );
+    }
+
+    #[test]
+    fn activity_days_are_camel_case_on_the_wire() {
+        let value = ActivityDay {
+            local_date: "2026-11-18".to_string(),
+            commits: 1,
+            rank: None,
+        };
+        assert_eq!(keys(&value), vec!["commits", "localDate", "rank"]);
+    }
+
+    #[test]
+    fn repository_entries_are_camel_case_on_the_wire() {
+        let value = RepositoryEntry {
+            alias: "one".to_string(),
+            commits: 1,
+            first_seen_at: 2,
+            updated_at: 3,
+        };
+        assert_eq!(
+            keys(&value),
+            vec!["alias", "commits", "firstSeenAt", "updatedAt"]
+        );
     }
 }
