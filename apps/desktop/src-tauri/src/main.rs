@@ -2064,6 +2064,20 @@ fn main() {
                     Ok(()) => println!("WINDOW opened reason={reason} page={page}"),
                     Err(e) => println!("WINDOW FAILED error={e}"),
                 }
+                // Reproduces the Settings page's "Preview popup" button without a
+                // click: the same command, from the same process, with the settings
+                // window already open. That context is what could not be tested any
+                // other way.
+                if std::env::args().any(|a| a == "--preview-popup") {
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(1500));
+                        match commands::show_popup_preview(handle) {
+                            Ok(()) => println!("PREVIEW command returned ok"),
+                            Err(e) => println!("PREVIEW command failed: {e}"),
+                        }
+                    });
+                }
             }
             // Reported every launch: whether the window opened is otherwise only
             // observable by looking at the screen.

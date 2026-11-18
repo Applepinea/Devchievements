@@ -170,12 +170,17 @@ impl PopupStyle {
         (width, height)
     }
 
-    /// Top-left position for a window of this size on a screen of the given size.
+    /// Top-left position for a window of this size inside a usable area.
     ///
-    /// Pure arithmetic so placement can be tested without a monitor.
+    /// `screen` is the area the window may occupy, not the monitor: a window placed
+    /// against the bottom of the monitor disappears behind the taskbar, which is what
+    /// a zero margin used to do. Pure arithmetic so placement is testable without a
+    /// monitor.
     pub fn position(&self, screen: (u32, u32)) -> (i32, i32) {
         let (width, height) = self.window_size();
-        let margin = self.screen_margin as i32;
+        // A small gap is enforced even when the user asks for zero: touching the edge
+        // looks like a rendering bug and, at the bottom, is hidden outright.
+        let margin = (self.screen_margin as i32).max(MIN_SCREEN_MARGIN);
         let (sw, sh) = (screen.0 as i32, screen.1 as i32);
         let x = match self.corner {
             Corner::TopLeft | Corner::BottomLeft => margin,
@@ -185,7 +190,11 @@ impl PopupStyle {
             Corner::TopLeft | Corner::TopRight => margin,
             Corner::BottomLeft | Corner::BottomRight => sh - height as i32 - margin,
         };
-        (x, y)
+        // Never let a small screen or a large popup push the window off the area.
+        (
+            x.clamp(0, (sw - width as i32).max(0)),
+            y.clamp(0, (sh - height as i32).max(0)),
+        )
     }
 }
 
@@ -213,6 +222,11 @@ impl std::fmt::Display for ThemeRejection {
 }
 
 impl std::error::Error for ThemeRejection {}
+
+/// The smallest gap kept between a popup and the edge of the usable area.
+///
+/// Logical pixels. Zero looks like a clipped window, and at the bottom it is clipped.
+pub const MIN_SCREEN_MARGIN: i32 = 16;
 
 /// The schema version this build writes and accepts.
 pub const THEME_SCHEMA_VERSION: u32 = 1;
@@ -536,5 +550,49 @@ mod tests {
         let theme = parse_theme(json).expect("parse");
         assert_eq!(theme.popup.animation_ms, 240);
         assert_eq!(theme.popup.background_blur, 0);
+    }
+
+    #[test]
+    fn a_zero_margin_still_keeps_a_gap_from_the_edge() {
+        // Reported from the app: a popup with margin 0 sat against the bottom edge and
+        // the taskbar covered it, so the preview looked like it did nothing.
+        let style = PopupStyle {
+            screen_margin: 0,
+            corner: Corner::BottomRight,
+            ..PopupStyle::default()
+        };
+        let (width, height) = style.window_size();
+        let (x, y) = style.position((1920, 1040));
+        assert_eq!(x, 1920 - width as i32 - MIN_SCREEN_MARGIN);
+        assert_eq!(y, 1040 - height as i32 - MIN_SCREEN_MARGIN);
+        assert!(y + height as i32 <= 1040 - MIN_SCREEN_MARGIN);
+    }
+
+    #[test]
+    fn a_popup_wider_than_the_area_does_not_produce_a_negative_coordinate() {
+        // A negative position puts the title bar off-screen, where a window cannot be
+        // dragged back. Only the axis that overflows is pinned; the other keeps its
+        // corner, which is why this asserts them separately.
+        let style = PopupStyle {
+            width: 4000,
+            ..PopupStyle::default()
+        };
+        let (x, y) = style.position((800, 600));
+        assert_eq!(x, 0, "a popup wider than the area starts at its left edge");
+        let (_, height) = style.window_size();
+        assert!(
+            (0..=600 - height as i32).contains(&y),
+            "y stays inside the area: {y}"
+        );
+    }
+
+    #[test]
+    fn the_configured_margin_is_honoured_when_it_is_larger_than_the_minimum() {
+        let style = PopupStyle {
+            screen_margin: 40,
+            corner: Corner::TopLeft,
+            ..PopupStyle::default()
+        };
+        assert_eq!(style.position((1920, 1040)), (40, 40));
     }
 }

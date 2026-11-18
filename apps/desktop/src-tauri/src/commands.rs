@@ -633,12 +633,24 @@ pub fn show_popup_preview(app: tauri::AppHandle) -> Result<(), String> {
         style: Default::default(),
         icon_url: crate::popup::icon_for("preview"),
     };
+    // The work has to happen on the main thread, but the answer has to come back:
+    // returning Ok before the window exists made the page say "Preview opened" even
+    // when nothing appeared, which is how this looked like a broken button.
     let handle = app.clone();
-    app.run_on_main_thread(move || match crate::popup::show(&handle, &payload, 1) {
-        Ok(()) => println!("POPUP preview shown"),
-        Err(e) => println!("POPUP preview failed: {e}"),
+    let (sender, receiver) = std::sync::mpsc::channel();
+    app.run_on_main_thread(move || {
+        let outcome = crate::popup::show(&handle, &payload, 1);
+        match &outcome {
+            Ok(()) => println!("POPUP preview shown"),
+            Err(e) => println!("POPUP preview failed: {e}"),
+        }
+        // A closed receiver means the command was cancelled; nothing to do.
+        let _ = sender.send(outcome);
     })
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .map_err(|_| "the preview did not open within 10 seconds".to_string())?
 }
 
 // ---------------------------------------------------------------- assets
