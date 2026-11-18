@@ -15,6 +15,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,6 +56,13 @@ function seed(dataDir) {
     encoding: "utf8",
     env,
   });
+  // A parked report, so the Settings page renders the "waiting for you" block. A
+  // section nobody renders is a section whose undefined fields nobody catches.
+  const db = new DatabaseSync(path.join(dataDir, "companion.db"));
+  db.prepare(
+    "INSERT OR IGNORE INTO browser_reports_rejected (event_id, login, repository_id, payload, received_at) VALUES (?,?,?,?,?)",
+  ).run("evt-parked", "PageTest", "github:PageTest/widgets", "{}", Date.now());
+  db.close();
   return env;
 }
 

@@ -43,6 +43,8 @@ macro_rules! app_commands {
             commands::mark_achievements_viewed,
             commands::get_activity,
             commands::get_repositories,
+            commands::get_unlinked_github_logins,
+            commands::link_github_login,
             commands::get_about,
             commands::backup_database,
             commands::restore_database,
@@ -76,6 +78,7 @@ macro_rules! app_commands {
 /// message that explains it. Anything that opens a window is not a command.
 const COMMAND_FLAGS: &[&str] = &[
     "--diagnostics",
+    "--link-login",
     "--capabilities",
     "--onboarding",
     "--reset-onboarding",
@@ -227,6 +230,14 @@ pub(crate) static UI_READY: AtomicBool = AtomicBool::new(false);
 
 /// Set when the user asks for an immediate drain from the tray.
 static DRAIN_NOW: AtomicBool = AtomicBool::new(false);
+
+/// Ask the drain loop to run now instead of waiting out its 50 ms poll.
+///
+/// Used after work that produced new Spool records (replaying parked reports), so a
+/// user who just clicked "link" does not wait for the next tick to see the result.
+pub(crate) fn nudge_drain() {
+    DRAIN_NOW.store(true, Ordering::SeqCst);
+}
 
 /// Counts what has been shown, so the tray tooltip reflects real work.
 static SHOWN: AtomicU64 = AtomicU64::new(0);
@@ -1689,6 +1700,25 @@ fn main() {
             }
             Err(e) => {
                 println!("MAPPING FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Link a GitHub login and replay the browser reports it sent while unlinked.
+    // Same code path as the Settings button; the flag exists so a test can drive it.
+    if let Some(i) = std::env::args().position(|a| a == "--link-login") {
+        let Some(login) = std::env::args().nth(i + 1) else {
+            println!("LINK FAILED: --link-login needs a login");
+            std::process::exit(2);
+        };
+        match tauri::async_runtime::block_on(commands::link_login_and_replay(&login)) {
+            Ok(replayed) => {
+                println!("LINKED {login} replayed={replayed}");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("LINK FAILED: {e}");
                 std::process::exit(1);
             }
         }

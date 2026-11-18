@@ -17,6 +17,9 @@ import {
   showPreview,
   resetOnboarding,
   exportDiagnostics,
+  getUnlinkedGithubLogins,
+  linkGithubLogin,
+  type UnlinkedLogin,
 } from "../ipc";
 import { t, tf } from "../i18n";
 
@@ -83,6 +86,41 @@ export default function Settings() {
   const [soundNotice, setSoundNotice] = useState<string>("");
   const [diagnosticsRaw, setDiagnosticsRaw] = useState(false);
   const [diagnosticsNotice, setDiagnosticsNotice] = useState<string>("");
+  // Reports the identity gate refused. They are real activity; only the account is
+  // not linked yet, so this list is a to-do rather than an error log.
+  const [waiting, setWaiting] = useState<UnlinkedLogin[]>([]);
+  const [linkNotice, setLinkNotice] = useState<string>("");
+
+  const refreshWaiting = useCallback(async () => {
+    try {
+      setWaiting(await getUnlinkedGithubLogins());
+    } catch {
+      // Cosmetic: a failure here must not break the page.
+    }
+  }, []);
+
+  const linkAccount = async (login: string) => {
+    setLinkNotice("");
+    try {
+      const replayed = await linkGithubLogin(login);
+      // "Replayed", not "counted": an opened pull request and a merged one both
+      // replay, but only the merged one moves a statistic.
+      setLinkNotice(
+        tf("Linked {login}. {n} waiting report(s) were replayed.", {
+          login,
+          n: replayed,
+        }),
+      );
+      await Promise.all([load(), refreshWaiting()]);
+    } catch (e) {
+      setLinkNotice(
+        tf("Could not link {login}: {error}", {
+          login,
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    }
+  };
 
   const pickSound = async () => {
     const chosen = await openFileDialog(["wav"]);
@@ -191,7 +229,8 @@ export default function Settings() {
     void load();
     void refreshAssets();
     void refreshSounds();
-  }, [load, refreshAssets, refreshSounds]);
+    void refreshWaiting();
+  }, [load, refreshAssets, refreshSounds, refreshWaiting]);
 
   const save = async () => {
     if (!settings) return;
@@ -277,6 +316,28 @@ export default function Settings() {
       <p className="muted">
         {t("The browser extension reports commits by GitHub account. A report only counts when its login is mapped here to one of the emails above; everything else is refused rather than assumed to be yours.")}
       </p>
+      {waiting.length > 0 ? (
+        <div className="notice">
+          <strong>{t("Waiting for you")}</strong>
+          <p className="muted">
+            {t("These GitHub accounts sent reports that were refused because they are not linked. Linking one also counts what it already sent.")}
+          </p>
+          <ul className="list">
+            {waiting.map((entry) => (
+              <li key={entry.login} className="row spread">
+                <span className="mono">{entry.login}</span>
+                <span className="muted">
+                  {tf("{n} report(s)", { n: entry.reports })}
+                </span>
+                <button onClick={() => void linkAccount(entry.login)}>
+                  {t("Link to my email")}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="notice">{linkNotice}</p>
+        </div>
+      ) : null}
       <ul className="list">
         {(settings.githubLogins ?? []).map((mapping: LoginMapping, index: number) => (
           <li key={index} className="row">

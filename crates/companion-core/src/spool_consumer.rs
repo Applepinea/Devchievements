@@ -27,7 +27,7 @@ use devchievements_events::{
 };
 use devchievements_git_hooks::spool::{Record, Spool, SpoolError};
 use devchievements_notifications::freshness_action;
-use devchievements_storage::ingest::{self, IngestOutcome, IngestRefusal};
+use devchievements_storage::ingest::{self, IngestOutcome};
 use devchievements_storage::projections;
 use sqlx::SqlitePool;
 
@@ -262,12 +262,51 @@ impl Companion {
             Ok(IngestOutcome::IngestedSilently) => Ok(IngestResult::Ingested { notifications: 0 }),
             Ok(IngestOutcome::Duplicate) => Ok(IngestResult::Duplicate),
             Ok(IngestOutcome::Rejected(reason)) => Err(reason),
-            Ok(IngestOutcome::Refused(refusal)) => match refusal {
-                IngestRefusal::IdentityNotConfigured => Ok(IngestResult::Refused),
-                IngestRefusal::NotTheUser { .. } => Ok(IngestResult::Refused),
-            },
+            Ok(IngestOutcome::Refused(_refusal)) => {
+                // Spec 7 says refuse; it does not say "and forget it". A browser
+                // report refused because the account is not linked is a setup step
+                // the user can complete, so the report is parked and can be replayed.
+                self.park_refused(&event, &payload, &record.payload).await;
+                Ok(IngestResult::Refused)
+            }
             Err(e) => Err(e.to_string()),
         }
+    }
+
+    /// Park a browser report the identity gate refused.
+    ///
+    /// Only browser reports are parked. A local commit refused for its author is a
+    /// different problem -- the repository's `user.email` is wrong -- and replaying
+    /// it would only produce the same refusal until that is fixed anyway.
+    async fn park_refused(
+        &self,
+        event: &devchievements_events::Event,
+        payload: &serde_json::Value,
+        raw: &str,
+    ) {
+        if payload.get("kind").and_then(|k| k.as_str()) != Some("browser_github") {
+            return;
+        }
+        let Some(login) = payload
+            .get("author_login")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        else {
+            return;
+        };
+
+        // A parking failure must not turn a refusal into a storage failure: the
+        // record is already excluded from statistics either way.
+        let _ = devchievements_storage::refusals::park(
+            &self.pool,
+            event.event_id.as_str(),
+            login,
+            event.canonical_repository_id.as_str(),
+            raw,
+            now_millis(),
+        )
+        .await;
     }
 
     /// Build an event from what the Hook Helper wrote.

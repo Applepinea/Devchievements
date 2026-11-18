@@ -116,6 +116,21 @@ function main() {
   // this host, and every dependency the UI needs is already hoisted.
   const desktopUi = path.join(repoRoot, "apps", "desktop");
   const viteBin = path.join(repoRoot, "node_modules", "vite", "bin", "vite.js");
+  // vite strips types without checking them, so a renamed field or a wrong prop type
+  // still produces a bundle and fails at runtime in front of the user. tsc is the
+  // only step that reads the types, so it runs before the build.
+  const tscBin = path.join(repoRoot, "node_modules", "typescript", "bin", "tsc");
+  if (fs.existsSync(tscBin) && fs.existsSync(desktopUi)) {
+    step("desktop-ui-typecheck", process.execPath, [tscBin, "--noEmit"], desktopUi);
+  } else {
+    results.push({
+      name: "desktop-ui-typecheck",
+      ok: null,
+      skipped: "typescript not installed (run: pnpm install --ignore-scripts)",
+    });
+    console.log("SKIP  desktop-ui-typecheck (typescript not installed)");
+  }
+
   if (fs.existsSync(viteBin) && fs.existsSync(desktopUi)) {
     step("desktop-ui-build", process.execPath, [viteBin, "build"], desktopUi);
   } else {

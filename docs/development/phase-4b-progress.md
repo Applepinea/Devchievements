@@ -1179,3 +1179,74 @@ notifications: if matches!(fresh, Silent) { 0 } else { queued.len() }
 10 分钟–24 小时这一档，§16.3 要求「汇总通知」。汇总形态没有实现，
 现在仍然是一条完整弹窗。这是**已知的未做**，不是「已符合规范」：
 在半成品汇总和用户应得的庆祝之间，选择了后者，并记在这里。
+## 20. 「没有任何弹窗」：一次可以修好的拒绝被当成了删除
+
+用户的反馈是四个字：**并没有弹窗**。查现场后，原因不是弹窗坏了，而是报告压根没进到
+判定——它被身份闸门拒绝了，然后**被删掉了**。
+
+### 20.1 现场证据
+
+`companion.log`：
+
+```text
+IDENTITY from settings.json
+REFUSED 1 record(s): author is not a configured email   (×6)
+```
+
+Spool 里 6 条被消费的记录，内容都是：
+
+```json
+{"activity":"pull_request","author_login":"Applepinea","merged":false,
+ "event_id":"browser:github:applepinea/awesome-dsh-plugin#pull_request_opened:pr:1", ...}
+```
+
+而 `settings.json` 里的映射只有 `{"qq985065985": ["csah1350@outlook.com"]}`。
+
+两个独立的原因叠在一起：
+
+| # | 原因 | 说明 |
+| --- | --- | --- |
+| 1 | 账号没关联 | 页面上的作者是 `Applepinea`，映射里只有 `qq985065985`，所以 §7 拒绝 |
+| 2 | 打开的 PR 本来就没有成就 | `merged: false` → `PullRequestOpened`，规则集里没有任何一条读它（§16.4 无此行）|
+
+即使账号关联正确，一个**只是打开**的 PR 也不会弹窗。这是规范行为，但它和「坏了」
+在用户那里长得一模一样——而这正是要修的地方。
+
+### 20.2 最严重的一条：拒绝等于删除
+
+`Spool` 记录在 drain 结束时被移到 `consumed/`，无论结果是被接受还是被拒绝。
+于是「账号还没关联」——一个点一下就能修好的设置问题——变成了**永久丢失的活动**，
+而 UI 上什么也没有。日志里那行 `REFUSED` 是唯一的痕迹。
+
+### 20.3 修法
+
+| 层 | 改动 |
+| --- | --- |
+| Schema v3 | 新表 `browser_reports_rejected`：保存**原始 payload**，所以拒绝是可回放的，不是账本上的一个计数 |
+| 消费端 | 浏览器报告被抓到拒绝时入库停放；本地提交不参与（那是仓库 `user.email` 的问题，重放只会得到同样的拒绝）|
+| 设置页 | 新增「等你处理」区块：列出未关联账号和待回放条数，一个「关联到我的邮箱」按钮 |
+| 回放 | 关联时把停放的 payload 写回 Spool 并立即 nudge drain，走**同一条**消费路径 |
+
+为什么走 Spool 回放而不是直接调 ingest：回放必须和扩展投递走完全一样的路径，
+否则「回放能用」和「真实投递能用」就是两套代码，迟早只对一半。
+
+### 20.4 验证
+
+`scripts/e2e/unlinked-login.mjs`（15 项，真二进制 + 真数据库）：
+
+```text
+未关联报告 → refused=1，无弹窗
+           → browser_reports_rejected 里有 1 行（login=Applepinea）
+--link-login Applepinea → LINKED replayed=1，映射写入 settings.json，停放表清空
+再跑一次 → ingested=1，refused=0，弹窗「Merged」，first_pr_merged 解锁，
+           pull_request_merged_count=1 且 commit_count=0
+```
+
+存储层另有单测（重复停放不重复计数、payload 逐字保留、清理生效）。
+
+### 20.5 仍然存在的两件事
+
+| 项 | 状态 |
+| --- | --- |
+| 用户已有的 6 条被删记录 | **找不回来**（它们在本功能之前就被消费删掉了）。重新打开一次 PR 页面即会重新上报 |
+| 打开的 PR 没有任何可见反馈 | 仍然如此。它现在会显示在「等你处理」（如果账号没关联），关联后则只是入库——规范没有为它定义通知，这一条没有擅自加 |

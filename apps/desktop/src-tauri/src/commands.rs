@@ -109,6 +109,81 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Browser reports waiting for the user to link a GitHub account (spec 7).
+///
+/// The identity gate refuses an unattributed report, which is correct, but a refusal
+/// the user cannot see is indistinguishable from "the extension is broken".
+#[tauri::command]
+pub async fn get_unlinked_github_logins(
+) -> Result<Vec<devchievements_storage::refusals::UnlinkedLogin>, String> {
+    let pool = pool().await?;
+    devchievements_storage::refusals::unlinked_logins(&pool)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Link a GitHub login to the configured email, then replay what was parked.
+///
+/// Replaying matters: the reports were real activity, only their identity was
+/// missing. Refusing them permanently would turn a one-click setup step into lost
+/// history.
+#[tauri::command]
+pub async fn link_github_login(login: String) -> Result<u32, String> {
+    link_login_and_replay(&login).await
+}
+
+/// Link a login and replay its parked reports.
+///
+/// Shared by the Settings button and by `--link-login`, so the end-to-end test drives
+/// the same code the user does instead of a parallel implementation.
+pub async fn link_login_and_replay(login: &str) -> Result<u32, String> {
+    let login = login.trim().to_string();
+    if login.is_empty() {
+        return Err("a GitHub login is required".to_string());
+    }
+
+    let path = crate::settings_path();
+    let mut stored = crate::settings::Settings::load(&path);
+    let Some(email) = stored.emails.first().cloned() else {
+        return Err("configure your email before linking a GitHub account".to_string());
+    };
+    stored.github_logins.insert(login.clone(), vec![email.clone()]);
+    stored.save(&path).map_err(|e| e.to_string())?;
+
+    let pool = pool().await?;
+    let parked = devchievements_storage::refusals::parked_for_login(&pool, &login)
+        .await
+        .map_err(|e| e.to_string())?;
+    if parked.is_empty() {
+        return Ok(0);
+    }
+
+    let data_dir = crate::default_data_dir();
+    let spool_dir = data_dir.join("spool");
+    let spool = devchievements_git_hooks::spool::Spool::open(&spool_dir)
+        .map_err(|e| e.to_string())?;
+
+    let mut replayed = 0u32;
+    let mut replayed_ids: Vec<String> = Vec::new();
+    for report in &parked {
+        match spool.append(&report.event_id, &report.payload) {
+            Ok(()) => {
+                replayed += 1;
+                replayed_ids.push(report.event_id.clone());
+            }
+            // Keep the parked copy when the spool refuses it, so nothing is lost.
+            Err(e) => eprintln!("REPLAY FAILED {}: {e}", report.event_id),
+        }
+    }
+    devchievements_storage::refusals::forget(&pool, &replayed_ids)
+        .await
+        .map_err(|e| e.to_string())?;
+    if replayed > 0 {
+        crate::nudge_drain();
+    }
+    Ok(replayed)
+}
+
 fn channel_name() -> String {
     serde_json::to_value(current_capabilities().channel())
         .ok()

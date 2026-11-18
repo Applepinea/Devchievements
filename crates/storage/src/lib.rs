@@ -24,6 +24,7 @@ pub mod ingest;
 pub mod observability;
 pub mod projections;
 pub mod read_models;
+pub mod refusals;
 pub mod schema;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};

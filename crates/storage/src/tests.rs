@@ -776,6 +776,59 @@ async fn a_browser_only_repository_exists_with_zero_commits() {
 }
 
 #[tokio::test]
+async fn a_refused_browser_report_is_parked_and_can_be_replayed() {
+    // Spec 7 refuses the report; nothing says the report should be deleted. Keeping it
+    // is what makes "link your account" a one-click repair instead of lost history.
+    let pool = temp_pool("refusals").await;
+    let payload = "{\"kind\":\"browser_github\",\"author_login\":\"Applepinea\"}";
+
+    crate::refusals::park(
+        &pool,
+        "evt-1",
+        "Applepinea",
+        "github:Applepinea/w",
+        payload,
+        10,
+    )
+    .await
+    .expect("park");
+    // The same record arriving twice must not double count.
+    crate::refusals::park(
+        &pool,
+        "evt-1",
+        "Applepinea",
+        "github:Applepinea/w",
+        payload,
+        11,
+    )
+    .await
+    .expect("park again");
+
+    let unlinked = crate::refusals::unlinked_logins(&pool).await.expect("list");
+    assert_eq!(unlinked.len(), 1);
+    assert_eq!(unlinked[0].login, "Applepinea");
+    assert_eq!(unlinked[0].reports, 1, "one report, not two");
+
+    let parked = crate::refusals::parked_for_login(&pool, "Applepinea")
+        .await
+        .expect("for login");
+    assert_eq!(parked.len(), 1);
+    assert_eq!(
+        parked[0].payload, payload,
+        "the payload must survive verbatim"
+    );
+
+    let removed = crate::refusals::forget(&pool, &["evt-1".to_string()])
+        .await
+        .expect("forget");
+    assert_eq!(removed, 1);
+    assert_eq!(
+        crate::refusals::parked_count(&pool).await.expect("count"),
+        0
+    );
+}
+
+#[tokio::test]
 async fn a_quiet_policy_records_the_unlock_without_queueing_a_notification() {
     // Spec 16.3: an event older than a day updates statistics silently. The unlock is
     // still real, and it is NOT relabelled as an import -- the event just happened to

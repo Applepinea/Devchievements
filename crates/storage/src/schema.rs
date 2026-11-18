@@ -19,7 +19,7 @@
 /// `repository_projection`. Version 1 databases are upgraded in place by
 /// `ingest::migrate`, which adds any column listed in [`COLUMN_UPGRADES`] that the
 /// table does not already have -- additive, so no event or projection row is lost.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Columns added after version 1, as `(table, column, SQL type)`.
 ///
@@ -127,6 +127,21 @@ CREATE TABLE IF NOT EXISTS repository_projection (
     first_seen_at           INTEGER NOT NULL,
     updated_at              INTEGER NOT NULL
 );
+
+-- Browser reports refused because the GitHub account is not linked (spec 7).
+-- Nothing here counts toward statistics; it exists so a fixable setup problem is
+-- visible instead of silently dropping the report.
+CREATE TABLE IF NOT EXISTS browser_reports_rejected (
+    event_id        TEXT PRIMARY KEY NOT NULL,
+    login           TEXT NOT NULL,
+    repository_id   TEXT NOT NULL,
+    -- The original payload, kept so the report can be replayed after linking.
+    payload         TEXT NOT NULL,
+    received_at     INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rejected_login
+    ON browser_reports_rejected (login, received_at);
 
 -- ------------------------------------------------------- permanent achievements
 CREATE TABLE IF NOT EXISTS unlocked_achievements (

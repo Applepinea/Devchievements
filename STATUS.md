@@ -322,6 +322,7 @@ ALL CHECKS PASSED
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-11-18（拒绝即删除） | 查「并没有弹窗」的现场：报告被 §7 身份闸门拒绝后**随 Spool 消费一起删掉**，设置问题变成永久丢数据，UI 上毫无痕迹。新增 schema v3 表 `browser_reports_rejected` 保存原始 payload；设置页「等你处理」列出未关联账号并可一键关联，关联时**写回 Spool 回放**（与扩展投递同一条路径）；`unlinked-login` e2e 15 项 |
 | 2026-11-18（过期事件仍弹窗） | 修 §16.3 的执行缺陷：新鲜度原来只在消费端把「排队数」改成 0，**Outbox 行照样写、照样弹**。改为写入端策略（`Inform`/`Quiet`/`Silent`）：超过 24 小时的事件仍然解锁、仍然计统计，但不写 Outbox；解锁来源仍是 realtime。10 分钟–24 小时的「汇总通知」形态仍未实现（已知未做）|
 | 2026-11-18（浏览器成就打通） | 修「浏览器报告存进去但什么都不会发生」：Engine 新增 `evaluate_browser_event`（PR Merge / Release / Repository Created / Star Given 各自计数、解锁 §13.2 浏览器成就、**不**移动每日等级）；schema v2 加 5 列并幂等升级旧库；新增 `browser-achievement` e2e 19 项；ADR-0019 |
 | 2026-11-18（扩展连接检查） | 逐层验证 Native Messaging：协议、Spool、消费全通；**发现并修复「合并的 PR 被计为一次提交并解锁 First Commit」**；记录扩展未安装、浏览器成就未实现 |

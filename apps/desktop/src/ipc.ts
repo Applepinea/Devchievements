@@ -58,6 +58,25 @@ export interface RepositoryEntry {
   updatedAt: number;
 }
 
+/** Browser reports parked because the GitHub account is not linked (spec 7). */
+export interface UnlinkedLogin {
+  login: string;
+  reports: number;
+  lastReceivedAt: number;
+}
+
+export const getUnlinkedGithubLogins = () =>
+  invoke<UnlinkedLogin[]>("get_unlinked_github_logins");
+
+/**
+ * Link a GitHub account to the configured email and replay what it sent.
+ *
+ * Returns how many parked reports were replayed, which is the only honest way for
+ * the UI to say "3 reports are being counted now" instead of "saved".
+ */
+export const linkGithubLogin = (login: string) =>
+  invoke<number>("link_github_login", { login });
+
 export interface LatencyBuckets {
   under100ms: number;
   under1s: number;
