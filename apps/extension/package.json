@@ -1,6 +1,6 @@
 {
   "name": "@devchievements/extension",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Devchievements browser extension (Phase 0 scaffold: MV3 build proof only)",

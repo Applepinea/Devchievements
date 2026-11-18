@@ -1,4 +1,7 @@
 import { readFileSync } from "node:fs";
+
+// The version comes from package.json rather than being repeated here. It said 0.0.0
+// while the desktop app said 0.1.0, and the Store rejects a 0.0.0 version outright.
 import { defineConfig } from "wxt";
 
 // The public key pins the extension id for unpacked builds. Without it the id is
@@ -23,8 +26,19 @@ export default defineConfig({
   manifest: {
     name: "Devchievements",
     description: "Achievements for Developers",
-    version: "0.0.0",
+    version: JSON.parse(
+      readFileSync(new URL("./package.json", import.meta.url), "utf8")
+    ).version,
     key: extensionKey,
+    // Declared explicitly because without an icons block the toolbar shows a blank
+    // button and the Store listing has no icon to show. Generated from the same
+    // source artwork as the desktop application.
+    icons: {
+      16: "icon-16.png",
+      32: "icon-32.png",
+      48: "icon-48.png",
+      128: "icon-128.png",
+    },
     // No <all_urls>: spec 27.2 limits us to verifiable GitHub activity.
     // nativeMessaging is what makes chrome.runtime.connectNative exist at all;
     // without it the bridge to the desktop companion silently cannot be built.
