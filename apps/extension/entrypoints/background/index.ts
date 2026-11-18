@@ -27,10 +27,10 @@ async function handlePage(message: Extract<ExtensionMessage, { type: "devch:page
     url: message.url,
     meta: (name: string) => message.meta[name] ?? null,
     text: (selector: string) => message.text[selector] ?? null,
-    attribute: (selector: string, name: string) => {
-      const value = message.attributes?.[selector];
-      return name === "href" ? (value ?? null) : null;
-    },
+    // The content script records one value per selector, and each selector maps to
+    // exactly one attribute. Hardcoding "href" here dropped `data-state`, which is
+    // what tells a merged pull request from an open one.
+    attribute: (selector: string, _name: string) => message.attributes?.[selector] ?? null,
   });
 
   if (extraction.kind === "ignored") {
