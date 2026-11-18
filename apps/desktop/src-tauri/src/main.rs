@@ -1132,6 +1132,136 @@ fn prompt_missing_webview() {
     eprintln!("WebView2 runtime is required and missing.");
 }
 
+/// Whether another copy of this app is already running for this user.
+///
+/// Each process registers its own tray icon, so a second launch used to add a second
+/// icon that outlived the first: reported as "there is an extra icon in the tray".
+/// Closing the window is not quitting -- the app is a background companion -- so
+/// opening the app again is a normal thing to do, and it must reach the copy that is
+/// already there.
+///
+/// A named mutex rather than a lock file: the kernel drops it when the process exits,
+/// including on a crash, so a stale guard cannot keep the app from starting.
+#[cfg(windows)]
+fn another_instance_is_running() -> bool {
+    use windows::core::HSTRING;
+    use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
+    use windows::Win32::System::Threading::CreateMutexW;
+
+    // Per user, via the name Windows gives us; two users may each run their own copy.
+    let name = HSTRING::from(format!(
+        "Local\\DevchievementsCompanion-{}",
+        std::env::var("USERNAME").unwrap_or_else(|_| "default".to_string())
+    ));
+    // Safety: a null security descriptor and zeroed attributes are the documented
+    // defaults; the handle is closed by the process exiting.
+    let handle = unsafe { CreateMutexW(None, true, &name) };
+    match handle {
+        Ok(_) => {
+            // Safety: only reads the calling thread's last-error value.
+            let already = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
+            already
+        }
+        // If the guard cannot be created, starting is better than refusing to.
+        Err(_) => false,
+    }
+}
+
+#[cfg(not(windows))]
+fn another_instance_is_running() -> bool {
+    false
+}
+
+/// Name of the event the running copy listens on to show its window.
+#[cfg(windows)]
+const SHOW_EVENT: &str = "Local\\DevchievementsCompanion-show";
+
+/// Ask the copy that is already running to show its window.
+#[cfg(windows)]
+fn request_show_from_running_copy() {
+    use windows::core::HSTRING;
+    use windows::Win32::Foundation::{CloseHandle, GetLastError};
+    use windows::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+
+    let name = HSTRING::from(SHOW_EVENT);
+    // Safety: the running copy created this event; opening and setting it are the
+    // two documented operations and the handle is closed immediately.
+    let opened = unsafe { OpenEventW(EVENT_MODIFY_STATE, false, &name) };
+    match opened {
+        Ok(event) => {
+            let _ = unsafe { SetEvent(event) };
+            let _ = unsafe { CloseHandle(event) };
+            println!("SHOW request delivered");
+        }
+        // No listener yet, or it has not started its setup: nothing to signal.
+        Err(_) => {
+            let _ = unsafe { GetLastError() };
+            println!("SHOW request failed: the running copy is not listening yet");
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn request_show_from_running_copy() {}
+
+/// Show the main window when another launch asks for it.
+///
+/// The listener lives on its own thread so the event loop is never blocked, and it
+/// exists only in a GUI launch (see the call site).
+#[cfg(windows)]
+fn listen_for_show_requests(app: tauri::AppHandle) {
+    use windows::core::HSTRING;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        CreateEventW, INFINITE, WaitForSingleObject,
+    };
+
+    std::thread::spawn(move || {
+        let name = HSTRING::from(SHOW_EVENT);
+        // Safety: a manual-reset event that starts unsignalled, with default
+        // attributes; the handle lives for the life of the thread.
+        let Ok(event) = (unsafe { CreateEventW(None, true, false, &name) }) else {
+            println!("SHOW listener unavailable");
+            return;
+        };
+        loop {
+            // Safety: waiting on a handle this thread owns.
+            let waited = unsafe { WaitForSingleObject(event, INFINITE) };
+            // WAIT_OBJECT_0 is the only outcome that means "the event was set";
+            // WAIT_FAILED and WAIT_ABANDONED both mean this listener is done.
+            if waited != windows::Win32::Foundation::WAIT_OBJECT_0 {
+                break;
+            }
+            // Reset before handling, so two quick launches are both honoured.
+            let _ = unsafe { windows::Win32::System::Threading::ResetEvent(event) };
+            println!("SHOW requested by a second launch");
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                match open_main_window(&handle) {
+                    Ok(()) => println!("WINDOW opened reason=second-launch"),
+                    Err(e) => println!("WINDOW FAILED error={e}"),
+                }
+            });
+        }
+        let _ = unsafe { CloseHandle(event) };
+    });
+}
+
+#[cfg(not(windows))]
+fn listen_for_show_requests(_app: tauri::AppHandle) {}
+
+/// Whether this launch exists to drive one scripted check rather than to be the app.
+///
+/// The end-to-end tests and the screenshot script open a specific page and stop the
+/// process as soon as it has reported; they need their own process even while the
+/// user's copy is running. `--page` is never passed by a user: the desktop launcher
+/// passes only `--open-window`, and double-clicking it twice is exactly the case the
+/// single-instance guard is for.
+fn is_scripted_launch() -> bool {
+    const SCRIPTED: &[&str] = &["--page", "--preview-popup"];
+    std::env::args().any(|a| SCRIPTED.contains(&a.as_str()))
+}
+
 fn main() {
     // Before anything can print: a GUI-subsystem launch has no console, and the
     // first println! would otherwise kill the process (see output_streams).
@@ -1172,6 +1302,17 @@ fn main() {
         if preflight::webview2_version().is_none() {
             std::process::exit(2);
         }
+    }
+
+    // One tray icon per user. A GUI launch that finds the app already running asks
+    // the running copy to show its window and exits, instead of adding a second icon.
+    //
+    // Commands are exempt: `--diagnostics`, the end-to-end tests and the screenshot
+    // runs all need to start while a copy is running, and none of them create a tray.
+    if !is_command_mode() && !is_scripted_launch() && another_instance_is_running() {
+        println!("ALREADY RUNNING: asking the running copy to show its window");
+        request_show_from_running_copy();
+        std::process::exit(0);
     }
 
     // A probe entry point, used by scripts/e2e/toast.mjs. It runs the SAME code path
@@ -1965,7 +2106,9 @@ fn main() {
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&privacy, &open, &drain, &quit])?;
 
-            let _tray = TrayIconBuilder::new()
+            // The tray gets a stable id, so a relaunch replaces its own icon instead of
+            // registering a second one under an anonymous id.
+            let _tray = TrayIconBuilder::with_id("main")
                 .icon(
                     app.default_window_icon()
                         .cloned()
@@ -2004,6 +2147,11 @@ fn main() {
                     _ => {}
                 })
                 .build(app)?;
+
+            // A second launch asks this copy to show its window instead of starting its
+            // own tray icon, so the request has to be listening by the time the window
+            // can appear.
+            listen_for_show_requests(app.handle().clone());
 
             // Apply the persisted privacy mode before any notification can render.
             // This must happen in the tray setup, not in a CLI branch: the drain

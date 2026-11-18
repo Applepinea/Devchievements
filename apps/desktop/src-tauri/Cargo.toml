@@ -36,7 +36,7 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-async-s
 async-std = { version = "1", features = ["attributes"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["UI_Notifications", "Data_Xml_Dom", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Foundation", "Win32_System_Variant", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Media_Audio"] }
+windows = { version = "0.62", features = ["UI_Notifications", "Data_Xml_Dom", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Foundation", "Win32_System_Variant", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Media_Audio", "Win32_System_Threading", "Win32_Security"] }
 
 [profile.release]
 lto = true
