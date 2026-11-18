@@ -34,6 +34,9 @@ async function handlePage(message: Extract<ExtensionMessage, { type: "devch:page
   });
 
   if (extraction.kind === "ignored") {
+    // Logged, because "the extension does nothing" and "the page is not activity"
+    // look identical from outside. This is the line that says which.
+    console.info("[devchievements] ignored:", extraction.reason, message.url);
     return { stored: false, reason: extraction.reason };
   }
 
@@ -46,6 +49,12 @@ async function handlePage(message: Extract<ExtensionMessage, { type: "devch:page
 
   // The desktop companion owns judgement and presentation.
   const bridged = await forward(extraction.event);
+  console.info(
+    "[devchievements] event",
+    extraction.event.eventType,
+    extraction.event.eventId,
+    bridged.delivered ? "delivered" : "not delivered: " + bridged.reason,
+  );
 
   return {
     stored,
