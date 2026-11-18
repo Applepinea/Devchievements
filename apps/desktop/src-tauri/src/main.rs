@@ -478,6 +478,23 @@ pub(crate) fn open_main_window(app: &tauri::AppHandle) -> Result<(), String> {
     open_main_window_at(app, "dashboard")
 }
 
+/// Window size in logical pixels: the product default, or `--window-size WxH`.
+fn window_size() -> (f64, f64) {
+    const DEFAULT: (f64, f64) = (720.0, 520.0);
+    let mut args = std::env::args().skip_while(|a| a != "--window-size");
+    let _ = args.next();
+    let Some(spec) = args.next() else {
+        return DEFAULT;
+    };
+    let Some((w, h)) = spec.split_once('x') else {
+        return DEFAULT;
+    };
+    match (w.parse::<f64>(), h.parse::<f64>()) {
+        (Ok(w), Ok(h)) if w >= 320.0 && h >= 240.0 && w <= 4096.0 && h <= 4096.0 => (w, h),
+        _ => DEFAULT,
+    }
+}
+
 /// Open the main window on a specific page.
 ///
 /// The page travels in the URL fragment so the UI can select it without any
@@ -491,13 +508,17 @@ pub(crate) fn open_main_window_at(app: &tauri::AppHandle, page: &str) -> Result<
         return Ok(());
     }
 
+    // The Store requires 1280x800 (or 640x480) screenshots, so the capture run needs
+    // the window at that size. A flag keeps the product's own default and lets the
+    // screenshot script ask for the size instead of the product guessing.
+    let (width, height) = window_size();
     tauri::WebviewWindowBuilder::new(
         app,
         "main",
         tauri::WebviewUrl::App(format!("index.html#{page}").into()),
     )
     .title("Devchievements")
-    .inner_size(720.0, 520.0)
+    .inner_size(width, height)
     .data_directory(default_data_dir().join("webview"))
     .build()
     .map(|_| ())
