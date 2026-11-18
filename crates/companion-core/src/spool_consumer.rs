@@ -190,14 +190,29 @@ impl Companion {
         // Spec 16.3: age decides presentation, not whether the event counts.
         let fresh = freshness_action(age);
 
-        let facts = ingest::commit_facts(
-            payload
-                .get("parents")
-                .and_then(|p| p.as_array())
-                .map(|a| a.len())
-                .unwrap_or(1),
-            false,
-        );
+        // Only a commit may be counted as a commit. Every event used to reach
+        // `evaluate_commit`, whose only input is `CommitFacts`, so a merged pull
+        // request incremented the commit counter and could unlock "First Commit" --
+        // measured: one browser PR produced repository_commit_count = 1.
+        //
+        // Non-commit events are recorded with facts that explicitly do not count, so
+        // the Engine leaves the statistics alone and the event is still stored.
+        let facts = if event.event_type == EventType::CommitCreated {
+            ingest::commit_facts(
+                payload
+                    .get("parents")
+                    .and_then(|p| p.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(1),
+                false,
+            )
+        } else {
+            devchievements_core::CommitFacts {
+                counts_as_commit: false,
+                is_merge: false,
+                is_empty: false,
+            }
+        };
 
         let clock = SystemClock;
         let tz = BundledTimezoneProvider::new();

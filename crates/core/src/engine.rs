@@ -456,4 +456,33 @@ mod tests {
             );
         });
     }
+
+    /// A non-commit event must not move commit statistics.
+    ///
+    /// Measured before the fix: a merged pull request arriving from the browser
+    /// extension produced `repository_commit_count = 1` and unlocked "First Commit",
+    /// because every record reached `evaluate_commit`, whose only input is
+    /// `CommitFacts`. The consumer now sends facts that do not count for anything that
+    /// is not a commit; this pins the Engine half of that contract.
+    #[test]
+    fn facts_that_do_not_count_produce_no_changes() {
+        let not_a_commit = CommitFacts {
+            counts_as_commit: false,
+            is_merge: true,
+            is_empty: false,
+        };
+        with_ctx(|ctx| {
+            let out = Engine.evaluate_commit(&StateSnapshot::default(), &not_a_commit, "pr-1", ctx);
+            assert!(
+                out.state_changes.is_empty(),
+                "no projection may move: {:?}",
+                out.state_changes
+            );
+            assert!(
+                out.side_effect_intents.is_empty(),
+                "and nothing may be celebrated: {:?}",
+                out.side_effect_intents
+            );
+        });
+    }
 }

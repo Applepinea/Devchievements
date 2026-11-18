@@ -1024,11 +1024,51 @@ receiver.recv_timeout(10s)                     // 也是主线程 → 死锁
 ### 16.2 新增的两个真实点击测试
 
 | 脚本 | 断言 |
-| --- | --- |
-| `scripts/e2e/preview-button.mjs` | 按钮存在 → 点击 → Rust 收到请求 → 页面无错误 |
-| `scripts/e2e/ui-buttons.mjs` | 六个导航按钮逐个点击，标题必须变化；点完页面仍响应 |
+| --- | 
+## 17. 浏览器扩展连接：协议通了，但发现一个计数缺陷
 
-第二个是用户报「每个按键都没反应」之后加的：**界面冻结和路由失效从外面看一样**，
-只有真的点一遍才能区分。实测当前构建六个按钮全部生效。
+用户要求「检查应用能否正确连接浏览器扩展」。逐层验证的结果：
+
+| 检查项 | 结果 |
+| --- | --- |
+| Native Messaging 注册表项 | ✅ Chrome 与 Edge 都有 `com.devchievements.host` |
+| host manifest | ✅ 存在，`allowed_origins` 指向扩展 id `gfgbmedanlpminnlbbdefojbgphoekbj` |
+| host 二进制 | ✅ 存在（指向 `target\debug`，**这是构建输出，不是安装位置**）|
+| 协议本身 | ✅ 手工按浏览器格式（4 字节长度 + JSON）发送，`stored: true` |
+| Spool 写入 | ✅ `pending-*.spool` 出现，内容正确 |
+| Companion 消费 | ✅ `DRAIN read=1 ingested=1` |
+| **扩展是否已安装** | ❌ **未安装**（Edge/Chrome 的用户配置里都没有这个 id）|
+
+### 17.1 发现并修掉的缺陷：PR 被算成提交
+
+浏览器报告一个合并的 PR 后，数据库出现：
+
+```text
+event:   PullRequestMerged
+commit projection: 1        ← 错了
+unlocked: first_commit      ← 错得更明显
+```
+
+原因：`spool_consumer` 把**每一条**记录都送进 `ingest_commit_with_rules`，
+而它唯一的事实输入是 `CommitFacts`——PR 于是按「一次提交」计数并触发了提交类成就。
+
+修法：只有 `EventType::CommitCreated` 才构造真实提交事实，其余事件用
+`counts_as_commit: false`，事件照样入库，统计不动。实测修复后：
+
+```text
+events: PullRequestMerged
+commit projection: []        ← 不再计数
+unlocked: []                 ← 不再误解锁
+```
+
+回归测试 `engine::tests::facts_that_do_not_count_produce_no_changes` 守住 Engine 一侧。
+
+### 17.2 仍未完成的部分
+
+| 项 | 状态 |
+| --- | --- |
+| PR / Release / Issue 的统计与成就 | **没有**。`pull_request_merged_count` 在 achievements crate 里有字段，但 Engine 只评估提交，浏览器类成就目前不会触发 |
+| 已安装包内的 native host | **没有**。MSIX 里不含 host 二进制，注册表指向构建目录；正式分发需要把它打进安装包并在安装时注册 |
+| 扩展在真实浏览器里连通 | **未验证**。扩展没有安装，端到端只测到 host 进程这一层 |
 
 ---
