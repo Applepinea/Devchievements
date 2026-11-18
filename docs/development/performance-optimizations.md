@@ -27,3 +27,23 @@ Hook p95 10.81 ms, ingestion p95 3.12 ms, idle CPU 2.40% of one core / 0.12% of 
 whole machine under the 50 ms cadence, and notification p95 274–328 ms. No new
 performance claim should be made until the Hook backlog, large history import,
 extension event counts, and tray-only idle cases are measured again.
+---
+
+## 托盘扫描周期：实测后保留 50 ms
+
+本轮把 drain 的等待从 5×10 ms 改成 10×10 ms（100 ms）。同一棵代码树、同一套夹具、
+120 次真实提交，两种周期各测一遍：
+
+| 周期 | commit→通知 p95 | 空闲 CPU（单核） | 空闲 CPU（整机） |
+| --- | --- | --- | --- |
+| 100 ms | **437 ms** | 1.823% | 0.091% |
+| 50 ms | **277 ms** | 3.906% | 0.195% |
+
+两者都达标（预算 500 ms、空闲 < 1%），所以这是取舍而不是缺陷：
+
+- 100 ms 把弹窗延迟推到预算的 **87%**，而且这是 20 核机器上的数字；
+- 50 ms 多花的是整机 **0.195%**，约每秒 2 ms，对续航没有可感影响。
+
+结论：**保留 50 ms**。用户能感觉到 160 ms 的差别，感觉不到 0.1% 的 CPU。
+要把空闲压到 0.01% 的正确做法是 spool 目录的文件系统通知，而不是继续拉长轮询——
+后者只是拿延迟换数字。

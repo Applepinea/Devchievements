@@ -121,12 +121,9 @@ pub fn scan_repository(repo_dir: &Path) -> Result<Vec<ScannedCommit>, String> {
             continue;
         }
         let mut fields = record.split('\u{1f}');
-        let (Some(sha), Some(parents), Some(email), Some(seconds)) = (
-            fields.next(),
-            fields.next(),
-            fields.next(),
-            fields.next(),
-        ) else {
+        let (Some(sha), Some(parents), Some(email), Some(seconds)) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
+        else {
             continue;
         };
 

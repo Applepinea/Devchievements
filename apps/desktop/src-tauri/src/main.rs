@@ -691,11 +691,11 @@ fn spawn_drain_loop(app: tauri::AppHandle) {
                 }
                 let _ = processor.deliver_pending(&mut sink, 3).await;
 
-                // A 100 ms idle interval cuts repeated empty spool and outbox scans
-                // while leaving most of the 500 ms notification budget for ingestion
-                // and presentation. The tray can still interrupt the wait in 10 ms
-                // slices. Re-measure the end-to-end p95 when changing this cadence.
-                for _ in 0..10 {
+                // 50 ms, measured rather than assumed: at 100 ms the end-to-end p95
+                // rose from 277 ms to 437 ms, which is 87% of the 500 ms budget on a
+                // 20-core machine and leaves a mid-range laptop no room. The idle cost
+                // of the shorter wait is 0.195% of the machine, which no one perceives.
+                for _ in 0..5 {
                     if DRAIN_NOW.swap(false, Ordering::SeqCst) {
                         break;
                     }

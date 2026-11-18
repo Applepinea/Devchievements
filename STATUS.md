@@ -242,7 +242,8 @@ ALL CHECKS PASSED
 > 每个数字都能在 `.verify/` 或 `scripts/**/.out/*.json` 找到原始样本。未实测的格子明确标注「未测量」。
 
 > 2026-11-18 性能跟进调整了 spool 计数的内存用法、托盘空闲扫描周期、历史导入分配和扩展 IndexedDB 查询。
-> 上表仍是**改动前基线**；新版本的延迟、内存和 CPU 尚未测量，不应视为改动后的结果。
+> 托盘扫描周期改动已**实测并回退**：100 ms 下 commit→通知 p95 升到 437 ms（预算的 87%），
+> 50 ms 下为 277 ms，空闲代价 0.195% 整机。取舍与数据见 `docs/development/performance-optimizations.md`。
 
 ---
 
@@ -320,7 +321,7 @@ ALL CHECKS PASSED
 
 | 日期 | 变更 |
 | --- | --- |
-| 2026-11-18（性能优化跟进） | Spool 计数改为定长缓冲读取；托盘空闲扫描改为约 100 ms；历史导入去掉未使用提交主题和全量匹配引用副本；扩展统计改走 IndexedDB 索引；**新性能数据待测** |
+| 2026-11-18（性能优化跟进，已并入 main） | Spool 计数改为定长缓冲读取；历史导入去掉未使用的提交主题与全量匹配引用副本；扩展统计改走 IndexedDB 索引。托盘扫描周期试过 100 ms，**实测 p95 437 ms（预算 87%）后回退 50 ms** |
 | 2026-11-16（第一轮） | Phase 0 主体：环境勘察、隔离工具链、Monorepo、AGENTS/STATUS/spec 拆分/ADR、15 场景 Git 实验 + fixtures、WASM 验证、扩展构建 |
 | 2026-11-18（Phase 4b 第十二轮） | 修掉 §22 的功能缺口：自定义成就**真正会被评估**（同事务、官方统计、复用内置记录路径）；新增 `user-achievements` e2e；顺带让 headless companion 也读规则 |
 | 2026-11-18（Phase 4b 第十一轮） | 商店路线打通：MSIX 打包（真图标 / startupTask / 包内 bootstrapper）+ **helper 复制出包**，解决「hook 不能执行包内 exe」；`probe-packaged-app` 10 项实测通过 |
