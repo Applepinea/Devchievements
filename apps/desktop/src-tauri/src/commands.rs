@@ -24,8 +24,6 @@ pub struct DashboardView {
     pub statistics: devchievements_storage::read_models::Statistics,
     /// The last two weeks of activity, newest first.
     pub recent: Vec<devchievements_storage::read_models::ActivityDay>,
-    /// Database health.
-    pub storage: devchievements_storage::read_models::StorageHealth,
     /// Where notifications can currently be shown.
     pub channel: String,
     /// Whether system notifications are usable.
@@ -80,7 +78,18 @@ pub struct AboutView {
     pub needs_extension: Vec<String>,
 }
 
+/// One connection pool per process, opened and migrated once.
+///
+/// This used to open a pool and run the migration check on every single page request.
+/// The drain loop already keeps its own pool open for the life of the app, so the
+/// repeated work bought nothing -- it only put a database handshake in front of every
+/// screen. Migrations are idempotent but not free.
 async fn pool() -> Result<sqlx::SqlitePool, String> {
+    use std::sync::OnceLock;
+    static POOL: OnceLock<sqlx::SqlitePool> = OnceLock::new();
+    if let Some(pool) = POOL.get() {
+        return Ok(pool.clone());
+    }
     let data_dir = default_data_dir();
     let pool = devchievements_storage::open(&data_dir.join("companion.db"))
         .await
@@ -88,6 +97,8 @@ async fn pool() -> Result<sqlx::SqlitePool, String> {
     devchievements_storage::ingest::migrate(&pool)
         .await
         .map_err(|e| e.to_string())?;
+    // First writer wins; a racing caller simply drops its own pool.
+    let _ = POOL.set(pool.clone());
     Ok(pool)
 }
 
@@ -105,6 +116,12 @@ fn channel_name() -> String {
         .unwrap_or_else(|| "in_app_only".to_string())
 }
 
+/// The cards: what the user actually came to see.
+///
+/// Deliberately excludes the storage picture. Database path, size and schema are
+/// diagnostics, they cost several more queries, and nothing on the first screen
+/// depends on them -- so they travel in [`get_storage_health`] instead of delaying
+/// the numbers.
 #[tauri::command]
 pub async fn get_dashboard() -> Result<DashboardView, String> {
     let pool = pool().await?;
@@ -115,8 +132,21 @@ pub async fn get_dashboard() -> Result<DashboardView, String> {
         .await
         .map_err(|e| e.to_string())?;
 
+    Ok(DashboardView {
+        statistics,
+        recent,
+        channel: channel_name(),
+        system_notifications: crate::toast::registration_state().is_ready(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+}
+
+/// The database health block, fetched after the cards are on screen.
+#[tauri::command]
+pub async fn get_storage_health() -> Result<devchievements_storage::read_models::StorageHealth, String> {
+    let pool = pool().await?;
     let data_dir = default_data_dir();
-    let storage = devchievements_storage::read_models::storage_health(
+    devchievements_storage::read_models::storage_health(
         &pool,
         devchievements_privacy::redact_path(
             &data_dir.to_string_lossy(),
@@ -124,16 +154,7 @@ pub async fn get_dashboard() -> Result<DashboardView, String> {
         ),
     )
     .await
-    .map_err(|e| e.to_string())?;
-
-    Ok(DashboardView {
-        statistics,
-        recent,
-        storage,
-        channel: channel_name(),
-        system_notifications: crate::toast::registration_state().is_ready(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    })
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -416,6 +437,67 @@ pub fn install_hooks(repo_path: String) -> Result<Vec<HookInstallResult>, String
 #[tauri::command]
 pub fn ui_error(message: String) {
     println!("UI ERROR {message}");
+}
+
+/// Milliseconds since this process started, measured once.
+///
+/// `Instant` rather than the wall clock: this is a duration, and a clock adjustment
+/// during start-up would otherwise produce a negative stage.
+fn process_origin() -> std::time::Instant {
+    static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    *ORIGIN.get_or_init(std::time::Instant::now)
+}
+
+/// Anchor the start-up clock. Called first thing in `main`.
+///
+/// Without this the origin was set by the first *measurement*, which made the first
+/// stage always read zero -- a number that looks like a measurement and is not one.
+pub fn mark_process_start() {
+    let _ = process_origin();
+}
+
+/// Record one start-up stage.
+///
+/// Spec 44.1 budgets "commit to notification", which is a different measurement.
+/// This one answers "where did the first screen go", and it exists because a single
+/// end-to-end number cannot say whether the time was spent in the webview, in JS, in
+/// IPC or in SQLite -- so it cannot say what to fix.
+///
+/// The stages are deliberately separate: a page that paints its shell quickly and
+/// fills its cards slowly is a different problem from one that paints nothing.
+#[tauri::command]
+pub fn ui_timing(stage: String, since_page_ms: f64) {
+    let origin_ms = process_origin().elapsed().as_secs_f64() * 1000.0;
+    // `since_page_ms` is measured inside the page (performance.now()), so it isolates
+    // script time from everything that happened before the document existed.
+    println!(
+        "UI TIMING stage={stage} origin_ms={origin_ms:.1} page_ms={since_page_ms:.1}"
+    );
+}
+
+/// What the very first screen needs, and nothing else.
+///
+/// `get_settings` and `onboarding_status` both answer this and much more: the former
+/// parses the whole settings document, the latter runs several Git queries and a file
+/// check. A user who finished onboarding months ago was paying for the wizard's
+/// concurrency on every window open, so the fast path gets its own command.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootView {
+    /// Resolved UI language.
+    pub language: String,
+    /// Whether the first-run wizard has been completed.
+    pub onboarding_completed: bool,
+}
+
+/// The fast path: two fields, one file read.
+#[tauri::command]
+pub fn boot_status() -> BootView {
+    let stored = crate::settings::Settings::load(&settings_path());
+    BootView {
+        language: stored.language.clone(),
+        onboarding_completed: stored.onboarding_completed,
+    }
 }
 
 /// Open a URL in the user's default browser.

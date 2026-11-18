@@ -30,7 +30,6 @@ export interface StorageHealth {
 export interface DashboardView {
   statistics: Statistics;
   recent: ActivityDay[];
-  storage: StorageHealth;
   channel: string;
   systemNotifications: boolean;
   version: string;
@@ -186,11 +185,34 @@ export function invoke<T>(command: string, args?: Record<string, unknown>): Prom
   return internals().invoke<T>(command, args);
 }
 
+/**
+ * Record one start-up stage. Fire-and-forget on purpose: measuring must never be
+ * able to delay the thing being measured.
+ */
+export const uiTiming = (stage: string, sincePageMs: number) =>
+  invoke<void>("ui_timing", { stage, sincePageMs });
+
+/**
+ * Milliseconds since this document started loading. `performance.now()` counts from
+ * navigation start, which is the closest a page can get to "window created".
+ */
+export const pageMs = () => performance.now();
+
+/** What the first screen needs: language and whether setup is done. */
+export interface BootView {
+  language: string;
+  onboardingCompleted: boolean;
+}
+
+export const bootStatus = () => invoke<BootView>("boot_status");
+
 export const getSettings = () => invoke<SettingsView>("get_settings");
 export const saveSettings = (settings: SettingsView) =>
   invoke<void>("save_settings", { settings });
 export const getStatus = () => invoke<StatusView>("get_status");
 export const getDashboard = () => invoke<DashboardView>("get_dashboard");
+/** Diagnostics block, fetched after the cards are on screen. */
+export const getStorageHealth = () => invoke<StorageHealth>("get_storage_health");
 export const getGallery = () => invoke<GalleryItem[]>("get_gallery");
 export const markViewed = (ids: string[]) =>
   invoke<number>("mark_achievements_viewed", { ids });

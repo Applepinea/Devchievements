@@ -34,8 +34,11 @@ macro_rules! app_commands {
             commands::check_dependencies,
             commands::export_diagnostics,
             commands::ui_error,
+            commands::ui_timing,
+            commands::boot_status,
             commands::open_external,
             commands::get_dashboard,
+            commands::get_storage_health,
             commands::get_gallery,
             commands::mark_achievements_viewed,
             commands::get_activity,
@@ -1263,6 +1266,11 @@ fn is_scripted_launch() -> bool {
 }
 
 fn main() {
+    // First statement in the process, so every start-up stage is measured from the
+    // same origin. Anything earlier than this is the loader's time, which the
+    // process cannot see.
+    commands::mark_process_start();
+
     // Before anything can print: a GUI-subsystem launch has no console, and the
     // first println! would otherwise kill the process (see output_streams).
     #[cfg(windows)]
@@ -2238,15 +2246,28 @@ fn main() {
                 stored_now.start_hidden,
                 stored_now.start_with_windows
             );
+            // Measured rather than assumed: both of these run in `setup`, which is on
+            // the path to the first frame, so their cost belongs in the start-up
+            // budget. If a change makes them expensive, the log says so.
+            let setup_started = std::time::Instant::now();
+
             // Keep the registry in step with the setting, so an app that moved (or an
             // entry deleted by hand) ends up correct rather than stale.
             autostart::reconcile(stored_now.start_with_windows);
+            let autostart_us = setup_started.elapsed().as_micros();
+
+            let helper_started = std::time::Instant::now();
             // An updated package must not leave commits invoking last version's
             // helper, so the copy is refreshed on every start.
             match local_helper::ensure(&default_data_dir()) {
                 Ok(path) => println!("HELPER ready at {}", path.display()),
                 Err(e) => println!("HELPER unavailable: {e}"),
             }
+            println!(
+                "SETUP COST autostart_ms={:.2} helper_ms={:.2}",
+                autostart_us as f64 / 1000.0,
+                helper_started.elapsed().as_micros() as f64 / 1000.0
+            );
 
             spawn_drain_loop(app.handle().clone());
             Ok(())

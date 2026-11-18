@@ -1,14 +1,19 @@
-import { useEffect, useState } from "react";
-import { getSettings, onboardingStatus, uiLanguage, uiReady } from "./ipc";
-import { currentLanguage, setLanguage, t } from "./i18n";
+import { Suspense, lazy, useEffect, useState } from "react";
+import { bootStatus, pageMs, uiLanguage, uiReady, uiTiming } from "./ipc";
+import { setLanguage, t } from "./i18n";
 import Dashboard from "./pages/Dashboard";
-import Gallery from "./pages/Gallery";
-import Activity from "./pages/Activity";
-import Repositories from "./pages/Repositories";
-import About from "./pages/About";
-import Settings from "./pages/Settings";
-import Welcome from "./pages/Welcome";
 import { uiError } from "./main";
+
+// Pages are split so opening the dashboard does not pay for parsing the four pages the
+// user is not looking at. Dashboard stays eager: it is the page that opens by default,
+// and a chunk for it would add a round trip to the first screen it is meant to show.
+const Gallery = lazy(() => import("./pages/Gallery"));
+const Activity = lazy(() => import("./pages/Activity"));
+const Repositories = lazy(() => import("./pages/Repositories"));
+const About = lazy(() => import("./pages/About"));
+const Settings = lazy(() => import("./pages/Settings"));
+// Loaded only when the wizard is actually shown, so a returning user never pays for it.
+const Welcome = lazy(() => import("./pages/Welcome"));
 
 // Labels are resolved at render time, so switching the language is a reload rather
 // than a state machine. Page ids stay English: they are the URL contract used by the
@@ -39,48 +44,58 @@ function requestedStep(): string | null {
   return new URLSearchParams(query).get("step");
 }
 
+/// The neutral placeholder shown while a page chunk is still loading.
+///
+/// Fixed height on purpose: a skeleton that resizes once the real page arrives is a
+/// second layout shift, which is worse than the wait it is hiding.
+function PageSkeleton() {
+  return (
+    <div className="shell-skeleton" aria-busy="true">
+      <div className="skeleton-line short" />
+      <div className="skeleton-line" />
+      <div className="skeleton-line" />
+      <div className="skeleton-line" />
+    </div>
+  );
+}
+
 export default function App() {
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
   const [languageReady, setLanguageReady] = useState(false);
   const [current, setCurrent] = useState<PageId>(initialPage);
 
-  // Language first: every string below is produced after this resolves, so the
-  // window never paints English and then switch.
+  // The page reports its own stages so a slow first screen can be attributed to the
+  // webview, to script, to IPC or to SQLite instead of being guessed at.
   useEffect(() => {
-    getSettings().then(
-      (settings) => {
-        const lang = setLanguage(settings.language);
+    void uiTiming("script_start", pageMs());
+  }, []);
+
+  // One small call answers both questions the shell needs. The full settings document
+  // and the wizard's Git probing are no longer on the first-screen path.
+  useEffect(() => {
+    bootStatus().then(
+      (boot) => {
+        const lang = setLanguage(boot.language);
         // Recorded server-side so "the UI is in the wrong language" can be answered
         // from the log, and so an end-to-end test can assert what actually rendered
         // rather than what the settings file asked for.
         void uiLanguage(lang, t("Dashboard"));
+        void uiTiming("boot_resolved", pageMs());
         setLanguageReady(true);
+        setOnboarded(boot.onboardingCompleted);
       },
-      // Without settings the app must still open; English is the source language.
-      () => setLanguageReady(true),
-    );
-  }, []);
-
-  // Spec 25: the wizard runs before the pages, and only once.
-  useEffect(() => {
-    onboardingStatus().then(
-      (s) => setOnboarded(s.completed),
-      // If the status cannot be read the app must still open; the wizard is
-      // helpful, not mandatory. This branch is also how a registration bug hid for
-      // weeks: when `onboarding_status` was missing from the app's command list but
-      // present in the smoke-test list, the product opened straight to an empty
-      // dashboard while every test passed. The command lists are one macro now, and
-      // scripts/e2e/wizard.mjs drives a real launch, not only the smoke builder.
-      () => setOnboarded(true),
+      // Without a status the app must still open; English is the source language.
+      () => {
+        void uiTiming("boot_failed", pageMs());
+        setLanguageReady(true);
+        setOnboarded(true);
+      },
     );
   }, []);
 
   // Tell the Rust side which view rendered. The window smoke test waits for this,
   // because a window showing a blank page looks identical to a working one.
   useEffect(() => {
-    // Wait for the status before reporting: while it is unknown the app does not
-    // yet know whether this is a first run, and reporting early would claim the
-    // dashboard rendered on a machine that is about to show the wizard.
     if (onboarded === null || !languageReady) return;
     // The wizard reports its own steps, and knows when one of them is still
     // loading. Announcing "welcome" from here marked the window ready before the
@@ -88,6 +103,7 @@ export default function App() {
     // panel still saying "Checking...".
     if (!onboarded) return;
     void uiReady(current);
+    void uiTiming("shell_ready", pageMs());
   }, [onboarded, current, languageReady]);
 
   // After the page has had time to load its data, look for placeholder text on
@@ -113,14 +129,25 @@ export default function App() {
   }, [onboarded, current]);
 
   if (onboarded === null || !languageReady) {
-    return <p className="muted">{t("Starting...")}</p>;
+    // The shell paints immediately: the navigation and the frame appear at once, and
+    // only the page area is a placeholder. Waiting on two IPC calls before drawing
+    // anything was the largest avoidable part of the first-screen delay.
+    return (
+      <div className="app">
+        <nav>
+          <div className="brand">Devchievements</div>
+        </nav>
+        <main className="shell">
+          <PageSkeleton />
+        </main>
+      </div>
+    );
   }
   if (!onboarded) {
     return (
-      <Welcome
-        initialStep={requestedStep() ?? "welcome"}
-        onFinish={() => setOnboarded(true)}
-      />
+      <Suspense fallback={<PageSkeleton />}>
+        <Welcome initialStep={requestedStep() ?? "welcome"} onFinish={() => setOnboarded(true)} />
+      </Suspense>
     );
   }
 
@@ -142,7 +169,9 @@ export default function App() {
         ))}
       </nav>
       <main className="shell">
-        <Page />
+        <Suspense fallback={<PageSkeleton />}>
+          <Page />
+        </Suspense>
       </main>
     </div>
   );

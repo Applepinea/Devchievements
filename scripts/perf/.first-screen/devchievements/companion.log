@@ -1,0 +1,11 @@
+WEBVIEW2 version=157.0.4341.60
+ALREADY RUNNING: asking the running copy to show its window
+SHOW request delivered
+SHOW requested by a second launch
+WINDOW opened reason=second-launch
+UI TIMING stage=script_start origin_ms=16003.3 page_ms=40.2
+UI TIMING stage=boot_resolved origin_ms=16005.5 page_ms=44.5
+UI LANGUAGE lang=en sample=Dashboard
+UI TIMING stage=shell_ready origin_ms=16008.0 page_ms=46.7
+UI READY view=dashboard
+UI TIMING stage=dashboard_data origin_ms=16010.4 page_ms=49.1

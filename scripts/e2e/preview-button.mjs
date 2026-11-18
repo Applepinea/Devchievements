@@ -115,10 +115,18 @@ async function main() {
 
   // The debugging target exists before React has mounted, so an immediate query
   // returns an empty page. Wait for the UI to render rather than for the window.
-  for (let i = 0; i < 60; i++) {
-    const count = await evaluate(`document.querySelectorAll('button').length`);
-    if (count > 0) break;
-    await sleep(500);
+  //
+  // Waiting for *any* button is no longer enough: pages other than the dashboard are
+  // now loaded on demand, so the navigation renders first and the page content
+  // arrives a moment later. Wait for this page's own control, or the test measures
+  // the chunk boundary instead of the button.
+  for (let i = 0; i < 80; i++) {
+    const ready = await evaluate(`
+      Array.from(document.querySelectorAll('button'))
+        .some((b) => /预览弹窗|Preview popup/.test(b.textContent || ''))
+    `);
+    if (ready) break;
+    await sleep(250);
   }
 
   // 1. Which buttons does the page actually render?

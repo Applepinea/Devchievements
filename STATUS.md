@@ -321,6 +321,7 @@ ALL CHECKS PASSED
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-11-18（首屏性能） | 按审查意见先建基线再优化：cold `shell_ready` p50 **848→371 ms**、warm **493→48 ms**；`boot_status` 快速路径、首屏骨架、页面级 lazy、`get_storage_health` 拆分、pool 缓存。setup 阶段实测 0.07/7.26 ms → **未改动** |
 | 2026-11-18（首屏缺陷） | 修掉 READ-ONLY 数据跨 IPC 的**线格式不一致**：`Statistics`/`StorageHealth`/`ActivityDay`/`RepositoryEntry`/`Capabilities` 缺 `rename_all = "camelCase"`，导致 `undefined 天`、`schema vundefined`、`Invalid Date`，以及 **About 页白屏**；补 5 个线格式测试 + 页面自检 + `ui-pages` e2e（6 页 × 2 断言） |
 | 2026-11-18（性能优化跟进，已并入 main） | Spool 计数改为定长缓冲读取；历史导入去掉未使用的提交主题与全量匹配引用副本；扩展统计改走 IndexedDB 索引。托盘扫描周期试过 100 ms，**实测 p95 437 ms（预算 87%）后回退 50 ms** |
 | 2026-11-16（第一轮） | Phase 0 主体：环境勘察、隔离工具链、Monorepo、AGENTS/STATUS/spec 拆分/ADR、15 场景 Git 实验 + fixtures、WASM 验证、扩展构建 |
@@ -373,7 +374,7 @@ ALL CHECKS PASSED
 | 4b.16 | 微软商店（MSIX） | `Tested`（本机） | `scripts/msix/` 打真实 MSIX 并装机：安装/AOT 图标/startupTask/数据包外；**helper 复制到 `%LOCALAPPDATA%\bin` 后 hook 可执行并投递记录**（10 项探测全过）。当前用 bootstrapper 按需装 WebView2，认证备注见 `docs/development/store-certification-notes.md`；商店审核口径与无运行库真机流程**未验证**。见 §13–§14 |
 | 4b.5 | 数据迁移（§26.4） | `In Progress` | 更新前后快照/还原路径已测；数据库迁移兼容旧版本尚未做 |
 | 4b.6 | 多语言（§40.1） | `Tested` | 英文原文当 key + 简体中文字典（178/178）；`system` 跟随 webview locale；`UI LANGUAGE lang=… sample=…` 由 e2e 断言查表真的发生；`check-i18n.mjs` 守漏译 |
-| 4b.7 | 性能优化（§40.1 / §44.1） | `Partially Implemented` | 改动前基线：hook p95 10.81 ms、commit→通知 p95 274/328 ms、空闲 CPU 0.12% 整机；2026-11-18 有性能跟进改动，**改动后未测**；开窗口时的空闲 CPU、以及 §44.3 的并发/损坏场景未测 |
+| 4b.7 | 性能优化（§40.1 / §44.1） | `Partially Implemented` | hook p95 10.81 ms、commit→通知 p95 274/328 ms、空闲 CPU 0.12% 整机；**首屏已实测并优化**：cold `shell_ready` p50 848→371 ms、warm 493→48 ms（各 12 次，分布不重叠，见 `docs/development/first-screen-performance.md`）。**未测**：首次 onboarding 路径、开窗口时的空闲 CPU、§44.3 并发/损坏场景 |
 | 4b.8 | 错误恢复（§40.1） | `Partially Implemented` | 崩溃恢复、更新失败回滚已测；其余错误路径未逐一评估 |
 | 4b.9 | 完整隐私设置（§40.1） | `Tested` | 隐私模式/托盘开关/日志脱敏；诊断导出默认脱敏、`--raw` 与设置页勾选才含真实仓库名，**警告写进文件本身**；`diagnostics-export` e2e 9 项 |
 | 4b.10 | 启动行为：可选隐藏到托盘 | `Tested` | 设置页开关 + `startHidden`（默认 true）；`STARTUP hidden=` 日志对两种取值都有断言；配置导出对旧文件兼容 |

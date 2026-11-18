@@ -1,19 +1,48 @@
 import { useEffect, useState } from "react";
-import { getDashboard, type DashboardView } from "../ipc";
+import {
+  getDashboard,
+  getStorageHealth,
+  pageMs,
+  uiTiming,
+  type DashboardView,
+  type StorageHealth,
+} from "../ipc";
 import { bytes, channel, dateTime } from "../format";
 import { t, tf } from "../i18n";
 
 export default function Dashboard() {
   const [data, setData] = useState<DashboardView | null>(null);
+  const [storage, setStorage] = useState<StorageHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getDashboard().then(setData, (e: unknown) =>
-      setError(e instanceof Error ? e.message : String(e)));
+    getDashboard().then(
+      (view) => {
+        setData(view);
+        void uiTiming("dashboard_data", pageMs());
+      },
+      (e: unknown) => setError(e instanceof Error ? e.message : String(e)),
+    );
+  }, []);
+
+  // The storage block is diagnostics: the path, the size, the schema version. None of
+  // it belongs on the first screen, so it is requested separately and rendered when it
+  // arrives instead of holding the numbers back.
+  useEffect(() => {
+    getStorageHealth().then(setStorage, () => setStorage(null));
   }, []);
 
   if (error) return <p className="error">{error}</p>;
-  if (!data) return <p className="muted">{t("Loading...")}</p>;
+  if (!data) {
+    return (
+      <div className="shell-skeleton" aria-busy="true">
+        <div className="skeleton-line short" />
+        <div className="skeleton-line" />
+        <div className="skeleton-line" />
+        <div className="skeleton-line" />
+      </div>
+    );
+  }
 
   const s = data.statistics;
   return (
@@ -56,11 +85,19 @@ export default function Dashboard() {
       </p>
 
       <h3>{t("Storage")}</h3>
-      <p className="muted">
-        {bytes(data.storage.bytes)} · {tf("schema v{v}", { v: data.storage.schemaVersion })}
-      </p>
-      <p className="muted">{t("Oldest event:")} {dateTime(data.storage.oldestEventAt)}</p>
-      <p className="tiny">{data.storage.path}</p>
+      {storage ? (
+        <>
+          <p className="muted">
+            {bytes(storage.bytes)} · {tf("schema v{v}", { v: storage.schemaVersion })}
+          </p>
+          <p className="muted">{t("Oldest event:")} {dateTime(storage.oldestEventAt)}</p>
+          <p className="tiny">{storage.path}</p>
+        </>
+      ) : (
+        <div className="shell-skeleton" aria-busy="true">
+          <div className="skeleton-line" />
+        </div>
+      )}
       <p className="tiny">{tf("Companion {version}", { version: data.version })}</p>
     </>
   );
