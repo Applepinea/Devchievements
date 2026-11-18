@@ -989,4 +989,46 @@ ok  the data directory is outside the package
 第 2 条立刻就抓到第 4 行那个白屏：本轮第一次跑就报
 `UI ERROR TypeError: Cannot read properties of undefined (reading 'replace')`。
 
+
+## 16. 预览按钮死锁：同步命令 + 等待 = 主线程自己等自己
+
+用户报告「预览弹窗完全没反应」，之前我两次都**绕开了按钮**（用 `--preview-popup` 从 Rust 调用），
+所以一直没复现。这次用 webview 的调试协议**真的去点那个按钮**，一次就复现：
+
+```text
+before:  POPUP icon_url=none / POPUP render radius=0 ...   ← 之后永远没有下文
+after:   POPUP placed at=1917,1407 ... POPUP preview shown ... POPUP painted
+```
+
+原因是一条 Tauri 规则：**同步命令跑在主线程**。
+
+```rust
+app.run_on_main_thread(|| popup::show(...));  // 排到主线程
+receiver.recv_timeout(10s)                     // 也是主线程 → 死锁
+```
+
+而这个等待**是当天早上我自己加的**（为了让失败能显示出来而不是假报已打开）。想要结果没错，错在线程。
+改成 `pub async fn`（命令移到工作线程）就好了。
+
+### 16.1 同一症状下叠着三个缺陷
+
+| # | 缺陷 | 引入时间 | 现象 |
+| --- | --- | --- | --- |
+| 1 | 定位用整个显示器而非工作区 | 一直存在 | 弹窗被任务栏压住 |
+| 2 | 用弹窗窗口判断显示器 | 一直存在 | 多屏时弹到别的屏 |
+| 3 | 同步命令 + 等待 = 死锁 | **当天引入** | 完全无反应 |
+
+第 3 条是「改完要用真实点击验证」的直接教训：
+用 `--preview-popup` 验证，等于测了一条用户点不到的路。
+
+### 16.2 新增的两个真实点击测试
+
+| 脚本 | 断言 |
+| --- | --- |
+| `scripts/e2e/preview-button.mjs` | 按钮存在 → 点击 → Rust 收到请求 → 页面无错误 |
+| `scripts/e2e/ui-buttons.mjs` | 六个导航按钮逐个点击，标题必须变化；点完页面仍响应 |
+
+第二个是用户报「每个按键都没反应」之后加的：**界面冻结和路由失效从外面看一样**，
+只有真的点一遍才能区分。实测当前构建六个按钮全部生效。
+
 ---
