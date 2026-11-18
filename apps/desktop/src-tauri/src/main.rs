@@ -2072,7 +2072,10 @@ fn main() {
                     let handle = app.handle().clone();
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_millis(1500));
-                        match commands::show_popup_preview(handle) {
+                        let outcome = async_std::task::block_on(
+                            commands::show_popup_preview(handle),
+                        );
+                        match outcome {
                             Ok(()) => println!("PREVIEW command returned ok"),
                             Err(e) => println!("PREVIEW command failed: {e}"),
                         }

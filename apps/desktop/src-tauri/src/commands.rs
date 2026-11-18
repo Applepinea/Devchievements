@@ -621,8 +621,12 @@ pub async fn clear_data() -> Result<(), String> {
 ///
 /// Saves nothing itself: the caller saves first, so what the preview shows is what
 /// the next real notification would use.
+// `async` is load-bearing, not stylistic: a synchronous command runs on the main
+// thread, and this one waits for work it scheduled onto that same thread -- a
+// deadlock that made the button do nothing for ten seconds and then report a
+// timeout. As an async command it runs on a worker, so the wait is real.
 #[tauri::command]
-pub fn show_popup_preview(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn show_popup_preview(app: tauri::AppHandle) -> Result<(), String> {
     let payload = crate::popup::PopupPayload {
         title: "Preview".to_string(),
         body: "This is how your notifications will look".to_string(),
