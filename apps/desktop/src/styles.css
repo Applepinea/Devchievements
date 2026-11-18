@@ -20,7 +20,15 @@ body {
   font: 14px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
 }
 
-.app { display: grid; grid-template-columns: 190px 1fr; min-height: 100vh; }
+/* `minmax(0, 1fr)` rather than `1fr`: a grid track's default minimum is its content,
+   so a long path or a wide row pushed the panel past the window instead of wrapping
+   inside it. That is what made the layout fall apart after resizing. */
+.app {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+}
 
 nav {
   background: var(--panel);
@@ -47,23 +55,49 @@ button.nav {
 button.nav:hover { background: #22262e; color: var(--text); }
 button.nav.active { background: #262b35; color: var(--text); }
 
-.shell { padding: 20px 26px 40px; max-width: 860px; overflow: auto; }
+.shell {
+  padding: 20px 26px 40px;
+  max-width: 860px;
+  min-width: 0;
+  /* Only the content scrolls; the navigation stays put. */
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 h2 { margin: 0 0 14px; font-size: 19px; }
 h3 { margin: 24px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
 
 .muted { color: var(--muted); margin: 4px 0 10px; }
 .tiny { color: var(--muted); font-size: 12px; margin: 2px 0; }
 .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px; }
+/* A long path has no spaces to break at, so it is allowed to break anywhere rather
+   than widen the panel. */
+.tiny, .mono { overflow-wrap: anywhere; }
 .error { color: var(--danger); }
 .notice { color: var(--muted); margin-top: 8px; }
 
-input:not([type=checkbox]) {
+/* Text inputs only. A range inherits padding from this rule, which insets the track:
+   the thumb then stops short of both ends however far the user drags, and the
+   min-width forces a horizontal scrollbar in a narrow window. */
+input:not([type=checkbox]):not([type=range]) {
   background: var(--panel);
   border: 1px solid #2a2f38;
   border-radius: 6px;
   color: var(--text);
   padding: 7px 10px;
-  min-width: 260px;
+  min-width: 0;
+}
+
+input[type=range] {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  /* The track is drawn edge to edge, so the thumb reaches both extremes. */
+  padding: 0;
+  margin: 0 4px;
+  accent-color: var(--accent);
+  background: transparent;
+  border: 0;
 }
 
 button {
@@ -79,15 +113,23 @@ button.ghost { background: transparent; color: var(--muted); }
 button:disabled { opacity: .6; cursor: default; }
 
 .list { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 8px; }
-.row { display: flex; align-items: center; gap: 10px; }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
 .row.spread { justify-content: space-between; }
 
-.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 22px; margin: 0 0 6px; }
+/* Two columns when there is room, one when there is not, so the statistics stay
+   readable in a narrow window instead of colliding. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px 22px;
+  margin: 0 0 6px;
+}
 .stats div { display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
 .stats dt { color: var(--muted); }
 .stats dd { margin: 0; }
 
-.grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; opacity: .62; }
 .card.unlocked { opacity: 1; border-color: #33405a; }
 .card p { margin: 6px 0 0; }
@@ -210,5 +252,13 @@ button.danger { background: var(--danger); }
   border-radius: inherit;
 }
 
-.field { display: flex; align-items: center; gap: 8px; min-width: 220px; }
-.field > span:first-child { color: var(--muted); min-width: 96px; }
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* A basis, not a floor: the row must be able to shrink in a narrow window. */
+  flex: 1 1 260px;
+  min-width: 0;
+}
+.field > span:first-child { color: var(--muted); flex: 0 0 96px; }
+.field > span:last-child { flex: 0 0 auto; min-width: 44px; text-align: right; }

@@ -178,9 +178,11 @@ impl PopupStyle {
     /// monitor.
     pub fn position(&self, screen: (u32, u32)) -> (i32, i32) {
         let (width, height) = self.window_size();
-        // A small gap is enforced even when the user asks for zero: touching the edge
-        // looks like a rendering bug and, at the bottom, is hidden outright.
-        let margin = (self.screen_margin as i32).max(MIN_SCREEN_MARGIN);
+        // The margin is honoured exactly, including zero. A zero margin used to
+        // disappear behind the taskbar, but that was because placement used the whole
+        // monitor; the caller now passes the work area, which already stops at the
+        // taskbar, so zero means flush against a visible edge.
+        let margin = self.screen_margin as i32;
         let (sw, sh) = (screen.0 as i32, screen.1 as i32);
         let x = match self.corner {
             Corner::TopLeft | Corner::BottomLeft => margin,
@@ -222,11 +224,6 @@ impl std::fmt::Display for ThemeRejection {
 }
 
 impl std::error::Error for ThemeRejection {}
-
-/// The smallest gap kept between a popup and the edge of the usable area.
-///
-/// Logical pixels. Zero looks like a clipped window, and at the bottom it is clipped.
-pub const MIN_SCREEN_MARGIN: i32 = 16;
 
 /// The schema version this build writes and accepts.
 pub const THEME_SCHEMA_VERSION: u32 = 1;
@@ -553,9 +550,10 @@ mod tests {
     }
 
     #[test]
-    fn a_zero_margin_still_keeps_a_gap_from_the_edge() {
-        // Reported from the app: a popup with margin 0 sat against the bottom edge and
-        // the taskbar covered it, so the preview looked like it did nothing.
+    fn a_zero_margin_puts_the_popup_flush_against_the_usable_edge() {
+        // The user asked for zero and got a gap: an earlier fix forced a minimum
+        // because a zero margin used to vanish behind the taskbar. The real cure is
+        // that the caller now passes the work area, so zero means zero.
         let style = PopupStyle {
             screen_margin: 0,
             corner: Corner::BottomRight,
@@ -563,9 +561,18 @@ mod tests {
         };
         let (width, height) = style.window_size();
         let (x, y) = style.position((1920, 1040));
-        assert_eq!(x, 1920 - width as i32 - MIN_SCREEN_MARGIN);
-        assert_eq!(y, 1040 - height as i32 - MIN_SCREEN_MARGIN);
-        assert!(y + height as i32 <= 1040 - MIN_SCREEN_MARGIN);
+        assert_eq!(x, 1920 - width as i32);
+        assert_eq!(y, 1040 - height as i32);
+    }
+
+    #[test]
+    fn a_zero_margin_on_the_top_left_is_the_origin() {
+        let style = PopupStyle {
+            screen_margin: 0,
+            corner: Corner::TopLeft,
+            ..PopupStyle::default()
+        };
+        assert_eq!(style.position((1920, 1040)), (0, 0));
     }
 
     #[test]
