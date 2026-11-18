@@ -608,3 +608,265 @@ async fn a_user_rule_unlocks_at_its_threshold_and_only_once() {
         .count();
     assert_eq!(celebrations, 1, "one unlock, one celebration");
 }
+
+// ----------------------------------------------------------- browser activities
+
+/// An identity that owns a GitHub login, which is how a browser report is
+/// attributed (spec 7: the login maps to the configured emails).
+fn identity_with_login() -> Identity {
+    let mut identity = configured_identity();
+    identity.add_login_mapping("me", vec!["me@example.com".to_string()]);
+    identity
+}
+
+/// A browser report as the Native Messaging host produces it.
+///
+/// A page never reveals an author email, so attribution has to go through the
+/// login mapping rather than through the payload's author email.
+fn browser_event(
+    event_type: EventType,
+    external_id: &str,
+    occurred_at: i64,
+    local_date: &str,
+) -> Event {
+    Event {
+        event_id: EventId::new(format!(
+            "browser:github:o/r#{}:{external_id}",
+            event_type.as_str()
+        ))
+        .expect("id"),
+        event_type,
+        source: EventSource::BrowserExtension,
+        source_confidence: SourceConfidence::BrowserConfirmed,
+        canonical_repository_id: CanonicalRepositoryId("github:o/r".to_string()),
+        external_id: Some(external_id.to_string()),
+        commit_sha: None,
+        occurred_at,
+        observed_at: occurred_at,
+        received_at: occurred_at,
+        local_date: LocalDate::new(local_date).expect("date"),
+        timezone: "Asia/Taipei".to_string(),
+        date_policy: 0,
+        payload: "{\"author_login\":\"me\",\"kind\":\"browser_github\"}".to_string(),
+        schema_version: SchemaVersion(1),
+    }
+}
+
+/// Facts for an event that is not a commit; the engine must not count it.
+fn not_a_commit() -> devchievements_core::CommitFacts {
+    devchievements_core::CommitFacts {
+        counts_as_commit: false,
+        is_merge: false,
+        is_empty: false,
+    }
+}
+
+#[tokio::test]
+async fn a_merged_pull_request_counts_and_unlocks_without_being_a_commit() {
+    // Spec 2.3 and 16.4: a merged PR is its own statistic, unlocks its own
+    // achievement, and must never be counted as a commit.
+    let pool = temp_pool("browser-pr-merged").await;
+    let mut fx = fixture();
+    let ctx = fx.ctx();
+    let identity = identity_with_login();
+    let event = browser_event(
+        EventType::PullRequestMerged,
+        "pr:1",
+        1_794_787_200_000,
+        "2026-11-16",
+    );
+
+    let outcome =
+        ingest::ingest_commit_with_rules(&pool, &event, &not_a_commit(), 0, &identity, &ctx, &[])
+            .await
+            .expect("ingest");
+    assert!(
+        matches!(outcome, IngestOutcome::Ingested { .. }),
+        "{outcome:?}"
+    );
+
+    let totals = projections::browser_totals(&pool).await.expect("totals");
+    assert_eq!(totals.pull_request_merged_count, 1);
+    assert_eq!(
+        projections::repository_commit_count(&pool, "github:o/r")
+            .await
+            .expect("count"),
+        0,
+        "a merged pull request must not move the commit counter"
+    );
+    assert!(
+        projections::unlocked_achievement_ids(&pool)
+            .await
+            .expect("unlocked")
+            .contains(&"first_pr_merged".to_string()),
+        "a merged pull request must unlock first_pr_merged"
+    );
+
+    let queued: Vec<(String,)> = sqlx::query_as("SELECT kind FROM outbox")
+        .fetch_all(&pool)
+        .await
+        .expect("outbox");
+    assert_eq!(queued.len(), 1, "one unlock, one celebration");
+    assert_eq!(queued[0].0, "achievement_unlocked");
+}
+
+#[tokio::test]
+async fn an_opened_pull_request_is_recorded_without_counting_anything() {
+    // Nothing in the rule set observes an opened pull request, so it is stored and
+    // stays silent rather than inventing a counter nothing reads.
+    let pool = temp_pool("browser-pr-opened").await;
+    let mut fx = fixture();
+    let ctx = fx.ctx();
+    let identity = identity_with_login();
+    let event = browser_event(
+        EventType::PullRequestOpened,
+        "pr:2",
+        1_794_787_200_000,
+        "2026-11-16",
+    );
+
+    let outcome =
+        ingest::ingest_commit_with_rules(&pool, &event, &not_a_commit(), 0, &identity, &ctx, &[])
+            .await
+            .expect("ingest");
+    assert!(
+        matches!(outcome, IngestOutcome::IngestedSilently),
+        "{outcome:?}"
+    );
+
+    assert_eq!(
+        projections::browser_totals(&pool).await.expect("totals"),
+        projections::BrowserTotals::default()
+    );
+    assert_eq!(ingest::event_count(&pool).await.expect("events"), 1);
+    let queued: Vec<(String,)> = sqlx::query_as("SELECT kind FROM outbox")
+        .fetch_all(&pool)
+        .await
+        .expect("outbox");
+    assert!(queued.is_empty(), "nothing to celebrate yet");
+}
+
+#[tokio::test]
+async fn a_browser_only_repository_exists_with_zero_commits() {
+    // Spec 24.1 lists repositories, and a repository known only from the browser is
+    // still one of them. Zero commits is a number, not a missing row.
+    let pool = temp_pool("browser-only-repo").await;
+    let mut fx = fixture();
+    let ctx = fx.ctx();
+    let identity = identity_with_login();
+    let event = browser_event(
+        EventType::ReleasePublished,
+        "release:1",
+        1_794_787_200_000,
+        "2026-11-16",
+    );
+
+    ingest::ingest_commit_with_rules(&pool, &event, &not_a_commit(), 0, &identity, &ctx, &[])
+        .await
+        .expect("ingest");
+
+    let row: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT commit_count, release_count FROM repository_projection
+         WHERE canonical_repository_id = 'github:o/r'",
+    )
+    .fetch_optional(&pool)
+    .await
+    .expect("row");
+    assert_eq!(row, Some((0, 1)));
+}
+
+#[tokio::test]
+async fn a_quiet_policy_records_the_unlock_without_queueing_a_notification() {
+    // Spec 16.3: an event older than a day updates statistics silently. The unlock is
+    // still real, and it is NOT relabelled as an import -- the event just happened to
+    // the user's account, we simply learned about it late.
+    let pool = temp_pool("quiet-policy").await;
+    let mut fx = fixture();
+    let ctx = fx.ctx();
+    let identity = identity_with_login();
+    let event = browser_event(
+        EventType::PullRequestMerged,
+        "pr:3",
+        1_794_787_200_000,
+        "2026-11-16",
+    );
+
+    let outcome = ingest::ingest_event_with_policy(
+        &pool,
+        &event,
+        &not_a_commit(),
+        0,
+        &identity,
+        &ctx,
+        ingest::NotificationPolicy::Quiet,
+        &[],
+    )
+    .await
+    .expect("ingest");
+    assert!(
+        matches!(outcome, IngestOutcome::IngestedSilently),
+        "{outcome:?}"
+    );
+
+    let unlocked: Vec<(String, String)> =
+        sqlx::query_as("SELECT achievement_id, unlock_source FROM unlocked_achievements")
+            .fetch_all(&pool)
+            .await
+            .expect("unlocked");
+    assert_eq!(
+        unlocked,
+        vec![("first_pr_merged".to_string(), "realtime".to_string())]
+    );
+
+    let queued: Vec<(String,)> = sqlx::query_as("SELECT notification_id FROM outbox")
+        .fetch_all(&pool)
+        .await
+        .expect("outbox");
+    assert!(
+        queued.is_empty(),
+        "a row in the outbox is delivered, so a quiet event must not create one"
+    );
+}
+
+#[tokio::test]
+async fn a_rebuild_reproduces_the_browser_counters() {
+    // The projections are derived, so rebuilding from the event log must land on the
+    // same numbers live ingestion produced -- otherwise "recompute history" is a lie.
+    let pool = temp_pool("browser-rebuild").await;
+    let mut fx = fixture();
+    let ctx = fx.ctx();
+    let identity = identity_with_login();
+
+    for (event_type, external_id) in [
+        (EventType::PullRequestMerged, "pr:1"),
+        (EventType::PullRequestMerged, "pr:2"),
+        (EventType::ReleasePublished, "release:1"),
+        (EventType::StarGiven, "star:1"),
+    ] {
+        let event = browser_event(event_type, external_id, 1_794_787_200_000, "2026-11-16");
+        ingest::ingest_commit_with_rules(&pool, &event, &not_a_commit(), 0, &identity, &ctx, &[])
+            .await
+            .expect("ingest");
+    }
+
+    let before = projections::browser_totals(&pool).await.expect("totals");
+    assert_eq!(before.pull_request_merged_count, 2);
+    assert_eq!(before.release_count, 1);
+    assert_eq!(before.star_given_count, 1);
+
+    projections::rebuild_from_events(&pool, 9_999)
+        .await
+        .expect("rebuild");
+
+    assert_eq!(
+        projections::browser_totals(&pool).await.expect("totals"),
+        before,
+        "a rebuild must reproduce the same numbers"
+    );
+    assert_eq!(
+        projections::repository_commit_count(&pool, "github:o/r")
+            .await
+            .expect("count"),
+        0
+    );
+}

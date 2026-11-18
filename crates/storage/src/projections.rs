@@ -69,6 +69,71 @@ pub async fn repository_commit_count(pool: &SqlitePool, repository_id: &str) -> 
     Ok(row.map(|(n,)| n as u32).unwrap_or(0))
 }
 
+/// The user's GitHub totals across every tracked repository (spec 2.3).
+///
+/// Summed rather than stored on a single row: the achievements are about the user,
+/// but each activity happened in one repository, and keeping the per-repository
+/// figure is what makes "where did this come from?" answerable.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BrowserTotals {
+    /// Merged pull requests.
+    pub pull_request_merged_count: u32,
+    /// Releases published.
+    pub release_count: u32,
+    /// Issues opened.
+    pub issue_opened_count: u32,
+    /// Repositories created.
+    pub repositories_created_count: u32,
+    /// Stars given.
+    pub star_given_count: u32,
+}
+
+impl BrowserTotals {
+    /// Fill the browser fields of a snapshot.
+    pub fn apply_to(self, snapshot: &mut devchievements_core::StateSnapshot) {
+        snapshot.pull_request_merged_count = self.pull_request_merged_count;
+        snapshot.release_count = self.release_count;
+        snapshot.issue_opened_count = self.issue_opened_count;
+        snapshot.repositories_created_count = self.repositories_created_count;
+        snapshot.stars_given_count = self.star_given_count;
+    }
+}
+
+/// Read the user's GitHub totals.
+pub async fn browser_totals(pool: &SqlitePool) -> StorageResult<BrowserTotals> {
+    let row = sqlx::query(
+        "SELECT
+            COALESCE(SUM(pull_request_merged_count), 0)   AS pr,
+            COALESCE(SUM(release_count), 0)               AS releases,
+            COALESCE(SUM(issue_opened_count), 0)          AS issues,
+            COALESCE(SUM(repositories_created_count), 0)  AS repos,
+            COALESCE(SUM(star_given_count), 0)            AS stars
+         FROM repository_projection",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(BrowserTotals {
+        pull_request_merged_count: row.get::<i64, _>("pr") as u32,
+        release_count: row.get::<i64, _>("releases") as u32,
+        issue_opened_count: row.get::<i64, _>("issues") as u32,
+        repositories_created_count: row.get::<i64, _>("repos") as u32,
+        star_given_count: row.get::<i64, _>("stars") as u32,
+    })
+}
+
+/// The column a browser-counter projection writes, if it is one.
+fn browser_counter_column(projection: &str) -> Option<&'static str> {
+    match projection {
+        "repository_pull_request_merged_count" => Some("pull_request_merged_count"),
+        "repository_release_count" => Some("release_count"),
+        "repository_issue_opened_count" => Some("issue_opened_count"),
+        "repository_repositories_created_count" => Some("repositories_created_count"),
+        "repository_star_given_count" => Some("star_given_count"),
+        _ => None,
+    }
+}
+
 /// Every unlocked achievement id.
 pub async fn unlocked_achievement_ids(pool: &SqlitePool) -> StorageResult<Vec<String>> {
     let rows: Vec<(String,)> = sqlx::query_as("SELECT achievement_id FROM unlocked_achievements")
@@ -88,6 +153,29 @@ pub async fn apply_state_changes(
     now_ms: i64,
 ) -> StorageResult<()> {
     for change in changes {
+        // The browser counters share one shape: each is a per-repository column whose
+        // new absolute value the Engine already computed, so one statement covers
+        // them all rather than five near-identical arms.
+        if let Some(column) = browser_counter_column(&change.projection) {
+            let value: i64 = change.payload.parse().unwrap_or(0);
+            let sql = format!(
+                "INSERT INTO repository_projection
+                    (canonical_repository_id, {column}, first_seen_at, updated_at)
+                 VALUES (?, ?, ?, ?)
+                 ON CONFLICT(canonical_repository_id) DO UPDATE SET
+                    {column}   = excluded.{column},
+                    updated_at = excluded.updated_at"
+            );
+            sqlx::query(&sql)
+                .bind(event.canonical_repository_id.as_str())
+                .bind(value)
+                .bind(now_ms)
+                .bind(now_ms)
+                .execute(&mut **tx)
+                .await?;
+            continue;
+        }
+
         match change.projection.as_str() {
             "repository_commit_count" => {
                 let value: i64 = change.payload.parse().unwrap_or(0);
@@ -193,6 +281,20 @@ pub async fn rebuild_from_events(pool: &SqlitePool, now_ms: i64) -> StorageResul
         .execute(&mut *tx)
         .await?;
 
+    // Every repository that produced any event keeps a row, including one known only
+    // from browser activities: the Repositories page lists those too (spec 24.1),
+    // and a repository with zero commits is a fact, not a missing row.
+    sqlx::query(
+        "INSERT INTO repository_projection
+            (canonical_repository_id, first_seen_at, updated_at)
+         SELECT canonical_repository_id, MIN(occurred_at), ?
+         FROM events
+         GROUP BY canonical_repository_id",
+    )
+    .bind(now_ms)
+    .execute(&mut *tx)
+    .await?;
+
     // Ordered by occurrence so per-day counts accumulate the same way they would
     // have during live ingestion.
     let rows = sqlx::query(
@@ -222,19 +324,45 @@ pub async fn rebuild_from_events(pool: &SqlitePool, now_ms: i64) -> StorageResul
         replayed += 1;
     }
 
+    // The row already exists (inserted above), so the commit total is written onto it
+    // rather than inserted as a second row.
     for (repo, total) in &repo_totals {
         sqlx::query(
-            "INSERT INTO repository_projection
-                (canonical_repository_id, commit_count, first_seen_at, updated_at)
-             VALUES (?, ?, ?, ?)",
+            "UPDATE repository_projection SET commit_count = ?, updated_at = ?
+             WHERE canonical_repository_id = ?",
         )
-        .bind(repo)
         .bind(total)
         .bind(now_ms)
-        .bind(now_ms)
+        .bind(repo)
         .execute(&mut *tx)
         .await?;
     }
+
+    // Browser counters are recomputed from the event log in one statement each, which
+    // is what keeps a rebuild equal to what live ingestion accumulated.
+    for (event_type, column) in [
+        ("PullRequestMerged", "pull_request_merged_count"),
+        ("ReleasePublished", "release_count"),
+        ("IssueOpened", "issue_opened_count"),
+        ("RepositoryCreated", "repositories_created_count"),
+        ("StarGiven", "star_given_count"),
+    ] {
+        let sql = format!(
+            "UPDATE repository_projection SET {column} = (
+                SELECT COUNT(*) FROM events e
+                WHERE e.event_type = ?
+                  AND e.canonical_repository_id = repository_projection.canonical_repository_id)"
+        );
+        sqlx::query(&sql).bind(event_type).execute(&mut *tx).await?;
+    }
+
+    // Events that only feed a browser counter still count as replayed, so the
+    // caller's number keeps meaning "events read", not "commits read".
+    let browser_only: Option<(i64,)> =
+        sqlx::query_as("SELECT COUNT(*) FROM events WHERE event_type <> 'CommitCreated'")
+            .fetch_optional(&mut *tx)
+            .await?;
+    replayed += browser_only.map(|(n,)| n).unwrap_or(0);
 
     for ((repo, date), (count, tz, policy)) in &day_counts {
         let rank =

@@ -50,6 +50,10 @@ export interface GalleryItem {
 export interface RepositoryEntry {
   alias: string;
   commits: number;
+  /** Merged pull requests the browser extension observed (spec 2.3). */
+  pullRequests: number;
+  /** Releases the browser extension observed. */
+  releases: number;
   firstSeenAt: number;
   updatedAt: number;
 }

@@ -32,22 +32,24 @@ pub use context::{
     TimezoneProvider,
 };
 pub use engine::{
-    CommitFacts, Engine, EngineOutput, ReadSet, SideEffectIntent, SideEffectKind, StateChange,
-    StateSnapshot,
+    BrowserActivity, CommitFacts, Engine, EngineOutput, ReadSet, SideEffectIntent, SideEffectKind,
+    StateChange, StateSnapshot,
 };
 pub use timezone::{local_date_at, BundledTimezoneProvider, DayBoundary};
 
 /// The event kinds the Engine currently evaluates.
 ///
 /// Deliberately narrow: adding a variant means adding a read-set and a rule, which
-/// is the point. Events that are only persisted (releases, stars, ...) do not need
-/// an Engine path yet.
+/// is the point. An opened pull request or a closed issue has no rule to satisfy, so
+/// it has no variant here and is only persisted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventKind {
     /// A commit, including ones that end up excluded.
     Commit,
     /// A local merge (distinct from a PR merge, spec 2.3).
     LocalMerge,
+    /// A GitHub activity reported by the browser extension (spec 2.3).
+    Browser,
 }
 
 /// Mirrors the unlock source so the Engine can label its intents without

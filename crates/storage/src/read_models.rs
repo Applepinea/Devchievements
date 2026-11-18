@@ -51,6 +51,10 @@ pub struct RepositoryEntry {
     pub alias: String,
     /// Valid commits counted.
     pub commits: i64,
+    /// Merged pull requests the browser extension observed (spec 2.3).
+    pub pull_requests: i64,
+    /// Releases the browser extension observed.
+    pub releases: i64,
     /// First time this repository contributed.
     pub first_seen_at: i64,
     /// Last time it contributed.
@@ -180,7 +184,8 @@ pub async fn repositories(
     alias: impl Fn(&str) -> String,
 ) -> StorageResult<Vec<RepositoryEntry>> {
     let rows = sqlx::query(
-        "SELECT canonical_repository_id, commit_count, first_seen_at, updated_at
+        "SELECT canonical_repository_id, commit_count, pull_request_merged_count,
+                release_count, first_seen_at, updated_at
          FROM repository_projection
          ORDER BY commit_count DESC, canonical_repository_id ASC",
     )
@@ -194,6 +199,8 @@ pub async fn repositories(
             RepositoryEntry {
                 alias: alias(&raw),
                 commits: row.get("commit_count"),
+                pull_requests: row.get("pull_request_merged_count"),
+                releases: row.get("release_count"),
                 first_seen_at: row.get("first_seen_at"),
                 updated_at: row.get("updated_at"),
             }
@@ -483,12 +490,21 @@ mod wire_tests {
         let value = RepositoryEntry {
             alias: "one".to_string(),
             commits: 1,
-            first_seen_at: 2,
-            updated_at: 3,
+            pull_requests: 2,
+            releases: 3,
+            first_seen_at: 4,
+            updated_at: 5,
         };
         assert_eq!(
             keys(&value),
-            vec!["alias", "commits", "firstSeenAt", "updatedAt"]
+            vec![
+                "alias",
+                "commits",
+                "firstSeenAt",
+                "pullRequests",
+                "releases",
+                "updatedAt"
+            ]
         );
     }
 }

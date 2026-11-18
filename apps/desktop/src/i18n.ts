@@ -192,6 +192,8 @@ const ZH: Record<string, string> = {
   "top right": "右上",
   "unavailable": "不可用",
   "{n} commits": "{n} 次提交",
+  "{n} PRs": "{n} 个 PR",
+  "{n} releases": "{n} 个 Release",
   "{n} d": "{n} 天",
   "— it never uploads anything": "— 从不上传任何东西",
   "— it reads commit facts through a Git hook": "— 通过 Git Hook 读取提交事实",

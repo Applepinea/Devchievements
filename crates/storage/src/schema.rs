@@ -13,8 +13,46 @@
 //! - **Every projection row carries the policy that produced it** (timezone, day
 //!   boundary, rule version), so a later review can explain why a number changed.
 
-/// Version applied by migration 1.
-pub const SCHEMA_VERSION: i64 = 1;
+/// Version applied by the current schema.
+///
+/// Bumped to 2 when the browser-activity counters were added to
+/// `repository_projection`. Version 1 databases are upgraded in place by
+/// `ingest::migrate`, which adds any column listed in [`COLUMN_UPGRADES`] that the
+/// table does not already have -- additive, so no event or projection row is lost.
+pub const SCHEMA_VERSION: i64 = 2;
+
+/// Columns added after version 1, as `(table, column, SQL type)`.
+///
+/// `CREATE TABLE IF NOT EXISTS` cannot add a column to an existing table, and this
+/// product has users on version 1 already: their database must gain the counters
+/// rather than be rejected or rebuilt.
+pub const COLUMN_UPGRADES: &[(&str, &str, &str)] = &[
+    (
+        "repository_projection",
+        "pull_request_merged_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "repository_projection",
+        "release_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "repository_projection",
+        "issue_opened_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "repository_projection",
+        "repositories_created_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "repository_projection",
+        "star_given_count",
+        "INTEGER NOT NULL DEFAULT 0",
+    ),
+];
 
 /// The complete Phase 1 schema as plain SQL.
 ///
@@ -78,6 +116,14 @@ CREATE TABLE IF NOT EXISTS daily_projection (
 CREATE TABLE IF NOT EXISTS repository_projection (
     canonical_repository_id TEXT PRIMARY KEY NOT NULL,
     commit_count            INTEGER NOT NULL DEFAULT 0,
+    -- GitHub activities observed by the browser extension (spec 2.3). Kept per
+    -- repository because that is where the activity happened; the achievements read
+    -- the sum, which is the user's total.
+    pull_request_merged_count     INTEGER NOT NULL DEFAULT 0,
+    release_count                 INTEGER NOT NULL DEFAULT 0,
+    issue_opened_count            INTEGER NOT NULL DEFAULT 0,
+    repositories_created_count    INTEGER NOT NULL DEFAULT 0,
+    star_given_count              INTEGER NOT NULL DEFAULT 0,
     first_seen_at           INTEGER NOT NULL,
     updated_at              INTEGER NOT NULL
 );

@@ -143,7 +143,54 @@ pub async fn load_snapshot(
         daily_commit_count,
         daily_rank_today: daily_rank,
         unlocked_achievement_ids: unlocked,
+        // Deliberately not loaded: a commit evaluation declares no browser counters
+        // in its read-set, and filling them "just in case" is how a read-set drifts.
+        ..Default::default()
     })
+}
+
+/// The browser activity an event type represents, if any.
+///
+/// An opened pull request, a closed issue and a received star are recorded but have
+/// no counter, because no rule reads one. Mapping them to something invented would
+/// mean every reader has to guess whether the number is maintained.
+pub fn browser_activity_for(
+    event_type: devchievements_events::EventType,
+) -> Option<devchievements_core::BrowserActivity> {
+    use devchievements_core::BrowserActivity;
+    use devchievements_events::EventType;
+
+    match event_type {
+        EventType::PullRequestMerged => Some(BrowserActivity::PullRequestMerged),
+        EventType::ReleasePublished => Some(BrowserActivity::ReleasePublished),
+        EventType::RepositoryCreated => Some(BrowserActivity::RepositoryCreated),
+        EventType::StarGiven => Some(BrowserActivity::StarGiven),
+        _ => None,
+    }
+}
+
+/// Load the read-set a browser activity declared (spec 4.3).
+///
+/// No day projection is read: browser activities do not move the daily rank
+/// (spec 14.3 counts commits).
+pub async fn load_browser_snapshot(
+    pool: &SqlitePool,
+    repository_id: &str,
+) -> StorageResult<StateSnapshot> {
+    let snapshot = StateSnapshot {
+        version: 0,
+        repository_commit_count: projections::repository_commit_count(pool, repository_id).await?,
+        daily_commit_count: 0,
+        daily_rank_today: None,
+        unlocked_achievement_ids: projections::unlocked_achievement_ids(pool).await?,
+        ..Default::default()
+    };
+
+    let mut snapshot = snapshot;
+    projections::browser_totals(pool)
+        .await?
+        .apply_to(&mut snapshot);
+    Ok(snapshot)
 }
 
 /// Ingest a commit event.
@@ -158,8 +205,26 @@ pub async fn load_snapshot(
 pub enum NotificationPolicy {
     /// Queue notifications as usual.
     Inform,
+    /// Record everything but queue nothing.
+    ///
+    /// Used for an event that is real but too old to announce (spec 16.3, over 24
+    /// hours). It is NOT a history import: the unlock source stays realtime, because
+    /// the event did just happen to the user's account.
+    Quiet,
     /// Record everything but queue nothing (history import).
     Silent,
+}
+
+impl NotificationPolicy {
+    /// Whether this policy may create outbox rows.
+    pub fn queues_notifications(self) -> bool {
+        self == NotificationPolicy::Inform
+    }
+
+    /// Whether unlocks from this policy should be labelled as imported.
+    pub fn is_import(self) -> bool {
+        self == NotificationPolicy::Silent
+    }
 }
 
 pub async fn ingest_commit(
@@ -196,7 +261,7 @@ pub async fn ingest_commit_with_rules(
     ctx: &InjectedContext<'_>,
     user_rules: &[devchievements_core::achievements::definition::UserAchievement],
 ) -> StorageResult<IngestOutcome> {
-    ingest_commit_inner(
+    ingest_event_with_policy(
         pool,
         event,
         facts,
@@ -205,6 +270,28 @@ pub async fn ingest_commit_with_rules(
         ctx,
         NotificationPolicy::Inform,
         user_rules,
+    )
+    .await
+}
+
+/// Ingest one event with an explicit notification policy.
+///
+/// The policy has to be decided by the caller because only the caller knows how old
+/// the event is (spec 16.3). Passing it in, rather than letting this layer re-derive
+/// freshness, keeps the clock out of storage and makes the decision testable.
+#[allow(clippy::too_many_arguments)]
+pub async fn ingest_event_with_policy(
+    pool: &SqlitePool,
+    event: &Event,
+    facts: &CommitFacts,
+    now_ms: i64,
+    identity: &Identity,
+    ctx: &InjectedContext<'_>,
+    policy: NotificationPolicy,
+    user_rules: &[devchievements_core::achievements::definition::UserAchievement],
+) -> StorageResult<IngestOutcome> {
+    ingest_commit_inner(
+        pool, event, facts, now_ms, identity, ctx, policy, user_rules,
     )
     .await
 }
@@ -314,32 +401,49 @@ async fn ingest_commit_inner(
     .await?;
 
     // ---- evaluate with the declared read-set ----
-    let snapshot = load_snapshot(
-        pool,
-        event.canonical_repository_id.as_str(),
-        event.local_date.as_str(),
-    )
-    .await
-    .unwrap_or_else(|_| StateSnapshot::default());
+    //
+    // Spec 2.3: a browser report is not a commit. It moves only its own counter and
+    // is judged by the browser achievements; the dispatch is on the event type
+    // because the Spool path carries both kinds through the same call.
+    let activity = browser_activity_for(event.event_type);
 
-    let output = Engine.evaluate_commit(&snapshot, facts, event.event_id.as_str(), ctx);
+    let (snapshot, statistics) = match activity {
+        Some(activity) => {
+            let snapshot = load_browser_snapshot(pool, event.canonical_repository_id.as_str())
+                .await
+                .unwrap_or_default();
+            let statistics = activity.statistics_with(&snapshot);
+            (snapshot, statistics)
+        }
+        None => {
+            let snapshot = load_snapshot(
+                pool,
+                event.canonical_repository_id.as_str(),
+                event.local_date.as_str(),
+            )
+            .await
+            .unwrap_or_else(|_| StateSnapshot::default());
+            let statistics = devchievements_core::achievements::StatisticsSnapshot {
+                commit_count: snapshot.repository_commit_count.saturating_add(1),
+                ..Default::default()
+            };
+            (snapshot, statistics)
+        }
+    };
+
+    let output = match activity {
+        Some(activity) => {
+            Engine.evaluate_browser_event(&snapshot, activity, event.event_id.as_str(), ctx)
+        }
+        None => Engine.evaluate_commit(&snapshot, facts, event.event_id.as_str(), ctx),
+    };
 
     // Spec 22: the user's own rules are judged against the same official statistics
     // the built-ins use, and inside the same transaction, so a rule can never unlock
-    // without the commit that caused it being recorded.
+    // without the event that caused it being recorded.
     let user_unlocks = if user_rules.is_empty() {
         Vec::new()
     } else {
-        let statistics = devchievements_core::achievements::StatisticsSnapshot {
-            commit_count: crate::projections::repository_commit_count(
-                pool,
-                event.canonical_repository_id.as_str(),
-            )
-            .await
-            .unwrap_or(0)
-            .saturating_add(1),
-            ..Default::default()
-        };
         let already = crate::projections::unlocked_achievement_ids(pool).await?;
         devchievements_core::achievements::definition::newly_satisfied(
             user_rules,
@@ -361,7 +465,7 @@ async fn ingest_commit_inner(
             notification_id: format!("ach:{achievement_id}:{}", event.event_id.as_str()),
             kind: devchievements_core::SideEffectKind::AchievementUnlocked {
                 achievement_id,
-                source: if policy == NotificationPolicy::Silent {
+                source: if policy.is_import() {
                     devchievements_core::UnlockSourceTag::Import
                 } else {
                     devchievements_core::UnlockSourceTag::Realtime
@@ -409,9 +513,11 @@ async fn ingest_commit_inner(
             }
         };
 
-        // Spec 11.2: a history import must not queue per-event notifications. The
-        // unlock itself is still recorded above, with its source and rule version.
-        if policy == NotificationPolicy::Silent {
+        // Spec 11.2 and 16.3: an import, or an event too old to announce, must not
+        // queue a notification. The unlock itself is still recorded above, with its
+        // source and rule version -- suppressing the row here is what makes the
+        // policy real, because a row that exists gets delivered by the outbox.
+        if !policy.queues_notifications() {
             continue;
         }
 
@@ -479,9 +585,34 @@ pub async fn recorded_schema_version(pool: &SqlitePool) -> StorageResult<Option<
     Ok(row.and_then(|(v,)| v.parse().ok()))
 }
 
+/// Whether a table already has a column.
+async fn column_exists(pool: &SqlitePool, table: &str, column: &str) -> StorageResult<bool> {
+    let rows = sqlx::query(&format!("PRAGMA table_info({table})"))
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .iter()
+        .any(|row| row.get::<String, _>("name") == column))
+}
+
 /// Apply the schema and record its version.
+///
+/// Older databases are upgraded in place: `CREATE TABLE IF NOT EXISTS` leaves an
+/// existing table untouched, so a column added in a later version has to be applied
+/// explicitly. The check is idempotent, which is what allows this to run on every
+/// open rather than once.
 pub async fn migrate(pool: &SqlitePool) -> StorageResult<()> {
     sqlx::raw_sql(schema::SCHEMA_SQL).execute(pool).await?;
+
+    for (table, column, definition) in schema::COLUMN_UPGRADES {
+        if !column_exists(pool, table, column).await? {
+            sqlx::raw_sql(&format!(
+                "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+            ))
+            .execute(pool)
+            .await?;
+        }
+    }
     sqlx::query(
         "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",

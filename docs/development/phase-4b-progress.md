@@ -1067,8 +1067,115 @@ unlocked: []                 ← 不再误解锁
 
 | 项 | 状态 |
 | --- | --- |
-| PR / Release / Issue 的统计与成就 | **没有**。`pull_request_merged_count` 在 achievements crate 里有字段，但 Engine 只评估提交，浏览器类成就目前不会触发 |
+| PR / Release / Issue 的统计与成就 | 当时**没有**（`pull_request_merged_count` 在 achievements crate 里有字段，但 Engine 只评估提交）。已在 §18 补上 |
 | 已安装包内的 native host | **没有**。MSIX 里不含 host 二进制，注册表指向构建目录；正式分发需要把它打进安装包并在安装时注册 |
-| 扩展在真实浏览器里连通 | **未验证**。扩展没有安装，端到端只测到 host 进程这一层 |
+| 扩展在真实浏览器里连通 | 当时**未验证**（扩展没有安装，端到端只测到 host 进程这一层）。已在 §18.1 于真实 Edge 中验证 |
 
 ---
+## 18. 浏览器活动真正产生成就与弹窗（§13.2 / §16.4）
+
+§17 修掉的是「PR 被算成提交」。修完之后出现的是**相反方向的缺陷**：事件入库了，
+但什么都不会发生——没有计数、没有成就、没有弹窗。用户看到的是「连上了，但没反应」，
+而这两件事在浏览器那一端完全无法区分。
+
+### 18.1 先让真实链路通
+
+按顺序实测（每一步都看真实文件/数据库，不看日志里的期望值）：
+
+| 步骤 | 实测 |
+| --- | --- |
+| 扩展在 Edge 里加载 | 未打包加载，id `gfgbmedanlpminnlbbdefojbgphoekbj`（`Secure Preferences` 里 `disable_reasons: []`）|
+| PR 页面产生报告 | `[devchievements] event pull_request_opened pr:1 delivered` |
+| host → Spool | `spool\pending-*.spool` 出现，内容为 `browser_github` + `pr:1` |
+| Companion 消费 | **首次仍 `REFUSED`**（见 18.2）|
+
+### 18.2 「保存了映射却还是不认」
+
+拒绝原因是 `author is not a configured email`：浏览器报告只带 GitHub 登录名，
+身份要靠 `githubLogins` 映射。映射保存进 `settings.json` 后**依旧被拒**。
+
+原因：drain 循环只在启动时读一次 `settings.json`。修法是**每一轮重读**
+（身份 + 自定义成就规则），理由写在代码里：一个保存了却要重启才生效的映射，
+用户会认为它已经生效。
+
+实测同一份 Spool 记录（`event_id: browser:github:applepinea/dsh-qq-access#pull_request_opened:pr:1`）：
+
+```text
+修复前  REFUSED 1 record(s): author is not a configured email
+修复后  IDENTITY from settings.json
+        INGESTED 1
+```
+
+数据库里现在有这一行（`PullRequestOpened`，`BrowserConfirmed`，`local_date 2026-11-05`）。
+
+### 18.3 补上浏览器活动的评估路径
+
+| 层 | 改动 |
+| --- | --- |
+| Engine | 新增 `BrowserActivity` 与 `evaluate_browser_event`：只移动自己的计数列、解锁 §13.2 的浏览器成就、**不**产生 `CommitRecorded`、**不**移动每日等级（§14.3 只数提交）|
+| 读集 | `ReadSet::BROWSER`：读提交总数（浏览器事件也可能满足提交成就）、读已解锁集合、读用户汇总；**不读**日投影 |
+| 存储 | `repository_projection` 加 5 列（PR Merge / Release / Issue Opened / Repository Created / Star Given），成就读 `SUM`；schema 1 → 2，旧库用 `PRAGMA table_info` + `ALTER TABLE` 幂等升级 |
+| 入库分发 | 按 `EventType` 分发，不再让所有记录走提交路径；用户自定义规则用**同一份**统计快照判定 |
+| 重建 | `rebuild_from_events` 一起重算这 5 个计数，并为「只有浏览器活动的仓库」建行（提交数为 0 是事实，不是缺行）|
+
+ADR：[0019](../decisions/0019-browser-activity-counters.md)。
+
+### 18.4 验证
+
+- Rust：4 个测试锁住语义——只动自己的计数、不产生提交确认、不移动每日等级、
+  第二次合并不重复庆祝；存储侧 4 个测试覆盖计数/解锁/outbox、只入库不计数、
+  零提交仓库的行、重建等于实时累加。
+- `scripts/e2e/browser-achievement.mjs`（22 项，真二进制 + 真数据库）：
+  合并的 PR → `NOTIFY popup title="Merged"` + `first_pr_merged` + 计数 1 且
+  提交计数仍为 0；打开的 PR → `ingested=1` 且**无**弹窗；重复报告 → `dup=1` 且
+  不重复庆祝；Release → `First Release`；三天前的合并 PR → 解锁但**不弹窗**
+  （这条断言最初是失败的，见 §19）。
+
+### 18.5 仍未验证 / 未做
+
+| 项 | 说明 |
+| --- | --- |
+| 真实「合并 PR」的浏览器事件 | 需要一次真实 merge；目前同一条路径用合成的记录验证过（与 host 写出的格式逐字节一致）|
+| 浏览器提交数 vs 提交成就的跨仓库口径 | 提交总数仍按**仓库**统计（既有行为）。浏览器事件用的是本仓库提交数 + 用户汇总的浏览器计数；「用户所有仓库的提交总数」这个口径没有改，单独记为待办 |
+| 已安装包内的 native host | MSIX 仍不含 host 二进制，注册表指向 `%LOCALAPPDATA%\devchievements\bin` |
+## 19. 一个被「计数」掩盖的缺陷：过期事件其实照样弹窗（§16.3）
+
+补浏览器成就时写了这条断言：三天前的合并 PR 应当**只更新统计、不弹窗**。
+它失败了——弹窗照常出现，而同一份日志里 `DRAIN ... queued=0`。
+
+### 19.1 原因
+
+新鲜度策略（§16.3）在消费端只做了一件事：把「排队数」改成 0。
+
+```rust
+notifications: if matches!(fresh, Silent) { 0 } else { queued.len() }
+```
+
+但 Outbox 行**已经写进数据库**了，而 outbox 的状态机只认「行是否存在」——
+于是这一行照常被投递、照常弹窗。**报表说没排队，屏幕上有弹窗**，
+两者都不算错，错的是它们描述的不是同一样东西。
+
+### 19.2 修法
+
+把新鲜度变成**写入端的策略**，而不是投递端的过滤器：
+
+| 策略 | 记录解锁 | 写 Outbox | 解锁来源 |
+| --- | --- | --- | --- |
+| `Inform` | ✅ | ✅ | realtime |
+| `Quiet`（新增） | ✅ | ❌ | **realtime**（事件刚发生在用户账号上，只是我们知道得晚）|
+| `Silent`（历史导入） | ✅ | ❌ | import |
+
+理由写在代码里：**存在即投递**。任何「先写再过滤」的实现都会再犯同一个错，
+所以安静必须体现在「不写」。
+
+### 19.3 实测
+
+`browser-achievement` e2e 新增一段：三天前的合并 PR → `ingested=1`、
+**无** `NOTIFY popup`、`first_pr_merged` 仍然入库且 `unlock_source=realtime`。
+存储层另有一个单测固定「Quiet 不写 Outbox 行」。
+
+### 19.4 一个仍然存在的近似
+
+10 分钟–24 小时这一档，§16.3 要求「汇总通知」。汇总形态没有实现，
+现在仍然是一条完整弹窗。这是**已知的未做**，不是「已符合规范」：
+在半成品汇总和用户应得的庆祝之间，选择了后者，并记在这里。

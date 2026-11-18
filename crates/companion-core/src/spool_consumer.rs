@@ -227,13 +227,29 @@ impl Companion {
 
         let _ = Engine; // the Engine is invoked inside ingest_commit
 
-        match ingest::ingest_commit_with_rules(
+        // Spec 16.3: an event older than a day updates statistics silently. The policy
+        // goes INTO storage so no outbox row is written at all -- a row that exists is
+        // delivered, and suppressing only the count here used to leave stale
+        // celebrations on screen while the drain report claimed "queued=0".
+        //
+        // "Digested" (10 minutes to 24 hours) still gets one full popup: the digest
+        // presentation is not implemented, and inventing a half-version of it would
+        // be worse than showing the celebration the user earned.
+        let policy = match fresh {
+            devchievements_notifications::FreshnessAction::Silent => {
+                ingest::NotificationPolicy::Quiet
+            }
+            _ => ingest::NotificationPolicy::Inform,
+        };
+
+        match ingest::ingest_event_with_policy(
             &self.pool,
             &event,
             &facts,
             now_millis(),
             identity,
             &ctx,
+            policy,
             &self.config.user_rules,
         )
         .await
@@ -241,17 +257,7 @@ impl Companion {
             Ok(IngestOutcome::Ingested {
                 queued_notifications,
             }) => Ok(IngestResult::Ingested {
-                notifications: if matches!(
-                    fresh,
-                    devchievements_notifications::FreshnessAction::Silent
-                ) {
-                    // Silent by policy: the event still counted, but the notification
-                    // must not be shown. Suppress its outbox rows here so the consumer
-                    // never sees them.
-                    0
-                } else {
-                    queued_notifications.len()
-                },
+                notifications: queued_notifications.len(),
             }),
             Ok(IngestOutcome::IngestedSilently) => Ok(IngestResult::Ingested { notifications: 0 }),
             Ok(IngestOutcome::Duplicate) => Ok(IngestResult::Duplicate),

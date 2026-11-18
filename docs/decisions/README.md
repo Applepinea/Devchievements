@@ -30,6 +30,8 @@
 | [0015](0015-toast-notifications.md) | 通知呈现改用 Windows Toast（本机未能验证） | `Accepted` |
 | [0016](0016-notification-api-choice.md) | 通知 API 选型与兼容性边界（未定稿） | `Proposed` |
 | [0007](0007-ipc-and-spool.md) | IPC 与 Spool 传输设计 | `Accepted` |
+| [0018](0018-extension-detects-desktop-judges.md) | 扩展只做检测，判定与呈现留在桌面端 | `Accepted` |
+| [0019](0019-browser-activity-counters.md) | 浏览器活动用独立计数列，成就读用户汇总 | `Accepted` |
 | 0006 | 数据模型与投影设计 | 目标 Phase 1 |
 
 | 0008 | Outbox 与通知所有权状态机 | 目标 Phase 1 |

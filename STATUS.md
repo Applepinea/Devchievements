@@ -65,6 +65,7 @@ ALL CHECKS PASSED
 | 3b.5 | 桌面弹窗呈现浏览器事件 | `Tested` | `browser-to-popup` e2e 6 项：浏览器字节 → host → 桌面弹窗 |
 | 3b.6 | 注册与清理脚本 | `Tested` | `register-native-host.mjs` / `unregister-native-host.mjs`，只动 HKCU |
 | 3b.7 | PR / Issue 识别 | `Tested` | 扩展 14 项测试；Rust 分类 opened/merged/closed；host 转发标志位 |
+| 3b.8 | 浏览器活动 → 计数 / 成就 / 弹窗 | `Tested` | `browser-achievement` e2e 22 项（真 binary、真 DB）：PR Merge 计数并解锁 **Merged**、PR Opened 只入库、重复报告只算一次、Release 解锁 **First Release**；4 个 Rust 测试锁住「PR 不算提交」「不移动每日等级」；ADR-0019 |
 
 ---
 
@@ -321,7 +322,10 @@ ALL CHECKS PASSED
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-11-18（过期事件仍弹窗） | 修 §16.3 的执行缺陷：新鲜度原来只在消费端把「排队数」改成 0，**Outbox 行照样写、照样弹**。改为写入端策略（`Inform`/`Quiet`/`Silent`）：超过 24 小时的事件仍然解锁、仍然计统计，但不写 Outbox；解锁来源仍是 realtime。10 分钟–24 小时的「汇总通知」形态仍未实现（已知未做）|
+| 2026-11-18（浏览器成就打通） | 修「浏览器报告存进去但什么都不会发生」：Engine 新增 `evaluate_browser_event`（PR Merge / Release / Repository Created / Star Given 各自计数、解锁 §13.2 浏览器成就、**不**移动每日等级）；schema v2 加 5 列并幂等升级旧库；新增 `browser-achievement` e2e 19 项；ADR-0019 |
 | 2026-11-18（扩展连接检查） | 逐层验证 Native Messaging：协议、Spool、消费全通；**发现并修复「合并的 PR 被计为一次提交并解锁 First Commit」**；记录扩展未安装、浏览器成就未实现 |
+| 2026-11-18（身份映射即时生效） | 修「保存了 GitHub 登录映射仍被拒」：drain 循环原本只在启动时读一次 `settings.json`，改为**每轮重读**（身份 + 自定义成就规则）；实测同一 Spool 记录从 `REFUSED` 变为 `INGESTED 1` |
 | 2026-11-18（首屏性能） | 按审查意见先建基线再优化：cold `shell_ready` p50 **848→371 ms**、warm **493→48 ms**；`boot_status` 快速路径、首屏骨架、页面级 lazy、`get_storage_health` 拆分、pool 缓存。setup 阶段实测 0.07/7.26 ms → **未改动** |
 | 2026-11-18（首屏缺陷） | 修掉 READ-ONLY 数据跨 IPC 的**线格式不一致**：`Statistics`/`StorageHealth`/`ActivityDay`/`RepositoryEntry`/`Capabilities` 缺 `rename_all = "camelCase"`，导致 `undefined 天`、`schema vundefined`、`Invalid Date`，以及 **About 页白屏**；补 5 个线格式测试 + 页面自检 + `ui-pages` e2e（6 页 × 2 断言） |
 | 2026-11-18（性能优化跟进，已并入 main） | Spool 计数改为定长缓冲读取；历史导入去掉未使用的提交主题与全量匹配引用副本；扩展统计改走 IndexedDB 索引。托盘扫描周期试过 100 ms，**实测 p95 437 ms（预算 87%）后回退 50 ms** |
@@ -371,7 +375,7 @@ ALL CHECKS PASSED
 | 4b.2 | 更新机制（Tauri Updater，§40.3） | `Partially Implemented` | 插件+公钥+签名产物就位；数据库快照/回滚 6 个测试；**无发布 feed、设置页未接按钮、真实下载安装未验证** |
 | 4b.3 | 发布流水线（§40.2） | `Platform Unverified` | `.github/workflows/release.yml` + 工作流 linter；本机无法执行 GitHub Actions，从未真正跑过 |
 | 4b.4 | 平台签名（§40.4） | `Blocked` | 无 Authenticode 证书 → 安装包没有代码签名，SmartScreen 会警告；**更新签名（`.sig`）已做，两者不可互相替代** |
-| 4b.18 | 浏览器扩展 ↔ 桌面连接（§18） | `Partially Implemented` | Native Messaging 三层（注册表/manifest/host）就位，手工按浏览器格式发送得到 `stored:true`，Spool→Companion 消费通过；**扩展未安装，真实浏览器链路未验证**；**PR 曾被算成提交**（已修 + 回归测试）；浏览器类成就**尚不评估** |
+| 4b.18 | 浏览器扩展 ↔ 桌面连接（§18） | `Tested`（真机链路见备注） | Native Messaging 三层就位；扩展已用 Edge 未打包加载（id `gfgbmedanlpminnlbbdefojbgphoekbj`），真实 PR 页面报告经 host → Spool → 消费入库（`DRAIN ingested=1 refused=0`，DB 中 `PullRequestOpened` 一行）；**PR 曾被算成提交**已修；浏览器活动现按 §13.2 计数并解锁成就（3b.8）。**未验证**：合并 PR 的真实浏览器事件（需要一次真实 merge）与 VM 上重跑 |
 | 4b.17 | 界面数据正确性（§44.2） | `Tested` | 5 个线格式测试钉住 IPC 键名；页面自检把 `undefined`/`Invalid Date` 写进日志；`ui-pages` e2e 逐页打开真实窗口并断言「请求的页 = 渲染的页」且无占位文本（12 项） |
 | 4b.16 | 微软商店（MSIX） | `Tested`（本机） | `scripts/msix/` 打真实 MSIX 并装机：安装/AOT 图标/startupTask/数据包外；**helper 复制到 `%LOCALAPPDATA%\bin` 后 hook 可执行并投递记录**（10 项探测全过）。当前用 bootstrapper 按需装 WebView2，认证备注见 `docs/development/store-certification-notes.md`；商店审核口径与无运行库真机流程**未验证**。见 §13–§14 |
 | 4b.5 | 数据迁移（§26.4） | `In Progress` | 更新前后快照/还原路径已测；数据库迁移兼容旧版本尚未做 |

@@ -33,6 +33,19 @@ pub struct StateSnapshot {
     pub daily_commit_count: u32,
     /// The daily rank already granted today, if any.
     pub daily_rank_today: Option<crate::daily_rank::DailyRank>,
+    /// Merged pull requests across every repository the user is tracked in.
+    ///
+    /// Browser activities are not tied to a working copy, so their counters are the
+    /// user's totals rather than one repository's (spec 2.3, 13.2).
+    pub pull_request_merged_count: u32,
+    /// Releases published, across every tracked repository.
+    pub release_count: u32,
+    /// Issues opened, across every tracked repository.
+    pub issue_opened_count: u32,
+    /// Repositories created by the user.
+    pub repositories_created_count: u32,
+    /// Stars the user gave.
+    pub stars_given_count: u32,
     /// Permanent achievements already unlocked.
     pub unlocked_achievement_ids: Vec<String>,
 }
@@ -47,6 +60,7 @@ impl StateSnapshot {
         match event_type {
             crate::EventKind::Commit => ReadSet::COMMIT,
             crate::EventKind::LocalMerge => ReadSet::MERGE,
+            crate::EventKind::Browser => ReadSet::BROWSER,
         }
     }
 }
@@ -62,6 +76,8 @@ pub struct ReadSet {
     pub daily_rank_today: bool,
     /// Needs the unlocked achievement set.
     pub unlocked_achievements: bool,
+    /// Needs the user's GitHub totals (merged pull requests, releases, ...).
+    pub browser_totals: bool,
 }
 
 impl ReadSet {
@@ -71,6 +87,20 @@ impl ReadSet {
         daily_commit_count: true,
         daily_rank_today: true,
         unlocked_achievements: true,
+        browser_totals: false,
+    };
+
+    /// The read-set for a GitHub activity reported by the browser extension.
+    ///
+    /// It reads the commit total because a merged pull request may itself satisfy a
+    /// commit achievement, but it never reads a day projection: browser activities
+    /// do not move the daily rank (spec 14.3 counts commits).
+    pub const BROWSER: ReadSet = ReadSet {
+        repository_commit_count: true,
+        daily_commit_count: false,
+        daily_rank_today: false,
+        unlocked_achievements: true,
+        browser_totals: true,
     };
 
     /// The read-set for a local merge.
@@ -143,6 +173,65 @@ pub struct CommitFacts {
     pub is_merge: bool,
     /// Whether it is an empty commit (tree identical to its parent).
     pub is_empty: bool,
+}
+
+/// A GitHub activity reported by the browser extension (spec 2.3).
+///
+/// Only activities a built-in achievement can observe appear here. An opened pull
+/// request or a closed issue is still recorded as an event, but nothing reads a
+/// counter for it, and inventing one would leave every reader guessing whether the
+/// number was maintained.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserActivity {
+    /// A pull request was merged.
+    PullRequestMerged,
+    /// A release was published.
+    ReleasePublished,
+    /// A repository was created.
+    RepositoryCreated,
+    /// A star was given.
+    StarGiven,
+}
+
+impl BrowserActivity {
+    /// The projection this activity counts toward.
+    pub fn counter_projection(self) -> &'static str {
+        match self {
+            BrowserActivity::PullRequestMerged => "repository_pull_request_merged_count",
+            BrowserActivity::ReleasePublished => "repository_release_count",
+            BrowserActivity::RepositoryCreated => "repository_repositories_created_count",
+            BrowserActivity::StarGiven => "repository_star_given_count",
+        }
+    }
+
+    /// The statistics the achievement rules see once this activity has happened.
+    ///
+    /// Shared with the storage layer so the user's own rules are judged against
+    /// exactly the numbers the built-ins were judged against.
+    pub fn statistics_with(
+        self,
+        snapshot: &StateSnapshot,
+    ) -> crate::achievements::StatisticsSnapshot {
+        let mut statistics = crate::achievements::StatisticsSnapshot {
+            commit_count: snapshot.repository_commit_count,
+            pull_request_merged_count: snapshot.pull_request_merged_count,
+            release_count: snapshot.release_count,
+            issue_opened_count: snapshot.issue_opened_count,
+            repository_created_count: snapshot.repositories_created_count,
+            star_given_count: snapshot.stars_given_count,
+            // Streaks are derived from days of commits; a browser activity cannot
+            // move one, and reading a zero here cannot relock anything because
+            // already-unlocked achievements are skipped by id.
+            longest_streak_days: 0,
+        };
+        match self {
+            BrowserActivity::PullRequestMerged => statistics.pull_request_merged_count += 1,
+            BrowserActivity::ReleasePublished => statistics.release_count += 1,
+            BrowserActivity::RepositoryCreated => statistics.repository_created_count += 1,
+            BrowserActivity::StarGiven => statistics.star_given_count += 1,
+        }
+        statistics
+    }
 }
 
 /// The Engine.
@@ -234,6 +323,63 @@ impl Engine {
 
         // The context is part of the contract even when unused today; reference it
         // so the signature cannot silently drift from the spec.
+        let _ = ctx.config.config_version();
+
+        out
+    }
+
+    /// Evaluate one activity reported by the browser extension (spec 2.3).
+    ///
+    /// # Why this is not a commit
+    ///
+    /// Every record used to reach `evaluate_commit`, so a merged pull request
+    /// incremented the commit counter and could unlock "First Commit". A browser
+    /// activity now moves only its own counter, and earns a notification only by
+    /// unlocking something (spec 16.4 has no row for a bare browser activity).
+    pub fn evaluate_browser_event(
+        &self,
+        snapshot: &StateSnapshot,
+        activity: BrowserActivity,
+        event_id: &str,
+        ctx: &InjectedContext<'_>,
+    ) -> EngineOutput {
+        let mut out = EngineOutput::default();
+
+        let statistics = activity.statistics_with(snapshot);
+        let new_total = match activity {
+            BrowserActivity::PullRequestMerged => statistics.pull_request_merged_count,
+            BrowserActivity::ReleasePublished => statistics.release_count,
+            BrowserActivity::RepositoryCreated => statistics.repository_created_count,
+            BrowserActivity::StarGiven => statistics.star_given_count,
+        };
+        out.state_changes.push(StateChange {
+            projection: activity.counter_projection().to_string(),
+            payload: new_total.to_string(),
+        });
+
+        // Built-ins are judged on the OFFICIAL profile (spec 13.3). Both capabilities
+        // are available here because a browser event is only evaluated in a mode where
+        // the extension is installed -- but a commit achievement it satisfies is still
+        // a legitimate unlock, since the rule is full-history.
+        let unlocks = crate::achievements::evaluate(
+            &crate::achievements::builtin_achievements(),
+            &statistics,
+            &snapshot.unlocked_achievement_ids,
+            &[
+                crate::achievements::Capability::LocalGit,
+                crate::achievements::Capability::BrowserGithub,
+            ],
+        );
+        for achievement_id in unlocks.newly_unlocked {
+            out.side_effect_intents.push(SideEffectIntent {
+                notification_id: format!("ach:{achievement_id}:{event_id}"),
+                kind: SideEffectKind::AchievementUnlocked {
+                    achievement_id,
+                    source: crate::UnlockSourceTag::Realtime,
+                },
+            });
+        }
+
         let _ = ctx.config.config_version();
 
         out
@@ -344,6 +490,81 @@ mod tests {
             assert!(Engine
                 .evaluate_commit(&StateSnapshot::default(), &facts, "e1", ctx)
                 .is_empty());
+        });
+    }
+
+    #[test]
+    fn a_browser_activity_moves_only_its_own_counter() {
+        // Spec 2.3: a merged pull request is not a commit. Before this existed, a
+        // merged PR incremented the commit counter and could unlock "First Commit".
+        with_ctx(|ctx| {
+            let out = Engine.evaluate_browser_event(
+                &StateSnapshot::default(),
+                BrowserActivity::PullRequestMerged,
+                "e1",
+                ctx,
+            );
+            let counters: Vec<&str> = out
+                .state_changes
+                .iter()
+                .map(|c| c.projection.as_str())
+                .collect();
+            assert_eq!(counters, vec!["repository_pull_request_merged_count"]);
+            assert_eq!(out.state_changes[0].payload, "1");
+            assert!(
+                out.side_effect_intents
+                    .iter()
+                    .all(|i| !matches!(i.kind, SideEffectKind::CommitRecorded)),
+                "a merge must not produce a commit acknowledgement"
+            );
+            assert!(
+                out.side_effect_intents
+                    .iter()
+                    .all(|i| !matches!(i.kind, SideEffectKind::DailyRankUpgrade { .. })),
+                "spec 14.3 counts commits, so a merge cannot move the daily rank"
+            );
+        });
+    }
+
+    #[test]
+    fn a_merged_pull_request_unlocks_the_merge_achievement() {
+        with_ctx(|ctx| {
+            let out = Engine.evaluate_browser_event(
+                &StateSnapshot::default(),
+                BrowserActivity::PullRequestMerged,
+                "e1",
+                ctx,
+            );
+            let unlocked: Vec<String> = out
+                .side_effect_intents
+                .iter()
+                .filter_map(|i| match &i.kind {
+                    SideEffectKind::AchievementUnlocked { achievement_id, .. } => {
+                        Some(achievement_id.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(unlocked, vec!["first_pr_merged".to_string()]);
+        });
+    }
+
+    #[test]
+    fn a_second_merged_pull_request_counts_but_does_not_announce_again() {
+        with_ctx(|ctx| {
+            let snapshot = StateSnapshot {
+                pull_request_merged_count: 1,
+                unlocked_achievement_ids: vec!["first_pr_merged".to_string()],
+                ..Default::default()
+            };
+            let out = Engine.evaluate_browser_event(
+                &snapshot,
+                BrowserActivity::PullRequestMerged,
+                "e2",
+                ctx,
+            );
+            assert!(out.side_effect_intents.is_empty());
+            assert_eq!(out.state_changes[0].payload, "2");
         });
     }
 

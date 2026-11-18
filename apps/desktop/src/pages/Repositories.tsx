@@ -81,8 +81,13 @@ export default function Repositories() {
             <li key={repo.alias} className="row spread">
               <span className="mono">{repo.alias}</span>
               <span className="muted">
-                {tf("{n} commits", { n: repo.commits })} · {t("last")}{" "}
-                {dateTime(repo.updatedAt)}
+                {tf("{n} commits", { n: repo.commits })}
+                {/* Browser-only repositories have no commits. Showing "0 commits"
+                    alone reads like the extension did nothing, so the activities it
+                    did observe are listed next to it (spec 24.1). */}
+                {repo.pullRequests > 0 ? " · " + tf("{n} PRs", { n: repo.pullRequests }) : ""}
+                {repo.releases > 0 ? " · " + tf("{n} releases", { n: repo.releases }) : ""} ·{" "}
+                {t("last")} {dateTime(repo.updatedAt)}
               </span>
             </li>
           ))}
