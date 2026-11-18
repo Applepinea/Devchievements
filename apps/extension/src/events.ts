@@ -66,9 +66,15 @@ export function canonicalRepositoryId(repo: RepositoryId): string {
  * identified by its tag. Reusing the same rule here means a commit seen through the
  * browser and later through the hook is one event, not two.
  */
-export function dedupKey(event: Pick<BrowserEvent, "canonicalRepositoryId" | "commitSha" | "externalId">): string {
+export function dedupKey(
+  event: Pick<BrowserEvent, "canonicalRepositoryId" | "commitSha" | "externalId" | "eventType">,
+): string {
   if (event.commitSha) return event.canonicalRepositoryId + "#" + event.commitSha;
-  return event.canonicalRepositoryId + "#release:" + (event.externalId ?? "unknown");
+  // Not "release:" for everything. A pull request used to produce the id
+  // `.../dsh-qq-access#release:pr:1`, which reads as a release, and two different
+  // kinds of activity that happened to share an external id would have collided.
+  // The type is part of the identity of the activity, so it belongs in the key.
+  return event.canonicalRepositoryId + "#" + event.eventType + ":" + (event.externalId ?? "unknown");
 }
 
 /**
@@ -76,7 +82,9 @@ export function dedupKey(event: Pick<BrowserEvent, "canonicalRepositoryId" | "co
  *
  * Same activity means same id, so a replayed content script cannot double-count.
  */
-export function eventId(event: Pick<BrowserEvent, "canonicalRepositoryId" | "commitSha" | "externalId">): string {
+export function eventId(
+  event: Pick<BrowserEvent, "canonicalRepositoryId" | "commitSha" | "externalId" | "eventType">,
+): string {
   return "browser:" + dedupKey(event);
 }
 

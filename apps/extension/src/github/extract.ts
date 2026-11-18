@@ -97,6 +97,7 @@ function commitEvent(facts: PageFacts, repo: RepositoryId, pathname: string): Ex
     canonicalRepositoryId: canonicalRepositoryId(repo),
     commitSha: sha,
     externalId: null,
+    eventType: "commit_created" as const,
   };
 
   return {
@@ -137,6 +138,7 @@ function releaseEvent(facts: PageFacts, repo: RepositoryId, pathname: string): E
     canonicalRepositoryId: canonicalRepositoryId(repo),
     commitSha: null,
     externalId: tag,
+    eventType: "release_published" as const,
   };
 
   return {
@@ -179,10 +181,14 @@ function pullRequestEvent(facts: PageFacts, repo: RepositoryId, pathname: string
     return { kind: "ignored", reason: "pull request page without a machine-readable date" };
   }
 
+  const eventType: BrowserEvent["eventType"] = merged
+    ? "pull_request_merged"
+    : "pull_request_opened";
   const base = {
     canonicalRepositoryId: canonicalRepositoryId(repo),
     commitSha: null,
     externalId: "pr:" + number,
+    eventType,
   };
 
   return {
@@ -223,10 +229,12 @@ function issueEvent(facts: PageFacts, repo: RepositoryId, pathname: string): Ext
     return { kind: "ignored", reason: "issue page without a machine-readable date" };
   }
 
+  const eventType: BrowserEvent["eventType"] = closed ? "issue_closed" : "issue_opened";
   const base = {
     canonicalRepositoryId: canonicalRepositoryId(repo),
     commitSha: null,
     externalId: "issue:" + number,
+    eventType,
   };
 
   return {

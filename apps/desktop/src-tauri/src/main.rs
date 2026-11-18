@@ -648,7 +648,8 @@ fn spawn_drain_loop(app: tauri::AppHandle) {
                 }
             };
 
-            let (identity, source) = load_identity(&data_dir);
+            // Checked once, so a machine with no identity says so before the loop.
+            let (mut identity, source) = load_identity(&data_dir);
             match source {
                 IdentitySource::Settings => println!("IDENTITY from settings.json"),
                 IdentitySource::GitConfig => println!("IDENTITY from git config (unconfirmed)"),
@@ -675,10 +676,15 @@ fn spawn_drain_loop(app: tauri::AppHandle) {
             // Resolve anything a previous crash left mid-flight (spec 17.9).
             let _ = processor.recover_after_crash().await;
 
+            // Re-read every pass, for the same reason the achievement rules are: the
+            // settings page can add a GitHub login mapping while the app runs, and a
+            // saved mapping that only applies after a restart is a mapping the user
+            // believes is already working. Reported exactly that way: the mapping was
+            // saved, the PR page was reopened, and the record was still refused.
             loop {
-                companion.replace_user_rules(
-                    settings::Settings::load(&settings_path()).user_achievements,
-                );
+                let stored = settings::Settings::load(&settings_path());
+                identity = stored.to_identity();
+                companion.replace_user_rules(stored.user_achievements);
                 match companion.drain_once(&identity).await {
                     Ok(report) if report.refused > 0 => {
                         // Visibility matters: a silent refusal looks like a broken app.
