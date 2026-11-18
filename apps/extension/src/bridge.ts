@@ -32,6 +32,51 @@ export type BridgeOutcome =
   | { delivered: false; reason: string };
 
 /**
+ * Translate one observed event into the host's wire shape.
+ *
+ * This used to read `eventType === "commit_created" ? "commit" : "release"`,
+ * which sent every pull request, issue and release as a `release` with whatever
+ * `externalId` happened to be. Measured on 2026-11-18: a merged pull request
+ * arrived as `ReleasePublished` with tag `pr:5` -- the wrong event, and it would
+ * have unlocked a release achievement. The six types are mapped explicitly now, and
+ * the fields the host validates (`number`, `merged`, `closed`) are always present so
+ * a payload is never judged on a field the bridge forgot to send.
+ */
+export function payloadFor(event: BrowserEvent): Record<string, unknown> {
+  const base = {
+    kind: "browser_github",
+    event_id: event.eventId,
+    repository_id: event.canonicalRepositoryId,
+    occurred_ms: event.occurredAt,
+    // Who made it. The desktop side refuses to attribute activity without this
+    // rather than counting somebody else's work (spec 7).
+    author_login: event.authorLogin,
+  };
+
+  // `externalId` carries "pr:<n>" / "issue:<n>" / the tag / the sha, depending on
+  // the type; the host wants the bare number for pull requests and issues.
+  const numeric = () => {
+    const match = /(\d+)\s*$/.exec(event.externalId ?? "");
+    return match ? Number(match[1]) : undefined;
+  };
+
+  switch (event.eventType) {
+    case "commit_created":
+      return { ...base, activity: "commit", commit_sha: event.commitSha };
+    case "release_published":
+      return { ...base, activity: "release", external_id: event.externalId };
+    case "pull_request_opened":
+      return { ...base, activity: "pull_request", number: numeric(), merged: false };
+    case "pull_request_merged":
+      return { ...base, activity: "pull_request", number: numeric(), merged: true };
+    case "issue_opened":
+      return { ...base, activity: "issue", number: numeric(), closed: false };
+    case "issue_closed":
+      return { ...base, activity: "issue", number: numeric(), closed: true };
+  }
+}
+
+/**
  * Forward one event to the desktop companion.
  *
  * Never throws: a missing host is an expected state (the app may not be installed),
@@ -75,18 +120,7 @@ export function forward(event: BrowserEvent): Promise<BridgeOutcome> {
 
     port.postMessage({
       type: "devch:github_event",
-      payload: {
-        kind: "browser_github",
-        event_id: event.eventId,
-        repository_id: event.canonicalRepositoryId,
-        activity: event.eventType === "commit_created" ? "commit" : "release",
-        commit_sha: event.commitSha,
-        external_id: event.externalId,
-        occurred_ms: event.occurredAt,
-        // Who made it. The desktop side refuses to attribute a commit without
-        // this rather than counting somebody else's work (spec 7).
-        author_login: event.authorLogin,
-      },
+      payload: payloadFor(event),
     });
   });
 }
