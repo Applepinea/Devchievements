@@ -18,10 +18,16 @@ dist-extension/
 apps/extension/.output/
 apps/extension/.wxt/
 
+# Tauri ACL / capability schemas (rewritten by `tauri build`; regenerable)
+apps/desktop/src-tauri/gen/schemas/
+
 # Experiment output directories (regenerable evidence, not source)
 **/.out/
 **/.crate-cache/
 **/.logs/
+
+# First-screen perf scratch (WebView2 profile, helper copy, logs; all rebuilt per run)
+scripts/perf/.first-screen/
 
 # Local crates proxy cache + logs (host workaround artifacts)
 /.crate-cache/
