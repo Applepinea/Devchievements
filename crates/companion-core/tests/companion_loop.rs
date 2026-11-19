@@ -323,6 +323,23 @@ async fn an_old_record_still_counts_but_is_quiet() {
 
     let report = fx.companion().drain_once(&identity()).await.expect("drain");
     assert_eq!(report.ingested, 1);
+    // "Quiet" is a claim about side effects, so it is asserted as one: no celebration
+    // may be queued and the outbox must actually be empty. A count of zero on its own
+    // would still pass if a row had been written and simply not reported.
+    assert_eq!(
+        report.queued_notifications, 0,
+        "a stale event must not queue a celebration"
+    );
+    let pending = fx
+        .companion()
+        .pending_notifications()
+        .await
+        .expect("pending");
+    assert!(
+        pending.is_empty(),
+        "the outbox must be empty, found {} row(s)",
+        pending.len()
+    );
 
     let (commits, _) = fx
         .companion()
@@ -738,4 +755,192 @@ async fn only_a_mapped_login_is_the_user() {
     );
 
     fixture.cleanup();
+}
+
+/// Spec 16.3: the band boundaries are load-bearing, so every edge is exercised.
+///
+/// 0-10 minutes is a full celebration. 10 minutes - 24 hours is a digest: it must
+/// never open a window. Over 24 hours only the statistics move, and the display
+/// channel must not even be called.
+#[tokio::test]
+async fn the_freshness_bands_decide_what_the_user_sees() {
+    const MINUTE: i64 = 60 * 1000;
+
+    for (name, age_ms, expected) in [
+        ("band-9m", 9 * MINUTE, "popup"),
+        ("band-11m", 11 * MINUTE, "digest"),
+        ("band-23h59m", 23 * 60 * MINUTE + 59 * MINUTE, "digest"),
+        ("band-24h01m", 24 * 60 * MINUTE + MINUTE, "nothing"),
+    ] {
+        let fx = Fixture::new(name).await;
+        push_record(&fx.spool, "evt-1", &"b".repeat(40), now_ms() - age_ms, 1);
+
+        let report = fx.companion().drain_once(&identity()).await.expect("drain");
+        assert_eq!(report.ingested, 1, "{name}: the event must still count");
+
+        let (commits, _) = fx
+            .companion()
+            .statistics("local:C:/repos/demo/.git")
+            .await
+            .expect("stats");
+        assert_eq!(
+            commits, 1,
+            "{name}: age decides presentation, never whether the event counts"
+        );
+
+        let mut sink = RecordingSink::default();
+        let (shown, _) = OutboxProcessor::new(fx.pool.clone())
+            .deliver_pending(&mut sink, 3)
+            .await
+            .expect("deliver");
+
+        match expected {
+            "popup" => assert!(
+                matches!(sink.shown.first(), Some(Presentation::Popup(_))),
+                "{name}: a fresh event celebrates, got {:?}",
+                sink.shown
+            ),
+            // A window here is the reported bug: a Spool replayed after a weekend
+            // used to open one window per record.
+            "digest" => {
+                assert!(
+                    sink.shown
+                        .iter()
+                        .all(|p| !matches!(p, Presentation::Popup(_))),
+                    "{name}: the digest band must not open a window, got {:?}",
+                    sink.shown
+                );
+                assert_eq!(shown, 1, "{name}: whatever is shown is one summary");
+
+                // Spec 16.3 / 17.5: a digested (or suppressed) event must not lose its
+                // discoverability. The gallery marks a row as new while `viewed_at` is
+                // NULL, so a summary that replaced the popup still has to leave one.
+                let unviewed: (i64,) = sqlx::query_as(
+                    "SELECT COUNT(*) FROM unlocked_achievements WHERE viewed_at IS NULL",
+                )
+                .fetch_one(&fx.pool)
+                .await
+                .expect("unviewed");
+                assert!(
+                    unviewed.0 > 0,
+                    "{name}: the gallery must still mark the unlock as new"
+                );
+            }
+            _ => {
+                assert_eq!(shown, 0, "{name}: nothing may be shown");
+                assert!(
+                    sink.shown.is_empty(),
+                    "{name}: the display channel must not be called, got {:?}",
+                    sink.shown
+                );
+            }
+        }
+
+        fx.cleanup();
+    }
+}
+
+/// A digested event that unlocked nothing produces no summary at all.
+///
+/// The middle band exists to summarise what happened while the user was away. A plain
+/// commit that moved no rank and unlocked no achievement has nothing to summarise, so
+/// it must not manufacture an empty "0 achievements" line -- and it must not fall back
+/// to the fresh-band sound either, because the user is not at the keyboard.
+#[tokio::test]
+async fn a_digested_commit_with_no_reward_stays_completely_silent() {
+    let fx = Fixture::new("digest-no-reward").await;
+
+    // Two fresh commits establish the day and consume the first two ranks.
+    push_record(&fx.spool, "evt-1", &"c".repeat(40), now_ms(), 1);
+    push_record(&fx.spool, "evt-2", &"d".repeat(40), now_ms(), 1);
+    fx.companion().drain_once(&identity()).await.expect("drain");
+
+    let mut sink = RecordingSink::default();
+    OutboxProcessor::new(fx.pool.clone())
+        .deliver_pending(&mut sink, 3)
+        .await
+        .expect("deliver");
+    sink.shown.clear();
+
+    // The third commit stays inside Uncommon (2-4), so its only intent is the bare
+    // commit -- and it is eleven minutes old, i.e. in the digest band.
+    push_record(
+        &fx.spool,
+        "evt-3",
+        &"e".repeat(40),
+        now_ms() - 11 * 60 * 1000,
+        1,
+    );
+    let report = fx
+        .companion()
+        .drain_once(&identity())
+        .await
+        .expect("drain stale");
+    assert_eq!(report.ingested, 1, "{report:?}");
+    assert_eq!(
+        report.queued_notifications, 0,
+        "nothing worth summarising must not queue a row"
+    );
+
+    let mut sink = RecordingSink::default();
+    let (shown, _) = OutboxProcessor::new(fx.pool.clone())
+        .deliver_pending(&mut sink, 3)
+        .await
+        .expect("deliver stale");
+    assert_eq!(shown, 0, "nothing may be presented");
+    assert!(
+        sink.shown.is_empty(),
+        "the display channel must not be called, got {:?}",
+        sink.shown
+    );
+
+    let (commits, _) = fx
+        .companion()
+        .statistics("local:C:/repos/demo/.git")
+        .await
+        .expect("stats");
+    assert_eq!(commits, 3, "the stale commit still counts");
+
+    fx.cleanup();
+}
+
+/// Spec 16.3 / 16.4: replaying a weekend's Spool must not open a pile of windows.
+#[tokio::test]
+async fn a_weekend_replay_produces_no_windows() {
+    let fx = Fixture::new("weekend-replay").await;
+    let base = now_ms() - 12 * 60 * 1000;
+    for i in 0..50usize {
+        let sha = format!("{:040x}", i + 1);
+        push_record(
+            &fx.spool,
+            &format!("evt-{i}"),
+            &sha,
+            base + i as i64 * 100,
+            1,
+        );
+    }
+
+    let report = fx.companion().drain_once(&identity()).await.expect("drain");
+    assert_eq!(report.ingested, 50, "{report:?}");
+
+    let mut sink = RecordingSink::default();
+    let (shown, _) = OutboxProcessor::new(fx.pool.clone())
+        .deliver_pending(&mut sink, 3)
+        .await
+        .expect("deliver");
+
+    assert!(
+        sink.shown
+            .iter()
+            .all(|p| !matches!(p, Presentation::Popup(_))),
+        "a replay must not open windows, got {} presentation(s): {:?}",
+        sink.shown.len(),
+        sink.shown
+    );
+    assert!(
+        shown <= 1,
+        "at most one summary for a whole replay, got {shown}"
+    );
+
+    fx.cleanup();
 }

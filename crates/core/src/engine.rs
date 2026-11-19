@@ -267,8 +267,15 @@ impl Engine {
         let new_repository_total = snapshot.repository_commit_count.saturating_add(1);
         let new_daily_total = snapshot.daily_commit_count.saturating_add(1);
 
+        // Both numbers are USER totals (spec 13.2, 14.1): the snapshot was loaded from
+        // the global projections, so "+1" here means "one more commit anywhere".
+        //
+        // The projection NAME says `global_` on purpose. Storage keeps the
+        // per-repository counters separately, and an earlier version of this change
+        // wrote the global number into the per-repository column -- which then made
+        // `SUM(commit_count)` count the same commits once per write.
         out.state_changes.push(StateChange {
-            projection: "repository_commit_count".to_string(),
+            projection: "global_commit_total".to_string(),
             payload: new_repository_total.to_string(),
         });
         out.state_changes.push(StateChange {

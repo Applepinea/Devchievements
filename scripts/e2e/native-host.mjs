@@ -20,6 +20,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
 const hostExe = path.join(repoRoot, "target", "debug", "devchievements-native-host.exe");
 const scratch = path.join(__dirname, ".native-host");
+// The browser passes the caller's origin as argv[1] and the host refuses anything
+// else (apps/native-host/src/main.rs). Spawning it without this argues that the
+// check does not exist.
+const ORIGIN = "chrome-extension://gfgbmedanlpminnlbbdefojbgphoekbj/";
 
 let failures = 0;
 function check(label, ok, detail) {
@@ -100,7 +104,19 @@ function main() {
   };
 
   const input = Buffer.concat([frame(valid), frame(bogus)]);
-  const run = spawnSync(hostExe, [], {
+
+  // Checked from the outside as well as in unit tests: the guard has to run before
+  // stdin, otherwise the spool would fill up on the way to being refused.
+  const intruder = spawnSync(hostExe, ["chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"], {
+    input,
+    env: { ...process.env, DEVCH_DATA_DIR: dataDir },
+    timeout: 30000,
+    windowsHide: true,
+  });
+  check("a foreign caller is refused", intruder.status !== 0, `exit ${intruder.status}`);
+  check("it gets no reply at all", (intruder.stdout ?? Buffer.alloc(0)).length === 0, String(intruder.stdout));
+
+  const run = spawnSync(hostExe, [ORIGIN], {
     input,
     env: { ...process.env, DEVCH_DATA_DIR: dataDir },
     timeout: 30000,

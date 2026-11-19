@@ -6,6 +6,9 @@
 //!
 //! # What it does
 //!
+//! 0. refuses to run unless the browser says it launched us for our own extension
+//!    (see `verify_origin`); that check runs before stdin is touched, so an
+//!    unexpected caller never gets a reply and never reaches the Spool;
 //! 1. reads length-prefixed JSON from stdin (framing is the browser's, not ours);
 //! 2. validates a GitHub report against the same rules the desktop side uses;
 //! 3. appends it to the Spool, which the Companion already drains;
@@ -23,6 +26,14 @@ use devchievements_git_hooks::browser_event;
 use devchievements_git_hooks::spool::Spool;
 
 fn main() -> io::Result<()> {
+    // Before anything else: a host that answers the wrong caller is worse than a host
+    // that refuses to start, because the Spool would accept whatever was sent.
+    if let Err(reason) = verify_origin(std::env::args().nth(1).as_deref()) {
+        eprintln!("devchievements-native-host: {reason}");
+        // Non-zero so the browser logs a failed launch instead of a silent port.
+        std::process::exit(2);
+    }
+
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut reader = stdin.lock();
@@ -52,6 +63,36 @@ fn main() -> io::Result<()> {
     }
 
     Ok(())
+}
+
+/// The only caller allowed to talk to this host: the extension that ships with the app.
+///
+/// The browser passes the caller's origin as the first argument, and that is the one
+/// field a page cannot forge -- unlike anything inside the message body, which is just
+/// JSON we were handed. The ID is fixed by the extension's public key
+/// (`apps/extension/extension-key.pub`), so it survives rebuilds and matches what
+/// `scripts/dev/register-native-host.mjs` writes into the manifest.
+const EXPECTED_ORIGIN: &str = "chrome-extension://gfgbmedanlpminnlbbdefojbgphoekbj/";
+
+/// Check the origin the browser passed as `argv[1]`.
+///
+/// Compared as an exact string: no case folding, no trailing-slash tolerance. Chrome
+/// and Edge both pass `chrome-extension://<id>/` with the slash, so being strict costs
+/// nothing while a lenient comparison would let a look-alike through.
+///
+/// Returns the reason on refusal so the caller can log something a user can act on.
+/// This is a pure function rather than a `process::exit` buried in `main` so the
+/// rules above are unit-tested instead of being taken on faith.
+fn verify_origin(origin: Option<&str>) -> Result<(), String> {
+    match origin {
+        Some(given) if given == EXPECTED_ORIGIN => Ok(()),
+        Some(given) => Err(format!(
+            "refusing caller origin {given:?}: this host only serves {EXPECTED_ORIGIN}"
+        )),
+        None => Err(format!(
+            "refusing caller with no origin argument: expected {EXPECTED_ORIGIN}"
+        )),
+    }
 }
 
 /// Where the Spool lives.
@@ -157,6 +198,53 @@ mod tests {
 
     fn reply(bytes: &[u8]) -> serde_json::Value {
         handle(bytes)
+    }
+
+    #[test]
+    fn the_shipping_extension_is_accepted() {
+        assert!(
+            verify_origin(Some("chrome-extension://gfgbmedanlpminnlbbdefojbgphoekbj/")).is_ok()
+        );
+    }
+
+    #[test]
+    fn another_extension_is_refused() {
+        // Same shape, different ID: a second copy of the extension, or one rebuilt
+        // with a different key, looks exactly like this.
+        let err = verify_origin(Some("chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"))
+            .expect_err("another extension must not be served");
+        assert!(err.contains("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), "{err}");
+        assert!(err.contains("gfgbmedanlpminnlbbdefojbgphoekbj"), "{err}");
+    }
+
+    #[test]
+    fn a_web_origin_is_refused() {
+        assert!(verify_origin(Some("http://localhost:3000")).is_err());
+        assert!(verify_origin(Some("https://github.com")).is_err());
+    }
+
+    #[test]
+    fn a_missing_origin_is_refused() {
+        // Launched by hand, or by something that is not a browser at all.
+        let err = verify_origin(None).expect_err("no origin must not be served");
+        assert!(err.contains("gfgbmedanlpminnlbbdefojbgphoekbj"), "{err}");
+    }
+
+    #[test]
+    fn a_near_miss_origin_is_refused() {
+        // Case and the trailing slash are the two ways a lenient comparison would
+        // silently widen the check.
+        assert!(verify_origin(Some(
+            "chrome-extension://GFGBMEDANLPMINNLBBDEFOJBGFPHOEKBJ/"
+        ))
+        .is_err());
+        assert!(
+            verify_origin(Some("chrome-extension://gfgbmedanlpminnlbbdefojbgphoekbj")).is_err()
+        );
+        assert!(verify_origin(Some(
+            "chrome-extension://gfgbmedanlpminnlbbdefojbgphoekbj//"
+        ))
+        .is_err());
     }
 
     #[test]

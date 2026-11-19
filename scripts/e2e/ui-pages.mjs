@@ -34,7 +34,7 @@ function check(label, ok, detail) {
   }
 }
 
-const pages = ["dashboard", "gallery", "activity", "repositories", "settings", "about"];
+const pages = ["dashboard", "gallery", "activity", "repositories", "builder", "settings", "about"];
 
 function seed(dataDir) {
   const repo = path.join(scratch, "repo");

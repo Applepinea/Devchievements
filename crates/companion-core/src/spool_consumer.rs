@@ -17,6 +17,11 @@
 //! `occurred_ms` may be days old. Spec 16.3 requires those to be handled by age:
 //! silent after 24 hours, digested in between. That decision happens here, at drain
 //! time, not at display time.
+//!
+//! The age becomes a [`ingest::NotificationPolicy`] and is handed to storage, which
+//! decides what to write: a celebration row, one summary row, or nothing at all. If
+//! this layer only filtered the report counters, the rows would still be written and
+//! a Spool replayed after a weekend would open a window per record.
 
 use std::path::{Path, PathBuf};
 
@@ -227,19 +232,26 @@ impl Companion {
 
         let _ = Engine; // the Engine is invoked inside ingest_commit
 
-        // Spec 16.3: an event older than a day updates statistics silently. The policy
-        // goes INTO storage so no outbox row is written at all -- a row that exists is
-        // delivered, and suppressing only the count here used to leave stale
-        // celebrations on screen while the drain report claimed "queued=0".
+        // Spec 16.3: the age decides the policy, and the policy goes INTO storage, so
+        // the band is enforced where the outbox row would be written. Suppressing only
+        // the count here used to leave stale celebrations on screen while the drain
+        // report claimed "queued=0".
         //
-        // "Digested" (10 minutes to 24 hours) still gets one full popup: the digest
-        // presentation is not implemented, and inventing a half-version of it would
-        // be worse than showing the celebration the user earned.
+        // No arm is a wildcard on purpose: a new freshness band must be a compile
+        // error, not a silent fall-through to "celebrate everything".
         let policy = match fresh {
+            devchievements_notifications::FreshnessAction::FullNotification => {
+                ingest::NotificationPolicy::Inform
+            }
+            devchievements_notifications::FreshnessAction::Digested => {
+                ingest::NotificationPolicy::Digest
+            }
             devchievements_notifications::FreshnessAction::Silent => {
+                // Quiet, not Silent: the unlock source stays realtime (spec 13.4). The
+                // event did happen to the user's account; we simply learned about it
+                // late. Labelling it an import would be a lie in the gallery.
                 ingest::NotificationPolicy::Quiet
             }
-            _ => ingest::NotificationPolicy::Inform,
         };
 
         match ingest::ingest_event_with_policy(

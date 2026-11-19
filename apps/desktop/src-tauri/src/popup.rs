@@ -257,12 +257,23 @@ fn place(window: &tauri::WebviewWindow, style: &devchievements_themes::PopupStyl
         return;
     };
 
-    let origin = monitor.position();
     let scale = monitor.scale_factor();
+
+    // Report says only the top-left corner could reach a zero margin. The cause was
+    // here: the usable area came from `SPI_GETWORKAREA`, which describes the PRIMARY
+    // monitor only, so every screen was laid out as if it were the primary one. The
+    // arithmetic in the themes crate was correct all along; it was handed the wrong
+    // rectangle.
+    //
+    // `Monitor::work_area()` is per monitor and carries its own origin, which is what
+    // makes a second screen (or a taskbar on a different edge) land correctly.
+    let area = monitor.work_area();
+    let usable_width = area.size.width;
+    let usable_height = area.size.height;
+    let origin = area.position;
 
     // Physical pixels from the system, logical pixels in the style: convert by the
     // scale factor so a 4K display does not produce a quarter-size popup.
-    let (usable_width, usable_height) = work_area(*monitor.size());
     let logical_width = (usable_width as f64 / scale) as u32;
     let logical_height = (usable_height as f64 / scale) as u32;
 
@@ -279,47 +290,9 @@ fn place(window: &tauri::WebviewWindow, style: &devchievements_themes::PopupStyl
     // "it appeared under the taskbar" or "it appeared on the other screen": the
     // numbers settle it.
     println!(
-        "POPUP placed at={},{} usable={}x{} monitor_origin={},{} scale={scale}",
+        "POPUP placed at={},{} usable={}x{} area_origin={},{} scale={scale}",
         target.x, target.y, usable_width, usable_height, origin.x, origin.y
     );
-}
-
-/// The part of the monitor that windows may occupy, in physical pixels.
-///
-/// The taskbar is subtracted. `SPI_GETWORKAREA` describes the primary monitor only, so
-/// it is used as the fallback when the popup is on another one.
-#[cfg(windows)]
-fn work_area(fallback: tauri::PhysicalSize<u32>) -> (u32, u32) {
-    use windows::Win32::Foundation::RECT;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SystemParametersInfoW, SPI_GETWORKAREA, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
-    };
-
-    let mut rect = RECT::default();
-    // Safety: `rect` is a valid, writable RECT for the duration of the call.
-    let ok = unsafe {
-        SystemParametersInfoW(
-            SPI_GETWORKAREA,
-            0,
-            Some(&mut rect as *mut RECT as *mut core::ffi::c_void),
-            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
-        )
-    };
-    if ok.is_err() {
-        return (fallback.width, fallback.height);
-    }
-    let width = (rect.right - rect.left).max(0) as u32;
-    let height = (rect.bottom - rect.top).max(0) as u32;
-    if width == 0 || height == 0 {
-        return (fallback.width, fallback.height);
-    }
-    (width, height)
-}
-
-/// Non-Windows builds have no taskbar concept here; the monitor size is the area.
-#[cfg(not(windows))]
-fn work_area(fallback: tauri::PhysicalSize<u32>) -> (u32, u32) {
-    (fallback.width, fallback.height)
 }
 
 /// Percent-encode the payload for the URL fragment.

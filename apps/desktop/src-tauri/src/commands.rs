@@ -94,6 +94,8 @@ async fn pool() -> Result<sqlx::SqlitePool, String> {
     let pool = devchievements_storage::open(&data_dir.join("companion.db"))
         .await
         .map_err(|e| e.to_string())?;
+    // `migrate` writes its own pre-migration backup (see its doc), so this needs no
+    // special path: every caller is covered, including the CLI ones.
     devchievements_storage::ingest::migrate(&pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -147,7 +149,9 @@ pub async fn link_login_and_replay(login: &str) -> Result<u32, String> {
     let Some(email) = stored.emails.first().cloned() else {
         return Err("configure your email before linking a GitHub account".to_string());
     };
-    stored.github_logins.insert(login.clone(), vec![email.clone()]);
+    stored
+        .github_logins
+        .insert(login.clone(), vec![email.clone()]);
     stored.save(&path).map_err(|e| e.to_string())?;
 
     let pool = pool().await?;
@@ -160,8 +164,8 @@ pub async fn link_login_and_replay(login: &str) -> Result<u32, String> {
 
     let data_dir = crate::default_data_dir();
     let spool_dir = data_dir.join("spool");
-    let spool = devchievements_git_hooks::spool::Spool::open(&spool_dir)
-        .map_err(|e| e.to_string())?;
+    let spool =
+        devchievements_git_hooks::spool::Spool::open(&spool_dir).map_err(|e| e.to_string())?;
 
     let mut replayed = 0u32;
     let mut replayed_ids: Vec<String> = Vec::new();
@@ -218,7 +222,8 @@ pub async fn get_dashboard() -> Result<DashboardView, String> {
 
 /// The database health block, fetched after the cards are on screen.
 #[tauri::command]
-pub async fn get_storage_health() -> Result<devchievements_storage::read_models::StorageHealth, String> {
+pub async fn get_storage_health(
+) -> Result<devchievements_storage::read_models::StorageHealth, String> {
     let pool = pool().await?;
     let data_dir = default_data_dir();
     devchievements_storage::read_models::storage_health(
@@ -545,9 +550,7 @@ pub fn ui_timing(stage: String, since_page_ms: f64) {
     let origin_ms = process_origin().elapsed().as_secs_f64() * 1000.0;
     // `since_page_ms` is measured inside the page (performance.now()), so it isolates
     // script time from everything that happened before the document existed.
-    println!(
-        "UI TIMING stage={stage} origin_ms={origin_ms:.1} page_ms={since_page_ms:.1}"
-    );
+    println!("UI TIMING stage={stage} origin_ms={origin_ms:.1} page_ms={since_page_ms:.1}");
 }
 
 /// What the very first screen needs, and nothing else.
@@ -960,6 +963,27 @@ pub fn import_sound(path: String) -> Result<StoredAsset, String> {
     })
 }
 
+/// Play the sound the current settings select for one slot (spec 19).
+///
+/// A preview only READS the settings: it does not unlock anything, does not write an
+/// outbox row and does not touch the database, so pressing it repeatedly is harmless.
+#[tauri::command]
+pub fn preview_sound(slot: String) -> crate::audio::PreviewReport {
+    let report = crate::audio::preview(&slot);
+    match (&report.reason, report.played) {
+        (_, true) => println!("SOUND preview slot={slot} id={} from={}", report.sound, report.source),
+        (Some(reason), _) => println!("SOUND preview slot={slot} id={} from={} played=false reason={reason}", report.sound, report.source),
+        (None, _) => println!("SOUND preview slot={slot} id={} from={}", report.sound, report.source),
+    }
+    report
+}
+
+/// The slots the settings page can preview.
+#[tauri::command]
+pub fn preview_sound_slots() -> Vec<String> {
+    crate::audio::preview_slots()
+}
+
 /// Import a sound from a path, for the CLI and tests.
 ///
 /// Also reports which sound ids are now available, so a caller can see the effect.
@@ -967,6 +991,184 @@ pub fn import_sound(path: String) -> Result<StoredAsset, String> {
 #[tauri::command]
 pub fn available_sounds() -> Vec<String> {
     crate::audio::available_sound_ids()
+}
+
+// ---------------------------------------------------------------- themes
+//
+// A theme package is untrusted input (spec 23). The validation itself lives in the
+// themes crate and in `theme_store`; these commands only move a path across the IPC
+// boundary, so the page cannot hand over a parsed theme and skip the checks.
+
+/// Everything the theme section of the settings page shows.
+#[tauri::command]
+pub fn list_themes() -> crate::theme_store::ThemeListView {
+    let popup = crate::settings::Settings::load(&settings_path()).popup;
+    crate::theme_store::list_themes(&crate::theme_store::themes_path(), &popup)
+}
+
+/// Make a theme's popup style the one in effect.
+///
+/// Written through `Settings::save`, the same path a slider uses: the popup reads the
+/// file at show time, so a separate in-memory copy would mean the theme only took
+/// effect after a restart.
+#[tauri::command]
+pub fn apply_theme(name: String) -> Result<(), String> {
+    let store = crate::theme_store::themes_path();
+    let popup = crate::theme_store::popup_for(&name, &store)?;
+
+    let path = settings_path();
+    let mut stored = crate::settings::Settings::load(&path);
+    stored.popup = popup;
+    stored.save(&path).map_err(|e| e.to_string())?;
+
+    println!("THEME applied name={name}");
+    Ok(())
+}
+
+/// Import a theme package from a path the dialog picked.
+///
+/// Returns the stored name: the page shows it, and a test needs something to assert
+/// on that is not "the call did not throw".
+#[tauri::command]
+pub fn import_theme(path: String) -> Result<String, String> {
+    let store = crate::theme_store::themes_path();
+    let theme = crate::theme_store::import_theme(std::path::Path::new(&path), &store)?;
+    println!("THEME imported name={}", theme.name);
+    Ok(theme.name)
+}
+
+/// Write the popup style in effect to a path the dialog picked.
+#[tauri::command]
+pub fn export_theme(path: String) -> Result<String, String> {
+    let store = crate::theme_store::themes_path();
+    let popup = crate::settings::Settings::load(&settings_path()).popup;
+    // Exported under the active theme's name when the style is one, so a shared file
+    // re-imports as the same entry instead of piling up "Custom" copies.
+    let name = crate::theme_store::list_themes(&store, &popup)
+        .active
+        .unwrap_or_else(|| crate::theme_store::CUSTOM_NAME.to_string());
+    crate::theme_store::export_theme(&popup, &name, std::path::Path::new(&path))?;
+    println!("THEME exported path={path} name={name}");
+    Ok(path)
+}
+
+/// Put the default popup style back.
+#[tauri::command]
+pub fn reset_theme() -> Result<(), String> {
+    let path = settings_path();
+    let mut stored = crate::settings::Settings::load(&path);
+    stored.popup = devchievements_themes::PopupStyle::default();
+    stored.save(&path).map_err(|e| e.to_string())?;
+    println!("THEME reset");
+    Ok(())
+}
+
+/// Delete a stored theme.
+///
+/// The built-in is synthesised rather than stored, so it needs no guard here; asking
+/// for it by name finds no file entry and is refused by `remove_theme`.
+#[tauri::command]
+pub fn remove_theme(name: String) -> Result<(), String> {
+    let store = crate::theme_store::themes_path();
+    crate::theme_store::remove_theme(&name, &store)?;
+    println!("THEME removed name={name}");
+    Ok(())
+}
+
+// --------------------------------------------------------- user achievements
+//
+// Spec 22: a user achievement is a rule, not code. Validation is the builder crate's
+// job (`definition::validate`); these commands only carry JSON across the IPC
+// boundary, so the form and the CLI cannot end up with two different notions of a
+// legal rule.
+
+/// One built-in achievement, as the builder page lists it.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuiltinAchievementSummary {
+    /// Stable id, which a user rule may not reuse (spec 13.3).
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// What the rule asks for.
+    pub description: String,
+    /// Rarity, as the wire name.
+    pub rarity: String,
+    /// Whether the catalogue hides it until unlocked.
+    pub hidden: bool,
+}
+
+/// The built-in catalogue, so the form can warn about a taken id or name.
+#[tauri::command]
+pub fn list_builtin_achievements() -> Vec<BuiltinAchievementSummary> {
+    devchievements_achievements::builtin_achievements()
+        .into_iter()
+        .map(|a| BuiltinAchievementSummary {
+            id: a.achievement_id.clone(),
+            name: a.name.clone(),
+            description: a.description.clone(),
+            rarity: a.rarity.as_str().to_string(),
+            hidden: a.hidden,
+        })
+        .collect()
+}
+
+/// The user's own achievements, straight from the settings document.
+#[tauri::command]
+pub fn list_user_achievements() -> Vec<devchievements_achievements::definition::UserAchievement> {
+    crate::settings::Settings::load(&settings_path()).user_achievements
+}
+
+/// Validate and store one user achievement.
+///
+/// # Why the argument is JSON text
+///
+/// `definition::validate` needs the raw definition so it can check the id, the name
+/// length, the rarity and the complexity limits. Accepting a struct would mean the
+/// page could construct one that skipped those checks, and the two entry points (form
+/// and `--add-achievement`) would drift.
+#[tauri::command]
+pub fn add_achievement(definition: String) -> Result<String, String> {
+    let path = settings_path();
+    let mut stored = crate::settings::Settings::load(&path);
+    let existing: Vec<String> = stored
+        .user_achievements
+        .iter()
+        .map(|a| a.id.clone())
+        .collect();
+
+    let achievement = devchievements_achievements::definition::from_json(
+        &definition,
+        &existing,
+        devchievements_achievements::builder::ComplexityLimits::default(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    let id = achievement.id.clone();
+    stored.user_achievements.push(achievement);
+    stored.save(&path).map_err(|e| e.to_string())?;
+
+    println!("ACHIEVEMENT STORED {id}");
+    Ok(id)
+}
+
+/// Remove one user achievement.
+///
+/// Only the settings document changes: an unlock it already recorded stays recorded.
+/// Spec 13.4 forbids revoking an achievement, and deleting a rule is not evidence the
+/// user did not earn it.
+#[tauri::command]
+pub fn remove_achievement(id: String) -> Result<(), String> {
+    let path = settings_path();
+    let mut stored = crate::settings::Settings::load(&path);
+    let before = stored.user_achievements.len();
+    stored.user_achievements.retain(|a| a.id != id);
+    if stored.user_achievements.len() == before {
+        return Err(format!("no user achievement with id `{id}`"));
+    }
+    stored.save(&path).map_err(|e| e.to_string())?;
+    println!("ACHIEVEMENT REMOVED {id}");
+    Ok(())
 }
 
 /// Open the settings window (used by the dashboard shortcut).

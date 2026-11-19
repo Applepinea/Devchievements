@@ -161,7 +161,16 @@ async function main() {
   };
   check("the page renders a preview button", !!clicked?.found, JSON.stringify(buttons));
   check("clicking it asks Rust to show a popup", popupLines.some((l) => /POPUP visible|POPUP preview shown|POPUP preview failed/.test(l)), JSON.stringify(popupLines));
-  check("no error was reported to the page", !/UI ERROR/.test(runLog), (runLog.match(/UI ERROR.*$/) ?? [""])[0]);
+  // The page scans its own text for placeholder values and reports the result through the
+  // same channel as an exception, so "UI ERROR UI PLACEHOLDER none on page settings" is the
+  // HEALTHY line. Only a placeholder that was actually found, or a real exception, is a
+  // failure -- asserting "no UI ERROR at all" would fail on the healthy report every time
+  // the 2.5 s scan wins the race with this read.
+  const placeholderLines = (runLog.match(/^UI ERROR UI PLACEHOLDER .*$/gm) ?? []).map((l) => l.trim());
+  const badPlaceholders = placeholderLines.filter((l) => !/UI PLACEHOLDER none on page /.test(l));
+  const otherErrors = (runLog.match(/^UI ERROR (?!UI PLACEHOLDER).*$/gm) ?? []).map((l) => l.trim());
+  check("the page found no placeholder text", badPlaceholders.length === 0, badPlaceholders.join("\n"));
+  check("no exception was reported to the page", otherErrors.length === 0, otherErrors.join("\n"));
 
   child.kill();
   try { socket.close(); } catch { /* already closed */ }

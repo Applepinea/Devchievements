@@ -453,14 +453,70 @@ pub use devchievements_achievements::Rarity;
 /// a plain commit gets a light sound and no popup, while an unlock gets a full
 /// popup. Treating them uniformly is the easy mistake, and it is a visible one --
 /// every commit would interrupt the user.
+///
+/// Spec 16.3 adds a third band: an event more than ten minutes old is digested, so it
+/// gets [`Presentation::Digest`] instead of a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Presentation {
     /// Show a merged popup (spec 16.6).
     Popup(Popup),
     /// Play a light acknowledgement sound and show nothing.
     SoundOnly,
+    /// Show one summary for several quiet events, never a celebration window.
+    Digest(DigestSummary),
     /// Nothing at all.
     Nothing,
+}
+
+/// Several events folded into a single, non-interrupting summary (spec 16.3).
+///
+/// The digest is deliberately not a [`Popup`]: events between ten minutes and a day
+/// old happened while the user was away, so opening a window per record would be the
+/// exact pile of "just unlocked" alerts a Spool replay used to produce after a
+/// weekend. One line, no window, and the gallery still shows the real unlocks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DigestSummary {
+    /// How many events were folded into this summary.
+    pub events: usize,
+    /// Titles of the achievements those events unlocked.
+    pub unlocks: Vec<String>,
+    /// Unlocks beyond the listed titles, already counted in the headline.
+    pub omitted_unlocks: usize,
+}
+
+impl DigestSummary {
+    /// How many unlocks the summary stands for, listed or not.
+    pub fn unlock_count(&self) -> usize {
+        self.unlocks.len() + self.omitted_unlocks
+    }
+
+    /// One readable line. English only, like the rest of this crate's copy: the UI
+    /// localises its own strings, and a digest is delivered outside the UI.
+    pub fn headline(&self) -> String {
+        match self.unlock_count() {
+            0 => format!("{} events recorded quietly", self.events),
+            1 => "1 achievement unlocked while you were away".to_string(),
+            n => format!("{n} achievements unlocked while you were away"),
+        }
+    }
+
+    /// Fold another digest into this one.
+    ///
+    /// A Spool replay produces one digest row per event, but the user must see one
+    /// summary for the whole replay (spec 16.3), so delivery merges them as it goes.
+    /// The three-title cap is applied again after merging, and whatever no longer
+    /// fits is added to the count rather than dropped.
+    pub fn merged_with(mut self, other: DigestSummary) -> DigestSummary {
+        self.events += other.events;
+        let omitted = self.omitted_unlocks + other.omitted_unlocks;
+        self.unlocks.extend(other.unlocks);
+
+        let listed = self.unlocks.len().min(3);
+        let overflow = self.unlocks.len() - listed;
+        self.unlocks.truncate(listed);
+        self.omitted_unlocks = omitted + overflow;
+        self
+    }
 }
 
 /// The content of a merged popup.
@@ -501,6 +557,21 @@ pub fn present_event(items: Vec<NotificationItem>, had_plain_commit: bool) -> Pr
         None if had_plain_commit => Presentation::SoundOnly,
         None => Presentation::Nothing,
     }
+}
+
+/// Fold several digested events into one summary (spec 16.3).
+///
+/// `unlocks` is every title the folded events unlocked, in delivery order. At most
+/// three are listed on the line; the rest are counted so the headline stays honest
+/// about how much happened rather than silently truncating it.
+pub fn digest_presentation(events: usize, unlocks: Vec<String>) -> Presentation {
+    let listed = unlocks.len().min(3);
+    let listed_unlocks = unlocks[..listed].to_vec();
+    Presentation::Digest(DigestSummary {
+        events,
+        omitted_unlocks: unlocks.len() - listed,
+        unlocks: listed_unlocks,
+    })
 }
 
 #[cfg(test)]
@@ -880,5 +951,67 @@ mod tests {
             }
             other => panic!("expected a popup, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_digest_is_never_a_popup() {
+        // Spec 16.3: the middle band is summarised. A window here is the reported bug,
+        // so the assertion is about the variant, not just about a count.
+        let presentation = digest_presentation(3, vec!["First Commit".to_string()]);
+        assert!(
+            !matches!(presentation, Presentation::Popup(_)),
+            "a digested event must not open a window: {presentation:?}"
+        );
+        match presentation {
+            Presentation::Digest(summary) => {
+                assert_eq!(summary.events, 3);
+                assert_eq!(summary.unlocks, vec!["First Commit".to_string()]);
+                assert_eq!(summary.omitted_unlocks, 0);
+            }
+            other => panic!("expected a digest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_digest_lists_at_most_three_titles_and_counts_the_rest() {
+        let unlocks: Vec<String> = (0..5).map(|i| format!("Achievement {i}")).collect();
+        match digest_presentation(5, unlocks) {
+            Presentation::Digest(summary) => {
+                assert_eq!(summary.unlocks.len(), 3);
+                assert_eq!(summary.omitted_unlocks, 2);
+                assert_eq!(
+                    summary.unlock_count(),
+                    5,
+                    "the count must not shrink when titles are trimmed"
+                );
+            }
+            other => panic!("expected a digest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn merging_digests_keeps_one_line_for_a_whole_replay() {
+        // A weekend replay queues one digest per event; the user must still see one.
+        let mut merged = DigestSummary {
+            events: 1,
+            unlocks: vec!["First Commit".to_string()],
+            omitted_unlocks: 0,
+        };
+        for _ in 0..49 {
+            merged = merged.merged_with(DigestSummary {
+                events: 1,
+                unlocks: vec!["Epic Thing".to_string()],
+                omitted_unlocks: 0,
+            });
+        }
+
+        assert_eq!(merged.events, 50, "every event is counted");
+        assert_eq!(merged.unlocks.len(), 3, "only three titles fit");
+        assert_eq!(merged.unlock_count(), 50, "the rest are counted, not lost");
+        assert!(
+            merged.headline().contains("50"),
+            "the headline must say how much happened, got {:?}",
+            merged.headline()
+        );
     }
 }

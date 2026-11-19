@@ -881,6 +881,352 @@ async fn a_quiet_policy_records_the_unlock_without_queueing_a_notification() {
     );
 }
 
+/// A commit event for a named repository, so a test can span several of them.
+fn commit_event_in(repository_id: &str, sha: &str, local_date: &str) -> Event {
+    let mut event = commit_event(sha, 1_794_787_200_000, local_date);
+    event.canonical_repository_id = CanonicalRepositoryId(repository_id.to_string());
+    event.event_id = EventId::new(format!("evt-{repository_id}-{sha}")).expect("id");
+    event
+}
+
+#[tokio::test]
+async fn upgrading_an_old_database_backs_up_first_and_keeps_every_unlock() {
+    // AGENTS.md 11: an irreversible migration needs a backup, and spec 13.4: an
+    // unlock is never revoked. This test builds a version-3 database by hand (the
+    // shape this build is migrating FROM), then opens it the way the app does.
+    let dir = std::env::temp_dir().join(format!("devch-migrate-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).expect("dir");
+    let pool = crate::open(&dir.join("companion.db")).await.expect("open");
+
+    // A v3 database: the per-repository tables plus an unlock and a day of history.
+    sqlx::raw_sql(
+        "CREATE TABLE schema_meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+         INSERT INTO schema_meta (key, value) VALUES ('schema_version', '3');
+         CREATE TABLE events (
+             event_id TEXT PRIMARY KEY NOT NULL, event_type TEXT NOT NULL,
+             source TEXT NOT NULL, source_confidence TEXT NOT NULL,
+             canonical_repository_id TEXT NOT NULL, external_id TEXT, commit_sha TEXT,
+             occurred_at INTEGER NOT NULL, observed_at INTEGER NOT NULL,
+             received_at INTEGER NOT NULL, local_date TEXT NOT NULL,
+             timezone TEXT NOT NULL, date_policy INTEGER NOT NULL,
+             payload TEXT NOT NULL, schema_version INTEGER NOT NULL, ingest_batch TEXT);
+         CREATE TABLE repository_projection (
+             canonical_repository_id TEXT PRIMARY KEY NOT NULL, commit_count INTEGER NOT NULL DEFAULT 0,
+             pull_request_merged_count INTEGER NOT NULL DEFAULT 0, release_count INTEGER NOT NULL DEFAULT 0,
+             issue_opened_count INTEGER NOT NULL DEFAULT 0,
+             repositories_created_count INTEGER NOT NULL DEFAULT 0,
+             star_given_count INTEGER NOT NULL DEFAULT 0,
+             first_seen_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+         CREATE TABLE daily_projection (
+             canonical_repository_id TEXT NOT NULL, local_date TEXT NOT NULL,
+             commit_count INTEGER NOT NULL DEFAULT 0, daily_rank TEXT,
+             timezone TEXT NOT NULL, date_policy INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+             PRIMARY KEY (canonical_repository_id, local_date));
+         CREATE TABLE unlocked_achievements (
+             achievement_id TEXT PRIMARY KEY NOT NULL, unlocked_at INTEGER NOT NULL,
+             unlock_source TEXT NOT NULL, rule_version INTEGER NOT NULL,
+             viewed_at INTEGER, triggering_event_id TEXT);
+         INSERT INTO repository_projection
+             (canonical_repository_id, commit_count, first_seen_at, updated_at)
+             VALUES ('github:o/a', 3, 0, 0), ('github:o/b', 2, 0, 0);
+         INSERT INTO daily_projection
+             (canonical_repository_id, local_date, commit_count, daily_rank, timezone, date_policy, updated_at)
+             VALUES ('github:o/a', '2026-11-16', 3, 'uncommon', 'Asia/Taipei', 0, 0),
+                    ('github:o/b', '2026-11-16', 2, 'uncommon', 'Asia/Taipei', 0, 0);
+         INSERT INTO unlocked_achievements
+             (achievement_id, unlocked_at, unlock_source, rule_version)
+             VALUES ('first_commit', 1, 'realtime', 1);",
+    )
+    .execute(&pool)
+    .await
+    .expect("seed v3");
+
+    ingest::migrate(&pool).await.expect("migrate");
+
+    // The backup is written by `migrate` itself, into a `backups/` directory next to
+    // the database file. Asserting on the directory rather than on a returned path is
+    // deliberate: the guarantee is "every caller gets a backup", not "the callers that
+    // remembered to ask for one do".
+    let backups: Vec<std::path::PathBuf> = std::fs::read_dir(dir.join("backups"))
+        .expect("a backups directory must exist after a schema change")
+        .flatten()
+        .map(|entry| entry.path())
+        .collect();
+    assert_eq!(backups.len(), 1, "exactly one backup, got {backups:?}");
+    let backup = &backups[0];
+    assert!(backup.exists(), "the backup must be a real file");
+
+    // The backup was taken BEFORE the migration, so it still says version 3.
+    let restored = crate::open(backup).await.expect("open backup");
+    assert_eq!(
+        ingest::recorded_schema_version(&restored)
+            .await
+            .expect("version"),
+        Some(3),
+        "the backup must be the pre-migration state"
+    );
+    restored.close().await;
+
+    // The migration itself must have aggregated the two repositories into one day.
+    assert_eq!(
+        ingest::recorded_schema_version(&pool)
+            .await
+            .expect("version"),
+        Some(crate::schema::SCHEMA_VERSION)
+    );
+    let day = projections::daily_global_projection(&pool, "2026-11-16")
+        .await
+        .expect("global day")
+        .expect("the backfill must have created the row");
+    assert_eq!(day.commit_count, 5, "3 + 2 commits on one day is 5");
+    assert_eq!(
+        day.daily_rank,
+        Some(devchievements_daily_rank::DailyRank::Rare),
+        "the rank is recomputed from the sum, so 5 is Rare even though both rows said Uncommon"
+    );
+
+    // Spec 13.4: nothing is revoked.
+    let unlocked = projections::unlocked_achievement_ids(&pool)
+        .await
+        .expect("unlocked");
+    assert_eq!(unlocked, vec!["first_commit".to_string()]);
+
+    pool.close().await;
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn the_daily_rank_counts_every_repository_together() {
+    // Spec 14.1 / checklist T1: A 3 commits + B 2 commits + C 1 commit is SIX commits
+    // today, which is Rare. Counting per repository is how 3 + 2 + 1 stayed Common.
+    let pool = temp_pool("global-daily").await;
+    let mut fx = fixture();
+    let identity = configured_identity();
+    let facts = ingest::commit_facts(1, false);
+
+    let plan = [("github:o/a", 3usize), ("github:o/b", 2), ("github:o/c", 1)];
+    let mut sha_counter = 0usize;
+    for (repository, commits) in plan {
+        for _ in 0..commits {
+            sha_counter += 1;
+            let sha = format!("{:040x}", sha_counter);
+            let event = commit_event_in(repository, &sha, "2026-11-16");
+            let ctx = fx.ctx();
+            ingest::ingest_commit(&pool, &event, &facts, 0, &identity, &ctx)
+                .await
+                .expect("ingest");
+        }
+    }
+
+    let today = projections::daily_global_projection(&pool, "2026-11-16")
+        .await
+        .expect("global day");
+    assert_eq!(
+        today.map(|d| d.commit_count),
+        Some(6),
+        "six commits across three repositories are one day of six"
+    );
+    let rank = projections::daily_global_projection(&pool, "2026-11-16")
+        .await
+        .expect("global day")
+        .and_then(|d| d.daily_rank);
+    assert_eq!(
+        rank,
+        Some(devchievements_daily_rank::DailyRank::Rare),
+        "5-9 commits in a day is Rare"
+    );
+
+    // The per-repository rows must still exist: the Repositories page shows them.
+    assert_eq!(
+        projections::repository_commit_count(&pool, "github:o/a")
+            .await
+            .expect("repo a"),
+        3
+    );
+    assert_eq!(
+        projections::repository_commit_count(&pool, "github:o/b")
+            .await
+            .expect("repo b"),
+        2
+    );
+}
+
+#[tokio::test]
+async fn the_commit_total_counts_every_repository_together() {
+    // Century is about the user, not about one repository (spec 13.2).
+    let pool = temp_pool("global-total").await;
+    let mut fx = fixture();
+    let identity = configured_identity();
+    let facts = ingest::commit_facts(1, false);
+
+    for (index, repository) in ["github:o/a", "github:o/b", "github:o/c"]
+        .iter()
+        .enumerate()
+    {
+        for n in 0..40 {
+            let sha = format!("{}{:039x}", index, n);
+            let event = commit_event_in(repository, &sha, "2026-11-16");
+            let ctx = fx.ctx();
+            ingest::ingest_commit(&pool, &event, &facts, 0, &identity, &ctx)
+                .await
+                .expect("ingest");
+        }
+    }
+
+    assert_eq!(
+        projections::global_commit_total(&pool)
+            .await
+            .expect("total"),
+        120,
+        "120 commits spread over three repositories is a total of 120"
+    );
+
+    let unlocked: Vec<(String,)> =
+        sqlx::query_as("SELECT achievement_id FROM unlocked_achievements")
+            .fetch_all(&pool)
+            .await
+            .expect("unlocked");
+    assert!(
+        unlocked.iter().any(|(id,)| id == "commits_100"),
+        "Century must unlock on the combined total, got {unlocked:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_rebuild_produces_the_same_global_numbers_as_live_ingestion() {
+    // The projections are derived, so a rebuild must land on exactly what live
+    // ingestion accumulated -- otherwise the migration this test guards is a lie.
+    let pool = temp_pool("global-rebuild").await;
+    let mut fx = fixture();
+    let identity = configured_identity();
+    let facts = ingest::commit_facts(1, false);
+
+    for (index, repository) in ["github:o/a", "github:o/b"].iter().enumerate() {
+        for n in 0..5 {
+            let sha = format!("{}{:039x}", index, n);
+            let event = commit_event_in(repository, &sha, "2026-11-16");
+            let ctx = fx.ctx();
+            ingest::ingest_commit(&pool, &event, &facts, 0, &identity, &ctx)
+                .await
+                .expect("ingest");
+        }
+    }
+
+    let live_total = projections::global_commit_total(&pool)
+        .await
+        .expect("total");
+    let live_day = projections::daily_global_projection(&pool, "2026-11-16")
+        .await
+        .expect("day")
+        .map(|d| (d.commit_count, d.daily_rank));
+    // The outbox is NOT part of a projection rebuild: the rows already there describe
+    // notifications the user may still be owed. What must hold is that the rebuild
+    // does not ADD any, because a rebuild is a recomputation, not a new event.
+    let queued_before = ingest::outbox_counts(&pool).await.expect("outbox");
+
+    projections::rebuild_from_events(&pool, 0)
+        .await
+        .expect("rebuild");
+
+    assert_eq!(
+        projections::global_commit_total(&pool)
+            .await
+            .expect("total"),
+        live_total,
+        "the rebuild must reproduce the global total"
+    );
+    let rebuilt_day = projections::daily_global_projection(&pool, "2026-11-16")
+        .await
+        .expect("day")
+        .map(|d| (d.commit_count, d.daily_rank));
+    assert_eq!(rebuilt_day, live_day, "and the global day projection");
+
+    // A rebuild must not revoke anything (spec 13.4) nor queue a notification.
+    let unlocked: Vec<(String,)> =
+        sqlx::query_as("SELECT achievement_id FROM unlocked_achievements")
+            .fetch_all(&pool)
+            .await
+            .expect("unlocked");
+    assert!(
+        unlocked.iter().any(|(id,)| id == "first_commit"),
+        "an unlock already recorded must survive a rebuild, got {unlocked:?}"
+    );
+    let queued_after = ingest::outbox_counts(&pool).await.expect("outbox");
+    assert_eq!(
+        queued_after, queued_before,
+        "a rebuild must not add notifications: it recomputes, it does not re-announce"
+    );
+}
+
+#[tokio::test]
+async fn a_digest_policy_queues_one_summary_instead_of_a_celebration() {
+    // Spec 16.3, the middle band: an event between ten minutes and a day old is
+    // summarised. The unlock is real and stays realtime; what changes is that the
+    // outbox carries ONE summary row instead of a celebration per reward.
+    let pool = temp_pool("digest-policy").await;
+    let mut fx = fixture();
+    let ctx = fx.ctx();
+    let identity = identity_with_login();
+    let event = browser_event(
+        EventType::PullRequestMerged,
+        "pr:4",
+        1_794_787_200_000,
+        "2026-11-16",
+    );
+
+    let outcome = ingest::ingest_event_with_policy(
+        &pool,
+        &event,
+        &not_a_commit(),
+        0,
+        &identity,
+        &ctx,
+        ingest::NotificationPolicy::Digest,
+        &[],
+    )
+    .await
+    .expect("ingest");
+
+    match &outcome {
+        IngestOutcome::Ingested {
+            queued_notifications,
+        } => {
+            assert_eq!(queued_notifications.len(), 1, "{outcome:?}");
+            assert!(
+                queued_notifications[0].starts_with("digest:"),
+                "a digest row is not a celebration, got {:?}",
+                queued_notifications[0]
+            );
+        }
+        other => panic!("expected one summary, got {other:?}"),
+    }
+
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT kind, payload FROM outbox ORDER BY notification_id")
+            .fetch_all(&pool)
+            .await
+            .expect("outbox");
+    assert_eq!(rows.len(), 1, "one event, one summary row: {rows:?}");
+    assert_eq!(rows[0].0, "digest_summary", "no celebration may be queued");
+    assert!(
+        rows[0].1.contains("first_pr_merged"),
+        "the summary must name what unlocked, got {:?}",
+        rows[0].1
+    );
+
+    let unlocked: Vec<(String, String)> =
+        sqlx::query_as("SELECT achievement_id, unlock_source FROM unlocked_achievements")
+            .fetch_all(&pool)
+            .await
+            .expect("unlocked");
+    assert_eq!(
+        unlocked,
+        vec![("first_pr_merged".to_string(), "realtime".to_string())],
+        "a late delivery is not an import; labelling it one would lie in the gallery"
+    );
+}
+
 #[tokio::test]
 async fn a_rebuild_reproduces_the_browser_counters() {
     // The projections are derived, so rebuilding from the event log must land on the
@@ -921,5 +1267,97 @@ async fn a_rebuild_reproduces_the_browser_counters() {
             .await
             .expect("count"),
         0
+    );
+}
+
+// ------------------------------------------------------ failure must not be silent
+
+#[tokio::test]
+async fn a_projection_read_failure_refuses_the_event_instead_of_guessing() {
+    // A failed read used to be swallowed by `unwrap_or_default()`, so the Engine
+    // judged the commit against a blank snapshot and then persisted the result of
+    // that guess: the counter stayed at zero, the event was still recorded, and the
+    // Companion marked the Spool record consumed -- the commit was lost for good.
+    // The read error is now returned, the transaction rolls back, and the retry
+    // counts once.
+    let pool = temp_pool("read-failure").await;
+    let mut fx = fixture();
+    let facts = ingest::commit_facts(1, false);
+    let event = commit_event(&"7".repeat(40), 1_794_787_200_000, "2026-11-16");
+
+    // Break exactly one read and leave every write path intact. Renaming or dropping
+    // a table cannot do that: ingestion writes the same three projection tables it
+    // reads, so the write side reports the failure even when the read is swallowed,
+    // and the test would pass for the wrong reason.
+    //
+    // So poison the value instead: put an invalid UTF-8 BLOB into the
+    // `achievement_id` primary key. TEXT affinity never converts a BLOB, no table is
+    // STRICT, and `impl Decode for String` fails on `from_utf8`, so the row can only
+    // be read by erroring. Every write to this table still succeeds, because those
+    // writes never read existing rows back.
+    sqlx::raw_sql(
+        "INSERT INTO unlocked_achievements (achievement_id, unlocked_at, unlock_source, rule_version) \
+         VALUES (X'FFFE', 0, 'fault', 1)",
+    )
+    .execute(&pool)
+    .await
+    .expect("poison");
+
+    let failed =
+        ingest::ingest_commit(&pool, &event, &facts, 0, &configured_identity(), &fx.ctx()).await;
+    assert!(
+        failed.is_err(),
+        "a projection read failure must be returned, not defaulted: {failed:?}"
+    );
+
+    assert_eq!(
+        ingest::event_count(&pool).await.expect("count"),
+        0,
+        "the event must not be recorded when its evaluation could not be read"
+    );
+    assert_eq!(
+        projections::repository_commit_count(&pool, "github:o/r")
+            .await
+            .expect("count"),
+        0,
+        "the counter must not move either"
+    );
+
+    // The read failure must not have been turned into a different error: an event
+    // that could not be evaluated is refused because it could not be read, and the
+    // message has to say so rather than blaming the write that never happened.
+    let message = format!("{}", failed.expect_err("read failure"));
+    assert!(
+        message.contains("decoding column"),
+        "the failure must be the projection read, not an unrelated one: {message}"
+    );
+
+    // Clear the fault the way a repaired database would, then replay the same event.
+    sqlx::raw_sql("DELETE FROM unlocked_achievements WHERE unlock_source = 'fault'")
+        .execute(&pool)
+        .await
+        .expect("unpoison");
+    let outcome =
+        ingest::ingest_commit(&pool, &event, &facts, 0, &configured_identity(), &fx.ctx())
+            .await
+            .expect("ingest");
+    assert!(
+        matches!(
+            outcome,
+            IngestOutcome::Ingested { .. } | IngestOutcome::IngestedSilently
+        ),
+        "the retry must ingest, not see a duplicate: {outcome:?}"
+    );
+
+    assert_eq!(
+        ingest::event_count(&pool).await.expect("count"),
+        1,
+        "the retry must count exactly once"
+    );
+    assert_eq!(
+        projections::repository_commit_count(&pool, "github:o/r")
+            .await
+            .expect("count"),
+        1
     );
 }

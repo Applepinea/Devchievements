@@ -58,6 +58,52 @@ pub async fn daily_projection(
     }))
 }
 
+/// One day across every repository (spec 14.1, checklist T1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalDay {
+    /// Valid commits counted that day, across all repositories.
+    pub commit_count: u32,
+    /// The rank granted for that day, if any.
+    pub daily_rank: Option<DailyRank>,
+}
+
+/// Read one day's GLOBAL projection, if any commit happened that day.
+///
+/// The daily rank is about the user's day, not one repository's (spec 14.1): three
+/// commits in A plus two in B plus one in C is a six-commit day. Reading a single
+/// repository's row is how that used to come out as Common.
+pub async fn daily_global_projection(
+    pool: &SqlitePool,
+    local_date: &str,
+) -> StorageResult<Option<GlobalDay>> {
+    let row = sqlx::query(
+        "SELECT commit_count, daily_rank FROM daily_global_projection WHERE local_date = ?",
+    )
+    .bind(local_date)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|r| {
+        let rank_text: Option<String> = r.get("daily_rank");
+        GlobalDay {
+            commit_count: r.get::<i64, _>("commit_count") as u32,
+            daily_rank: rank_text.as_deref().and_then(parse_rank),
+        }
+    }))
+}
+
+/// The sum of every repository's commit counter (spec 13.2, checklist T1).
+///
+/// Achievements about totals are about the user, so "Century" means a hundred commits
+/// anywhere, not a hundred in one working copy.
+pub async fn global_commit_total(pool: &SqlitePool) -> StorageResult<u32> {
+    let row: (i64,) =
+        sqlx::query_as("SELECT COALESCE(SUM(commit_count), 0) FROM repository_projection")
+            .fetch_one(pool)
+            .await?;
+    Ok(row.0 as u32)
+}
+
 /// The repository-wide commit total.
 pub async fn repository_commit_count(pool: &SqlitePool, repository_id: &str) -> StorageResult<u32> {
     let row: Option<(i64,)> = sqlx::query_as(
@@ -177,6 +223,30 @@ pub async fn apply_state_changes(
         }
 
         match change.projection.as_str() {
+            // The payload is the USER's new total, which the Engine computed from the
+            // global read. It is deliberately NOT written into the per-repository
+            // column: that column means "commits in this repository", and writing a
+            // global number into it made SUM(commit_count) count every commit once per
+            // write. The per-repository column is incremented instead.
+            "global_commit_total" => {
+                sqlx::query(
+                    "INSERT INTO repository_projection
+                        (canonical_repository_id, commit_count, first_seen_at, updated_at)
+                     VALUES (?, 1, ?, ?)
+                     ON CONFLICT(canonical_repository_id) DO UPDATE SET
+                        commit_count = commit_count + 1,
+                        updated_at   = excluded.updated_at",
+                )
+                .bind(event.canonical_repository_id.as_str())
+                .bind(now_ms)
+                .bind(now_ms)
+                .execute(&mut **tx)
+                .await?;
+            }
+
+            // Kept for a replay of an event written by an older Engine, and for the
+            // Golden Tests, which build state changes directly. Same meaning as
+            // above: an absolute per-repository value.
             "repository_commit_count" => {
                 let value: i64 = change.payload.parse().unwrap_or(0);
                 sqlx::query(
@@ -216,6 +286,27 @@ pub async fn apply_state_changes(
                 .bind(now_ms)
                 .execute(&mut **tx)
                 .await?;
+
+                // Spec 14.1: the day is the user's day, not one repository's. The
+                // Engine computed the per-repository value; the global row is one
+                // increment of it, which is exactly what "this commit happened today"
+                // means once and only once per event.
+                sqlx::query(
+                    "INSERT INTO daily_global_projection
+                        (local_date, commit_count, daily_rank, timezone, date_policy, updated_at)
+                     VALUES (?, 1, NULL, ?, ?, ?)
+                     ON CONFLICT(local_date) DO UPDATE SET
+                        commit_count = commit_count + 1,
+                        timezone     = excluded.timezone,
+                        date_policy  = excluded.date_policy,
+                        updated_at   = excluded.updated_at",
+                )
+                .bind(event.local_date.as_str())
+                .bind(&event.timezone)
+                .bind(i64::from(event.date_policy))
+                .bind(now_ms)
+                .execute(&mut **tx)
+                .await?;
             }
 
             "daily_rank_today" => {
@@ -226,6 +317,16 @@ pub async fn apply_state_changes(
                 .bind(&change.payload)
                 .bind(now_ms)
                 .bind(event.canonical_repository_id.as_str())
+                .bind(event.local_date.as_str())
+                .execute(&mut **tx)
+                .await?;
+
+                sqlx::query(
+                    "UPDATE daily_global_projection SET daily_rank = ?, updated_at = ?
+                     WHERE local_date = ?",
+                )
+                .bind(&change.payload)
+                .bind(now_ms)
                 .bind(event.local_date.as_str())
                 .execute(&mut **tx)
                 .await?;
@@ -275,6 +376,9 @@ pub async fn rebuild_from_events(pool: &SqlitePool, now_ms: i64) -> StorageResul
     let mut tx = pool.begin().await?;
 
     sqlx::query("DELETE FROM daily_projection")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM daily_global_projection")
         .execute(&mut *tx)
         .await?;
     sqlx::query("DELETE FROM repository_projection")
@@ -364,6 +468,11 @@ pub async fn rebuild_from_events(pool: &SqlitePool, now_ms: i64) -> StorageResul
             .await?;
     replayed += browser_only.map(|(n,)| n).unwrap_or(0);
 
+    // The global day is accumulated while the per-repository rows are written, so the
+    // two can never disagree after a rebuild (checklist T1).
+    let mut global_days: std::collections::BTreeMap<String, (i64, String, i64)> =
+        std::collections::BTreeMap::new();
+
     for ((repo, date), (count, tz, policy)) in &day_counts {
         let rank =
             devchievements_daily_rank::DailyRankThresholds::official().rank_for(*count as u32);
@@ -374,6 +483,29 @@ pub async fn rebuild_from_events(pool: &SqlitePool, now_ms: i64) -> StorageResul
              VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(repo)
+        .bind(date)
+        .bind(count)
+        .bind(rank.map(|r| r.as_str()))
+        .bind(tz)
+        .bind(policy)
+        .bind(now_ms)
+        .execute(&mut *tx)
+        .await?;
+
+        let global = global_days
+            .entry(date.clone())
+            .or_insert((0, tz.clone(), *policy));
+        global.0 += count;
+    }
+
+    for (date, (count, tz, policy)) in &global_days {
+        let rank =
+            devchievements_daily_rank::DailyRankThresholds::official().rank_for(*count as u32);
+        sqlx::query(
+            "INSERT INTO daily_global_projection
+                (local_date, commit_count, daily_rank, timezone, date_policy, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
         .bind(date)
         .bind(count)
         .bind(rank.map(|r| r.as_str()))

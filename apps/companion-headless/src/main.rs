@@ -45,6 +45,14 @@ impl DeliverySink for StdoutSink {
                 println!("SOUND commit");
                 self.shown += 1;
             }
+            Presentation::Digest(summary) => {
+                // Spec 16.3: one summary for the middle band, never a window.
+                println!(
+                    "NOTIFY digest events={} unlocks={:?} omitted={}",
+                    summary.events, summary.unlocks, summary.omitted_unlocks
+                );
+                self.shown += 1;
+            }
             Presentation::Nothing => return DisplayOutcome::Shown,
         }
         DisplayOutcome::Shown

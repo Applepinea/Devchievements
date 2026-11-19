@@ -127,11 +127,19 @@ pub async fn load_snapshot(
     repository_id: &str,
     local_date: &str,
 ) -> StorageResult<StateSnapshot> {
-    let repository_commit_count = projections::repository_commit_count(pool, repository_id).await?;
+    // Spec 13.2 / 14.1 (checklist T1): both numbers the Engine judges are about the
+    // USER, not about one working copy. Three commits in A plus two in B plus one in C
+    // is a six-commit day, and Century means a hundred commits anywhere.
+    //
+    // The per-repository counters are still maintained and still read -- by the
+    // Repositories page and by `statistics()` -- so nothing is lost by reading the
+    // global figures here.
+    let _ = repository_id;
+    let repository_commit_count = projections::global_commit_total(pool).await?;
 
-    let daily = projections::daily_projection(pool, repository_id, local_date).await?;
+    let daily = projections::daily_global_projection(pool, local_date).await?;
     let (daily_commit_count, daily_rank) = match daily {
-        Some(row) => (row.commit_count, row.daily_rank),
+        Some(day) => (day.commit_count, day.daily_rank),
         None => (0, None),
     };
 
@@ -177,9 +185,12 @@ pub async fn load_browser_snapshot(
     pool: &SqlitePool,
     repository_id: &str,
 ) -> StorageResult<StateSnapshot> {
+    let _ = repository_id;
     let snapshot = StateSnapshot {
         version: 0,
-        repository_commit_count: projections::repository_commit_count(pool, repository_id).await?,
+        // Global for the same reason: a merged pull request may satisfy a commit
+        // achievement, and that achievement is about the user's total (spec 13.2).
+        repository_commit_count: projections::global_commit_total(pool).await?,
         daily_commit_count: 0,
         daily_rank_today: None,
         unlocked_achievement_ids: projections::unlocked_achievement_ids(pool).await?,
@@ -193,18 +204,26 @@ pub async fn load_browser_snapshot(
     Ok(snapshot)
 }
 
-/// Ingest a commit event.
+/// Whether one event may produce user-visible notifications.
 ///
-/// The whole operation runs inside one SQLite transaction; any failure rolls back
-/// to exactly the state before the call.
-/// Whether the event may produce user-visible notifications.
+/// Spec 16.3 splits events by age into three bands, and each band is a different
+/// promise to the user: celebrate now, summarise later, or only move the numbers.
+/// The policy is passed in rather than derived here because only the caller knows
+/// how old the event is; keeping the clock out of storage also makes each band
+/// testable without waiting.
 ///
 /// Spec 11.2: a history import is silent. The achievements still unlock and are still
 /// recorded with their source and rule version; only the outbox rows are suppressed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotificationPolicy {
-    /// Queue notifications as usual.
+    /// Queue one celebration per intent (spec 16.4).
     Inform,
+    /// Queue a single summary row instead of a celebration per intent (spec 16.3).
+    ///
+    /// Used for an event between ten minutes and a day old: the user was away, so a
+    /// window per record would be the pile of "just unlocked" popups a Spool replay
+    /// after a weekend used to produce.
+    Digest,
     /// Record everything but queue nothing.
     ///
     /// Used for an event that is real but too old to announce (spec 16.3, over 24
@@ -216,17 +235,26 @@ pub enum NotificationPolicy {
 }
 
 impl NotificationPolicy {
-    /// Whether this policy may create outbox rows.
+    /// Whether this policy may create one outbox row per intent.
     pub fn queues_notifications(self) -> bool {
-        self == NotificationPolicy::Inform
+        matches!(self, NotificationPolicy::Inform)
+    }
+
+    /// Whether this policy folds its intents into one summary row.
+    pub fn digests_notifications(self) -> bool {
+        matches!(self, NotificationPolicy::Digest)
     }
 
     /// Whether unlocks from this policy should be labelled as imported.
     pub fn is_import(self) -> bool {
-        self == NotificationPolicy::Silent
+        matches!(self, NotificationPolicy::Silent)
     }
 }
 
+/// Ingest a commit event.
+///
+/// The whole operation runs inside one SQLite transaction; any failure rolls back
+/// to exactly the state before the call.
 pub async fn ingest_commit(
     pool: &SqlitePool,
     event: &Event,
@@ -407,11 +435,14 @@ async fn ingest_commit_inner(
     // because the Spool path carries both kinds through the same call.
     let activity = browser_activity_for(event.event_type);
 
+    // A failed read is returned, never defaulted. Substituting an empty snapshot
+    // would make the Engine judge this event against zero, persist that guess and
+    // let the caller consume the Spool record: the commit would be lost, and the
+    // only trace would be a statistic that silently stayed behind.
     let (snapshot, statistics) = match activity {
         Some(activity) => {
-            let snapshot = load_browser_snapshot(pool, event.canonical_repository_id.as_str())
-                .await
-                .unwrap_or_default();
+            let snapshot =
+                load_browser_snapshot(pool, event.canonical_repository_id.as_str()).await?;
             let statistics = activity.statistics_with(&snapshot);
             (snapshot, statistics)
         }
@@ -421,8 +452,7 @@ async fn ingest_commit_inner(
                 event.canonical_repository_id.as_str(),
                 event.local_date.as_str(),
             )
-            .await
-            .unwrap_or_else(|_| StateSnapshot::default());
+            .await?;
             let statistics = devchievements_core::achievements::StatisticsSnapshot {
                 commit_count: snapshot.repository_commit_count.saturating_add(1),
                 ..Default::default()
@@ -474,6 +504,10 @@ async fn ingest_commit_inner(
         });
     }
     let mut queued = Vec::new();
+    // Spec 16.3, the middle band: one summary for the whole event, never a window per
+    // reward. The ids are collected while the unlocks are recorded and written as a
+    // single row after the loop, so the digest cannot outrun the unlocks it describes.
+    let mut digest_unlocks: Vec<String> = Vec::new();
     for intent in &intents {
         let (kind, payload) = match &intent.kind {
             SideEffectKind::CommitRecorded => ("commit_recorded", "{}".to_string()),
@@ -517,6 +551,23 @@ async fn ingest_commit_inner(
         // queue a notification. The unlock itself is still recorded above, with its
         // source and rule version -- suppressing the row here is what makes the
         // policy real, because a row that exists gets delivered by the outbox.
+        //
+        // The digest band is the exception: it queues, but only as a summary. The
+        // reward is remembered here and folded into one row after the loop.
+        if policy.digests_notifications() {
+            match &intent.kind {
+                SideEffectKind::AchievementUnlocked { achievement_id, .. } => {
+                    digest_unlocks.push(achievement_id.clone())
+                }
+                SideEffectKind::DailyRankUpgrade { rank } => {
+                    digest_unlocks.push(format!("daily:{}", rank.as_str()));
+                }
+                // A plain commit is not a reward, so it never appears in a summary.
+                SideEffectKind::CommitRecorded => {}
+            }
+            continue;
+        }
+
         if !policy.queues_notifications() {
             continue;
         }
@@ -535,6 +586,29 @@ async fn ingest_commit_inner(
         .await?;
 
         queued.push(intent.notification_id.clone());
+    }
+
+    if !digest_unlocks.is_empty() {
+        let notification_id = format!("digest:{}", event.event_id.as_str());
+        let payload = serde_json::json!({
+            "events": 1,
+            "unlocks": digest_unlocks,
+        })
+        .to_string();
+
+        sqlx::query(
+            "INSERT OR IGNORE INTO outbox
+                (notification_id, event_id, status, created_at, kind, payload)
+             VALUES (?, ?, 'created', ?, 'digest_summary', ?)",
+        )
+        .bind(&notification_id)
+        .bind(event.event_id.as_str())
+        .bind(now_ms)
+        .bind(&payload)
+        .execute(&mut *tx)
+        .await?;
+
+        queued.push(notification_id);
     }
 
     tx.commit().await?;
@@ -595,6 +669,57 @@ async fn column_exists(pool: &SqlitePool, table: &str, column: &str) -> StorageR
         .any(|row| row.get::<String, _>("name") == column))
 }
 
+/// The recorded schema version, treating "the table does not exist yet" as `None`.
+///
+/// A database that has never been migrated has no `schema_meta` table at all, so the
+/// query fails. That is the fresh-install case, not an error worth propagating: it is
+/// also the case where a backup would be a copy of nothing.
+async fn schema_version_of_unmigrated(pool: &SqlitePool) -> Option<i64> {
+    recorded_schema_version(pool).await.unwrap_or_default()
+}
+
+/// Write a pre-migration backup next to the database file.
+///
+/// # Why the path comes from the pool
+///
+/// The directory is taken from the database the pool is actually connected to, so a
+/// caller cannot hand in the wrong one. That is also what makes it safe to do this
+/// inside [`migrate`] with no extra parameter.
+///
+/// # Why a failure aborts the migration
+///
+/// A skipped backup turns "your data can be restored" into a claim nobody checked. If
+/// the copy cannot be written the migration does not run, and the error says why.
+async fn take_pre_migration_backup(pool: &SqlitePool, from_version: i64) -> StorageResult<()> {
+    let filename = pool.connect_options().get_filename().to_path_buf();
+    let directory = filename
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let backups = directory.join("backups");
+    let path = backups.join(format!(
+        "pre-migration-v{from_version}-to-v{}-{}.db",
+        schema::SCHEMA_VERSION,
+        now_millis_for_backup()
+    ));
+
+    crate::backup::backup(pool, &path).await?;
+    println!("MIGRATION backup={}", path.display());
+    Ok(())
+}
+
+/// Milliseconds since the epoch, for a backup filename.
+///
+/// Local to this function on purpose: the rest of the crate takes the clock from the
+/// caller, but a filename is not business logic and threading a clock through the
+/// migration signature to name a file would be worse than this one call.
+fn now_millis_for_backup() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 /// Apply the schema and record its version.
 ///
 /// Older databases are upgraded in place: `CREATE TABLE IF NOT EXISTS` leaves an
@@ -602,6 +727,22 @@ async fn column_exists(pool: &SqlitePool, table: &str, column: &str) -> StorageR
 /// explicitly. The check is idempotent, which is what allows this to run on every
 /// open rather than once.
 pub async fn migrate(pool: &SqlitePool) -> StorageResult<()> {
+    // Read BEFORE the schema is applied: this is the only way to tell a fresh database
+    // from one an older build already filled, which decides whether a backup and the
+    // global-projection backfill below are needed.
+    let previous = schema_version_of_unmigrated(pool).await;
+
+    // AGENTS.md 11 requires a backup before an irreversible migration, and this is the
+    // ONE place every caller funnels through. Putting it here rather than at each of the
+    // seven call sites is deliberate: a backup that has to be remembered at every call
+    // site is a backup that will be missing at the eighth.
+    //
+    // The data directory is derived from the pool's own filename, so a caller cannot
+    // pass a mismatched directory and write the backup somewhere unrelated.
+    if previous.is_some_and(|version| version < schema::SCHEMA_VERSION) {
+        take_pre_migration_backup(pool, previous.unwrap_or(0)).await?;
+    }
+
     sqlx::raw_sql(schema::SCHEMA_SQL).execute(pool).await?;
 
     for (table, column, definition) in schema::COLUMN_UPGRADES {
@@ -613,6 +754,15 @@ pub async fn migrate(pool: &SqlitePool) -> StorageResult<()> {
             .await?;
         }
     }
+
+    // Schema 4 added `daily_global_projection`. An existing database has per-repository
+    // day rows describing exactly the same commits, so the global rows can be derived
+    // from them instead of forcing a full event replay: this is a pure aggregation of
+    // data that is already correct, so it cannot lose an event or revoke an unlock.
+    if previous.is_some_and(|v| v < 4) {
+        backfill_global_days(pool).await?;
+    }
+
     sqlx::query(
         "INSERT INTO schema_meta (key, value) VALUES ('schema_version', ?)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -620,5 +770,54 @@ pub async fn migrate(pool: &SqlitePool) -> StorageResult<()> {
     .bind(schema::SCHEMA_VERSION.to_string())
     .execute(pool)
     .await?;
+    Ok(())
+}
+
+/// Sum the existing per-repository day rows into the global day table.
+///
+/// Idempotent: it rewrites every global row from scratch, so running it twice or on a
+/// half-migrated database converges on the same numbers. The rank is recomputed from
+/// the summed count rather than copied, because a day that was Common per repository
+/// can be Rare once the repositories are added together -- which is the whole point.
+async fn backfill_global_days(pool: &SqlitePool) -> StorageResult<()> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("DELETE FROM daily_global_projection")
+        .execute(&mut *tx)
+        .await?;
+
+    let rows = sqlx::query(
+        "SELECT local_date,
+                SUM(commit_count) AS commits,
+                MAX(updated_at)   AS updated_at,
+                MAX(timezone)     AS timezone,
+                MAX(date_policy)  AS date_policy
+         FROM daily_projection
+         GROUP BY local_date",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let thresholds = devchievements_daily_rank::DailyRankThresholds::official();
+    for row in rows {
+        let date: String = row.get("local_date");
+        let commits: i64 = row.get("commits");
+        let rank = thresholds.rank_for(commits as u32);
+        sqlx::query(
+            "INSERT INTO daily_global_projection
+                (local_date, commit_count, daily_rank, timezone, date_policy, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&date)
+        .bind(commits)
+        .bind(rank.map(|r| r.as_str()))
+        .bind(row.get::<String, _>("timezone"))
+        .bind(row.get::<i64, _>("date_policy"))
+        .bind(row.get::<i64, _>("updated_at"))
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
     Ok(())
 }

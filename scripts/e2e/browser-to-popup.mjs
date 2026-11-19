@@ -22,6 +22,8 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
 const hostExe = path.join(repoRoot, "target", "debug", "devchievements-native-host.exe");
+// The host only serves the origin the browser passes as argv[1].
+const HOST_ORIGIN = "chrome-extension://gfgbmedanlpminnlbbdefojbgphoekbj/";
 const appExe = path.join(repoRoot, "apps", "desktop", "src-tauri", "target", "debug", "devchievements-desktop.exe");
 const scratch = path.join(__dirname, ".browser-popup");
 const SHA = "abcdef0123456789abcdef0123456789abcdef01";
@@ -94,7 +96,7 @@ async function main() {
       occurred_ms: Date.now() - 2_000,
     },
   };
-  const host = spawnSync(hostExe, [], {
+  const host = spawnSync(hostExe, [HOST_ORIGIN], {
     input: frame(message),
     env: { ...env, DEVCH_DATA_DIR: dataDir },
     timeout: 30000,

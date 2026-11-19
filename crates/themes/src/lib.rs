@@ -550,6 +550,60 @@ mod tests {
     }
 
     #[test]
+    fn a_position_is_relative_to_the_screen_it_is_given_not_to_the_primary_one() {
+        // The reported bug: only the top-left corner could reach margin 0. The placement
+        // arithmetic was right, but it was handed the PRIMARY monitor's work area for
+        // every screen, and that value also dropped the `left`/`top` offset. On a
+        // second monitor (or any corner that is not the primary's top-left) the popup
+        // was therefore pushed somewhere it did not belong, and a zero margin looked
+        // like it was ignored.
+        //
+        // This pins the contract `position` actually has: its argument is the size of
+        // the screen the window will live on, and the answer is relative to THAT
+        // screen's origin. A caller that passes the wrong screen gets a wrong answer,
+        // which is why the caller now passes the monitor's own work area.
+        let zero = PopupStyle {
+            screen_margin: 0,
+            corner: Corner::BottomRight,
+            width: 400,
+            height: Some(100),
+            ..PopupStyle::default()
+        };
+        // A 1280x720 secondary screen: flush against its own bottom-right corner.
+        assert_eq!(zero.position((1280, 720)), (1280 - 400, 720 - 100));
+        // The same style on the primary screen must land on that screen's corner, not
+        // on the secondary one's. Reusing one screen size for both is the defect.
+        assert_eq!(zero.position((1920, 1040)), (1920 - 400, 1040 - 100));
+    }
+
+    #[test]
+    fn a_zero_margin_reaches_the_edge_in_every_corner() {
+        // The report said "only top-left can be zero". Every corner must honour zero,
+        // because the clamp at the end of `position` is symmetric.
+        let screen = (1920u32, 1040u32);
+        let (w, h) = (400i32, 100i32);
+        for (corner, expected) in [
+            (Corner::TopLeft, (0, 0)),
+            (Corner::TopRight, (screen.0 as i32 - w, 0)),
+            (Corner::BottomLeft, (0, screen.1 as i32 - h)),
+            (
+                Corner::BottomRight,
+                (screen.0 as i32 - w, screen.1 as i32 - h),
+            ),
+        ] {
+            let style = PopupStyle {
+                screen_margin: 0,
+                corner,
+                width: w as u32,
+                height: Some(h as u32),
+                scale_percent: 100,
+                ..PopupStyle::default()
+            };
+            assert_eq!(style.position(screen), expected, "corner {corner:?}");
+        }
+    }
+
+    #[test]
     fn a_zero_margin_puts_the_popup_flush_against_the_usable_edge() {
         // The user asked for zero and got a gap: an earlier fix forced a minimum
         // because a zero margin used to vanish behind the taskbar. The real cure is

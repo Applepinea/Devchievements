@@ -32,6 +32,8 @@
 | [0007](0007-ipc-and-spool.md) | IPC 与 Spool 传输设计 | `Accepted` |
 | [0018](0018-extension-detects-desktop-judges.md) | 扩展只做检测，判定与呈现留在桌面端 | `Accepted` |
 | [0019](0019-browser-activity-counters.md) | 浏览器活动用独立计数列，成就读用户汇总 | `Accepted` |
+| [0020](0020-freshness-policy-in-ingest-path.md) | 新鲜度策略在摄取路径生效，中间档走汇总不弹窗 | `Accepted` |
+| [0021](0021-cross-repository-statistics.md) | 每日等级与累计成就按跨仓库合计，新增全局每日投影 | `Accepted` |
 | 0006 | 数据模型与投影设计 | 目标 Phase 1 |
 
 | 0008 | Outbox 与通知所有权状态机 | 目标 Phase 1 |

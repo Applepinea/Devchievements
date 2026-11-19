@@ -12,6 +12,13 @@
 //! state machine entry. Merging is a PRESENTATION concern (spec 16.6), so it belongs
 //! at delivery time: one event produced N rows, the user must see one popup.
 //!
+//! # Digested events are folded here too
+//!
+//! Spec 16.3's middle band queues one summary row per event, but the user must see
+//! one summary for the whole replay, not fifty. The fold happens at delivery time for
+//! the same reason the popup merge does: storage tracks one state machine per intent,
+//! presentation decides what the user actually sees.
+//!
 //! # The crash rule, restated because it is easy to get wrong
 //!
 //! Spec 17.9: persist `display_attempted_at` **before** the popup appears. If the
@@ -19,7 +26,9 @@
 //! again; it becomes `delivery_unknown` and relies on the gallery's new-unlock marker
 //! so the user can still find it.
 
-use devchievements_notifications::{present_event, NotificationItem, Presentation, Rarity};
+use devchievements_notifications::{
+    present_event, DigestSummary, NotificationItem, Presentation, Rarity,
+};
 use sqlx::{Row, SqlitePool};
 
 /// An outbox row that is ready to be shown.
@@ -103,6 +112,9 @@ impl OutboxProcessor {
 
         let mut shown = 0usize;
         let mut unknown = 0usize;
+        // One summary for the whole call (spec 16.3), accumulated across events.
+        let mut digest: Option<DigestSummary> = None;
+        let mut digest_rows: Vec<PendingNotification> = Vec::new();
 
         for group in group_by_event(rows) {
             let presentation = presentation_for(&group);
@@ -111,6 +123,17 @@ impl OutboxProcessor {
                 for row in &group {
                     self.mark(&row.notification_id, "suppressed").await?;
                 }
+                continue;
+            }
+
+            if let Presentation::Digest(summary) = presentation {
+                // The attempt is recorded only when the folded summary is actually
+                // shown, so a crash before that shows it again instead of losing it.
+                digest = Some(match digest {
+                    Some(acc) => acc.merged_with(summary),
+                    None => summary,
+                });
+                digest_rows.extend(group);
                 continue;
             }
 
@@ -131,6 +154,34 @@ impl OutboxProcessor {
                     for row in &group {
                         if exhausted {
                             // Never claim success we did not achieve.
+                            self.mark(&row.notification_id, "delivery_unknown").await?;
+                        } else {
+                            self.requeue(&row.notification_id).await?;
+                        }
+                    }
+                    if exhausted {
+                        unknown += 1;
+                    }
+                }
+            }
+        }
+
+        if let Some(summary) = digest {
+            for row in &digest_rows {
+                self.mark_attempt(&row.notification_id).await?;
+            }
+
+            match sink.present(&Presentation::Digest(summary)) {
+                DisplayOutcome::Shown => {
+                    for row in &digest_rows {
+                        self.mark(&row.notification_id, "completed").await?;
+                    }
+                    shown += 1;
+                }
+                DisplayOutcome::NotShown => {
+                    let exhausted = digest_rows.iter().all(|r| r.attempts + 1 >= max_attempts);
+                    for row in &digest_rows {
+                        if exhausted {
                             self.mark(&row.notification_id, "delivery_unknown").await?;
                         } else {
                             self.requeue(&row.notification_id).await?;
@@ -242,6 +293,13 @@ fn group_by_event(rows: Vec<PendingNotification>) -> Vec<Vec<PendingNotification
 
 /// Build the presentation for one event's rows.
 pub fn presentation_for(group: &[PendingNotification]) -> Presentation {
+    // A digest row is already a summary, so it short-circuits the merge: there is
+    // exactly one row per event under the digest policy, and merging a summary with
+    // itself is meaningless.
+    if let Some(summary) = group.iter().find_map(digest_for) {
+        return Presentation::Digest(summary);
+    }
+
     let mut items = Vec::new();
     let mut had_plain_commit = false;
 
@@ -257,6 +315,44 @@ pub fn presentation_for(group: &[PendingNotification]) -> Presentation {
     }
 
     present_event(items, had_plain_commit)
+}
+
+/// Resolve a digest row into the summary it carries (spec 16.3).
+///
+/// The row already holds the fold: storage wrote it with the titles it unlocked, so
+/// delivery does not have to re-read the achievements table to say what happened.
+fn digest_for(row: &PendingNotification) -> Option<DigestSummary> {
+    if row.kind != "digest_summary" {
+        return None;
+    }
+
+    let payload: serde_json::Value = serde_json::from_str(&row.payload).ok()?;
+    let events = payload.get("events")?.as_u64()? as usize;
+    let unlocks = payload
+        .get("unlocks")?
+        .as_array()?
+        .iter()
+        .filter_map(|v| v.as_str())
+        .map(title_of)
+        .collect();
+
+    Some(DigestSummary {
+        events,
+        unlocks,
+        omitted_unlocks: 0,
+    })
+}
+
+/// The display title for an achievement or daily-rank id.
+fn title_of(id: &str) -> String {
+    if let Some(rank) = id.strip_prefix("daily:") {
+        return format!("{} Day", humanise(rank));
+    }
+    devchievements_achievements::builtin_achievements()
+        .into_iter()
+        .find(|a| a.achievement_id == id)
+        .map(|a| a.name.clone())
+        .unwrap_or_else(|| humanise(id))
 }
 
 /// Resolve an outbox row into a mergeable item, if it describes a reward.

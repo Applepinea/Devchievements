@@ -256,6 +256,43 @@ async function main() {
       unlocked.some((row) => row.achievement_id === "first_pr_merged"),
       JSON.stringify(unlocked),
     );
+    const outbox = await query(dir, "SELECT kind FROM outbox");
+    check(
+      "nothing was queued for display either",
+      outbox.length === 0,
+      JSON.stringify(outbox),
+    );
+  }
+
+  console.log("");
+  console.log("an activity from this morning is summarised, not celebrated (spec 16.3)");
+  {
+    const dir = fresh("digest");
+    browserRecord(dir, {
+      kind: "pull_request",
+      event_id: "pull_request_merged:pr:11",
+      number: 11,
+      merged: true,
+      ageMs: 11 * 60 * 1000,
+    });
+    const out = runOnce(dir);
+    check("the record is ingested", /ingested=1/.test(out), out);
+    check(
+      "no window is opened",
+      !/NOTIFY popup/.test(out),
+      out,
+    );
+    check(
+      "one summary is shown instead",
+      /NOTIFY digest/.test(out),
+      out,
+    );
+    const unlocked = await query(dir, "SELECT achievement_id FROM unlocked_achievements");
+    check(
+      "the unlock is still real",
+      unlocked.some((row) => row.achievement_id === "first_pr_merged"),
+      JSON.stringify(unlocked),
+    );
   }
 
   console.log("");

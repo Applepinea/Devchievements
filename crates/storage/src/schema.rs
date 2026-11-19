@@ -16,10 +16,14 @@
 /// Version applied by the current schema.
 ///
 /// Bumped to 2 when the browser-activity counters were added to
-/// `repository_projection`. Version 1 databases are upgraded in place by
-/// `ingest::migrate`, which adds any column listed in [`COLUMN_UPGRADES`] that the
-/// table does not already have -- additive, so no event or projection row is lost.
-pub const SCHEMA_VERSION: i64 = 3;
+/// `repository_projection`, to 3 for `browser_reports_rejected`, and to 4 for
+/// `daily_global_projection` + `schema_meta.global_commit_total`.
+///
+/// Version 1-3 databases are upgraded in place by `ingest::migrate`: new columns come
+/// from [`COLUMN_UPGRADES`], new tables from [`SCHEMA_SQL`] (`CREATE TABLE IF NOT
+/// EXISTS`), and the new global projection is backfilled from the per-repository rows
+/// that are already correct. Nothing is dropped, so no event and no unlock is lost.
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// Columns added after version 1, as `(table, column, SQL type)`.
 ///
@@ -110,6 +114,26 @@ CREATE TABLE IF NOT EXISTS daily_projection (
     date_policy             INTEGER NOT NULL,
     updated_at              INTEGER NOT NULL,
     PRIMARY KEY (canonical_repository_id, local_date)
+);
+
+-- One row per LOCAL DATE across every repository (spec 14.1, checklist T1).
+--
+-- Why this table exists at all: the daily rank is about the user's day, not about one
+-- repository's day. Three commits in A, two in B and one in C is a six-commit day, and
+-- six is Rare. Reading per-repository rows and taking one of them made it Common.
+--
+-- Kept as its own table rather than a `canonical_repository_id = ''` row in
+-- `daily_projection`: that table's primary key includes the repository, so a sentinel
+-- would make every reader guess whether an id is real, and the Repositories page would
+-- have to filter it out.
+CREATE TABLE IF NOT EXISTS daily_global_projection (
+    local_date   TEXT PRIMARY KEY NOT NULL,
+    commit_count INTEGER NOT NULL DEFAULT 0,
+    daily_rank   TEXT,
+    -- The policy in force when the row was written, same reason as above (spec 12).
+    timezone     TEXT NOT NULL,
+    date_policy  INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL
 );
 
 -- Repository-wide counters, kept incrementally so a commit never scans history.

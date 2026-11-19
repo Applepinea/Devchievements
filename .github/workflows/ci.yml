@@ -1,14 +1,19 @@
 # .github/workflows/ci.yml
 #
-# 基础 CI（规范 §30.1）：格式检查、静态检查、单元测试、构建。
-# 完整的发布流水线（多平台、多 Git 版本矩阵、签名）属于 Phase 4b（§40.2）。
+# 基础 CI（规范 §30.1）：格式检查、静态检查、单元测试、构建，
+# 外加跨 Git 版本的行为实验矩阵（规范 §9.7，ADR-0003）。
+# 发布流水线（安装包、签名、更新源）在 release.yml（§40.2）；多平台构建按
+# ADR-0017 不做，因为没有人支持那些目标。
 #
-# STATUS: this file ran for the first time on 2026-11-17 and failed, which is how
-# two real defects were found: a pnpm version conflict in this file, and a commit
-# parser that only accepted the loose-object shape.
+# STATUS: this file first ran on 2026-11-17 and failed, which is how two real
+# defects were found: a pnpm version conflict in this file, and a commit parser
+# that only accepted the loose-object shape.
 #
-# The git-version matrix below still does not pin git versions: the runners have no
-# per-version package, so that step is an honest placeholder, not a passing test.
+# The git-version-matrix job downloads pinned PortableGit builds and runs the
+# experiment harness against each of them, so the minimum supported Git version
+# in ADR-0003 is a measured number instead of a documented guess. The versions
+# are pinned on purpose: testing whatever is current would move the target every
+# month and still say nothing about the floor.
 
 name: CI
 
@@ -52,7 +57,19 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test
+        # This already replays the recorded traces: crates/golden-tests runs the
+        # fixture replay and crates/git-hooks checks the fixture index and the
+        # post-rewrite stdin shape (spec §9.7). The step below repeats them under
+        # their own name so that coverage is readable in the job log.
         run: cargo test --workspace
+
+      - name: Replay recorded Git traces
+        # Committed fixtures, never regenerated: they are the frozen record the
+        # engine is tested against. If a change alters their meaning it has to
+        # change them explicitly, which is the point.
+        run: |
+          cargo test -p devchievements-golden-tests
+          cargo test -p devchievements-git-hooks --test trace_fixtures
 
       - name: Build
         run: cargo build --workspace
@@ -95,7 +112,184 @@ jobs:
       - name: Build extension
         run: pnpm --filter @devchievements/extension build
 
-  # The git-version matrix job was removed with the Windows-only scope change
-  # (ADR-0017). It ran on ubuntu-latest, never pinned the versions it claimed to
-  # test, and printing a warning is not coverage. Multi-version hook experiments
-  # remain unimplemented and are tracked in STATUS.md rather than faked here.
+  git-version-matrix:
+    name: Git ${{ matrix.git }} behaviour
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 2.54.0 is the release the committed fixtures were recorded on (see
+        # packages/golden-tests/fixtures/git-traces/index.json); 2.40.1 and 2.30.2
+        # are the floor candidates. 2.20.1 was measured too and cannot run the
+        # harness at all: it has no git init -b, so it is not a candidate.
+        git: ["2.30.2", "2.40.1", "2.54.0"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # PortableGit is the only per-version Windows package git-for-windows
+      # publishes, and it ships as a 7z self-extractor. The -o target is honoured
+      # by these builds but was silently ignored by 2.20.1, so where git landed is
+      # verified here rather than assumed.
+      - name: Unpack PortableGit ${{ matrix.git }}
+        shell: pwsh
+        run: |
+          $version = "${{ matrix.git }}"
+          $root = Join-Path $env:RUNNER_TEMP "git-$version"
+          $exe = Join-Path $env:RUNNER_TEMP "PortableGit-$version-64bit.7z.exe"
+          $url = "https://github.com/git-for-windows/git/releases/download/v$version.windows.1/PortableGit-$version-64bit.7z.exe"
+          Write-Host "downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile $exe
+          Start-Process -FilePath $exe -ArgumentList "-y", "-o$root" -Wait
+          $git = Join-Path $root "cmd/git.exe"
+          for ($i = 0; $i -lt 60; $i++) {
+            if (Test-Path $git) { break }
+            Start-Sleep -Seconds 2
+          }
+          if (-not (Test-Path $git)) {
+            throw "PortableGit did not unpack into $root"
+          }
+          Write-Host "unpacked $git"
+
+      - name: Put this Git version first on PATH
+        shell: pwsh
+        run: |
+          $version = "${{ matrix.git }}"
+          $root = Join-Path $env:RUNNER_TEMP "git-$version"
+          # usr/bin carries the POSIX sh and sed that scenarios 05 and 13 need;
+          # without them those two leg would measure a missing shell, not Git.
+          foreach ($d in @("cmd", "mingw64/bin", "usr/bin")) {
+            (Join-Path $root $d) | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+          # The recorder runs git with stdout redirected to a file under TEMP. With
+          # a TEMP inside the user profile that spawn fails on the development host
+          # and every field comes back empty, which reads like a Git difference but
+          # is not one. Keeping TEMP inside the checkout makes that failure mode
+          # impossible here as well.
+          $tmp = Join-Path $env:GITHUB_WORKSPACE ".tmp"
+          New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+          "TEMP=$tmp" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TMP=$tmp" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Check that this leg really runs ${{ matrix.git }}
+        # If the PATH edit above quietly failed, every leg would test the image
+        # default and the whole matrix would be a lie with a green tick.
+        shell: pwsh
+        run: |
+          $expected = "${{ matrix.git }}"
+          $actual = (git --version).Trim()
+          Write-Host "git --version -> $actual"
+          if ($actual -notlike "*$expected*") {
+            throw "wrong git on PATH: wanted $expected, got $actual"
+          }
+          where.exe git
+
+      - name: Build the hook recorder
+        # Plain cargo, not scripts/cargo-run.mjs: that wrapper points at the local
+        # toolchain under _toolchain/, which does not exist on a runner.
+        run: cargo build --release --manifest-path scripts/git-experiments/hook-recorder-rs/Cargo.toml
+
+      - name: Record every scenario on this Git version
+        # The harness exits 0 even when a scenario tears, so the exit code proves
+        # nothing; the assertion step below is what decides pass or fail. It also
+        # never writes into the committed fixtures: everything lands under
+        # scripts/git-experiments/.out/, which is gitignored on purpose.
+        run: node scripts/git-experiments/run-experiments.mjs
+
+      # Every value below was measured, not assumed: three real PortableGit builds
+      # on one Windows 11 host produced identical results for these fields, and the
+      # 2.54.0 column matches the committed fixtures. Anything that differs is a
+      # real behaviour difference between Git versions and has to be understood
+      # before this job can pass.
+      - name: Assert the behaviour against the recorded contract
+        shell: pwsh
+        run: |
+          $summaryPath = "scripts/git-experiments/.out/all-summary.json"
+          if (-not (Test-Path $summaryPath)) { throw "no summary at $summaryPath" }
+          $summary = Get-Content -Raw $summaryPath | ConvertFrom-Json
+
+          $expectedVersion = "${{ matrix.git }}"
+          Write-Host "recorded with: $($summary.git_version) on $($summary.host.platform)/$($summary.host.arch)"
+          if ($summary.git_version -notlike "*$expectedVersion*") {
+            throw "summary says $($summary.git_version), expected $expectedVersion"
+          }
+          if ($summary.host.platform -ne "win32") {
+            throw "summary was recorded on $($summary.host.platform), expected win32"
+          }
+
+          # counts/order/kinds/dirs/parents/branches are flattened to strings so the
+          # whole contract fits in one readable table instead of a nested blob.
+          $flat = @{}
+          foreach ($s in $summary.scenarios) {
+            $counts = ($s.hook_counts.PSObject.Properties | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join ","
+            $flat[$s.scenario] = @{
+              counts   = $counts
+              order    = ($s.order -join ",")
+              reflog   = [bool]$s.reflog_all_true
+              kinds    = ($s.rewrite_kinds -join ",")
+              dirs     = ($s.git_dir_kinds -join ",")
+              parents  = ($s.parents_shape -join ",")
+              branches = ($s.branches -join ",")
+            }
+          }
+
+          $expected = @{
+            "01-plain-commit"               = @("post-commit=2", "post-commit,post-commit", $true, "", "main", "1,2", "main")
+            "02-amend"                      = @("post-commit=2,post-rewrite=1", "post-commit,post-commit,post-rewrite", $true, "amend", "main", "1", "main")
+            "03-amend-then-commit"          = @("post-commit=3,post-rewrite=1", "post-commit,post-commit,post-rewrite,post-commit", $true, "amend", "main", "1,2", "main")
+            "04-rebase"                     = @("post-commit=6,post-rewrite=1", "post-commit,post-commit,post-commit,post-commit,post-commit,post-commit,post-rewrite", $true, "rebase", "main", "1,2", "main,topic")
+            "05-interactive-rebase-reword"  = @("post-commit=3", "post-commit,post-commit,post-commit", $true, "", "main", "1,2", "main")
+            "06-merge-no-ff"                = @("post-commit=3,post-merge=1", "post-commit,post-commit,post-commit,post-merge", $true, "", "main", "1,2", "main,feature")
+            "07-merge-ff"                   = @("post-commit=2,post-merge=1", "post-commit,post-commit,post-merge", $true, "", "main", "1,2", "main,topic")
+            "08-empty-commit"               = @("post-commit=2", "post-commit,post-commit", $true, "", "main", "1,2", "main")
+            "09-cherry-pick"                = @("post-commit=3", "post-commit,post-commit,post-commit", $true, "", "main", "1,2", "main,src")
+            "10-squash"                     = @("post-commit=4,post-merge=1", "post-commit,post-commit,post-commit,post-merge,post-commit", $true, "", "main", "1,2", "main,sq")
+            "11-worktree"                   = @("post-commit=2", "post-commit,post-commit", $true, "", "main,worktree", "1,2", "main,wtbranch")
+            "12-custom-hooks-path"          = @("post-commit=1", "post-commit", $true, "", "main", "1", "main")
+            "13-existing-hook-chaining"     = @("", "", $false, "", "", "", "")
+            "14-submodule"                  = @("post-commit=2", "post-commit,post-commit", $true, "", "main", "1,2", "main")
+            "15-sparse-checkout"            = @("post-commit=3", "post-commit,post-commit,post-commit", $true, "", "main", "1,2", "main")
+          }
+
+          $problems = @()
+          foreach ($name in $expected.Keys) {
+            if (-not $flat.ContainsKey($name)) { $problems += "${name}: missing from the summary"; continue }
+            $row = $flat[$name]
+            $want = $expected[$name]
+            $pairs = @("counts", "order", "reflog", "kinds", "dirs", "parents", "branches")
+            for ($i = 0; $i -lt $pairs.Count; $i++) {
+              if ("$($row[$pairs[$i]])" -ne "$($want[$i])") {
+                $problems += "${name}: $($pairs[$i]) was [$($row[$pairs[$i]])], expected [$($want[$i])]"
+              }
+            }
+          }
+          if ($summary.scenarios.Count -ne 15) {
+            $problems += "expected 15 scenarios, got $($summary.scenarios.Count)"
+          }
+
+          # Scenario 13 removes the recorder to prove an existing user hook still
+          # runs, so it legitimately records nothing; the proof is in result instead.
+          $chaining = $summary.scenarios | Where-Object { $_.scenario -eq "13-existing-hook-chaining" }
+          if (-not $chaining.result.commit_ok) { $problems += "13: the commit did not succeed" }
+          if (-not $chaining.result.user_hook_ran) { $problems += "13: the existing user hook did not run" }
+
+          if ($problems.Count -gt 0) {
+            $problems | ForEach-Object { Write-Host "FAIL $_" }
+            throw "$($problems.Count) behaviour difference(s) on Git $expectedVersion"
+          }
+          Write-Host "OK: 15 scenarios match the recorded contract on Git $expectedVersion"
+
+      - name: Upload the raw traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: git-experiments-${{ matrix.git }}
+          path: scripts/git-experiments/.out
+          retention-days: 7
+

@@ -19,6 +19,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
 const appExe = path.join(repoRoot, "apps", "desktop", "src-tauri", "target", "debug", "devchievements-desktop.exe");
 const hostExe = path.join(repoRoot, "target", "debug", "devchievements-native-host.exe");
+// The host only serves the origin the browser passes as argv[1].
+const HOST_ORIGIN = "chrome-extension://gfgbmedanlpminnlbbdefojbgphoekbj/";
 const scratch = path.join(__dirname, ".login-mapping");
 
 const SHA_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -64,7 +66,7 @@ function sendReport(dataDir, sha, login) {
       author_login: login,
     },
   };
-  return spawnSync(hostExe, [], {
+  return spawnSync(hostExe, [HOST_ORIGIN], {
     input: frame(message),
     env: { ...process.env, DEVCH_DATA_DIR: dataDir },
     timeout: 30000,

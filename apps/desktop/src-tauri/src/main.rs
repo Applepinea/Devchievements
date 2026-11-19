@@ -59,6 +59,8 @@ macro_rules! app_commands {
             commands::remove_asset,
             commands::import_sound,
             commands::available_sounds,
+            commands::preview_sound,
+            commands::preview_sound_slots,
             commands::open_data_folder,
             commands::clear_data,
             commands::open_window,
@@ -66,6 +68,16 @@ macro_rules! app_commands {
             commands::update_status,
             commands::prepare_update,
             commands::clear_update_snapshot,
+            commands::list_themes,
+            commands::apply_theme,
+            commands::import_theme,
+            commands::export_theme,
+            commands::reset_theme,
+            commands::remove_theme,
+            commands::list_builtin_achievements,
+            commands::list_user_achievements,
+            commands::add_achievement,
+            commands::remove_achievement,
         ]
     };
 }
@@ -96,6 +108,13 @@ const COMMAND_FLAGS: &[&str] = &[
     "--add-achievement",
     "--import-asset",
     "--import-sound",
+    "--preview-sound",
+    "--import-theme",
+    "--export-theme",
+    "--apply-theme",
+    "--reset-theme",
+    "--list-themes",
+    "--remove-theme",
     "--install-hooks",
     "--register-shortcut",
     "--notify-shell",
@@ -202,6 +221,7 @@ mod local_helper;
 pub(crate) mod popup;
 mod preflight;
 mod settings;
+mod theme_store;
 pub(crate) mod toast;
 mod update;
 
@@ -262,22 +282,25 @@ impl DeliverySink for DesktopSink {
                 let overrides = devchievements_sound::SoundOverrides {
                     slots: prefs.sound_overrides.clone(),
                 };
-                let selection = audio::play_for_with(
+                // Held to the end of this arm: the sound is in flight while it lives, so the
+                // next presentation waits for it, but the popup below is still opened the
+                // moment the sound STARTS rather than a second later.
+                let playing = audio::play_for_with(
                     &audio::request_for(&popup.primary_id, to_sound_rarity(popup.rarity)),
                     &overrides,
                     prefs.volume,
                     prefs.muted,
                 );
-                match selection {
+                match &playing {
                     // Spec 44.4 accepts the start of playback as the end of the
-                    // latency budget, so it is stamped where it happens rather than
-                    // guessed by whoever reads the log.
-                    Some(s) => println!(
+                    // latency budget, so it is stamped when the device was handed the
+                    // buffer rather than when the caller happened to read the clock.
+                    Some(played) => println!(
                         "SOUND play id={} from={:?} volume={} at={}",
-                        s.sound,
-                        s.source,
+                        played.selection().sound,
+                        played.selection().source,
                         prefs.volume,
-                        now_millis()
+                        played.started_at_ms()
                     ),
                     None => println!("SOUND suppressed muted={}", prefs.muted),
                 }
@@ -344,19 +367,40 @@ impl DeliverySink for DesktopSink {
                 let overrides = devchievements_sound::SoundOverrides {
                     slots: prefs.sound_overrides.clone(),
                 };
-                match audio::play_for_with(
+                // Held to the end of the drain: a commit chime and the popup that follows it
+                // are heard one after the other, never on top of each other.
+                let playing = audio::play_for_with(
                     &devchievements_sound::SoundRequest::Commit,
                     &overrides,
                     prefs.volume,
                     prefs.muted,
-                ) {
-                    Some(selection) => println!(
+                );
+                match &playing {
+                    Some(played) => println!(
                         "SOUND play id={} from={:?} at={}",
-                        selection.sound,
-                        selection.source,
-                        now_millis()
+                        played.selection().sound,
+                        played.selection().source,
+                        played.started_at_ms()
                     ),
                     None => println!("SOUND suppressed muted={}", prefs.muted),
+                }
+                SHOWN.fetch_add(1, Ordering::Relaxed);
+            }
+            Presentation::Digest(summary) => {
+                // Spec 16.3: the middle band is summarised, not celebrated. No window,
+                // no sound -- the events happened while the user was away, and the
+                // gallery already carries the new-unlock badges for the real rewards.
+                println!(
+                    "DIGEST events={} unlocks={:?} omitted={} headline={:?}",
+                    summary.events,
+                    summary.unlocks,
+                    summary.omitted_unlocks,
+                    summary.headline()
+                );
+                // The tray tooltip is the one always-visible surface a tray-only app
+                // has, so the summary lands there instead of vanishing into the log.
+                if let Some(tray) = self.app.tray_by_id("main") {
+                    let _ = tray.set_tooltip(Some(summary.headline()));
                 }
                 SHOWN.fetch_add(1, Ordering::Relaxed);
             }
@@ -807,6 +851,11 @@ struct SettingsView {
     start_with_windows: bool,
     /// UI language: `system`, `en` or `zh-CN`.
     language: String,
+    /// What had to be dropped when the settings file was read, if anything.
+    ///
+    /// Without this the page silently shows defaults for fields the user did write,
+    /// which is how "my sliders reset themselves" becomes unexplainable.
+    load_warning: Option<String>,
 }
 
 /// One login mapping, as a list of pairs so the UI can edit them in order.
@@ -833,7 +882,7 @@ struct StatusView {
 
 #[tauri::command]
 fn get_settings() -> SettingsView {
-    let stored = settings::Settings::load(&settings_path());
+    let (stored, report) = settings::Settings::load_with_report(&settings_path());
     let data_dir = default_data_dir();
     SettingsView {
         emails: stored.emails,
@@ -869,6 +918,7 @@ fn get_settings() -> SettingsView {
             &data_dir.to_string_lossy(),
             std::env::var("USERPROFILE").ok().as_deref(),
         ),
+        load_warning: report.message(),
     }
 }
 
@@ -1165,7 +1215,7 @@ fn prompt_missing_webview() {
 #[cfg(windows)]
 fn another_instance_is_running() -> bool {
     use windows::core::HSTRING;
-    use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError};
+    use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
     use windows::Win32::System::Threading::CreateMutexW;
 
     // Per user, via the name Windows gives us; two users may each run their own copy.
@@ -1232,9 +1282,7 @@ fn request_show_from_running_copy() {}
 fn listen_for_show_requests(app: tauri::AppHandle) {
     use windows::core::HSTRING;
     use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Threading::{
-        CreateEventW, INFINITE, WaitForSingleObject,
-    };
+    use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
 
     std::thread::spawn(move || {
         let name = HSTRING::from(SHOW_EVENT);
@@ -1256,11 +1304,9 @@ fn listen_for_show_requests(app: tauri::AppHandle) {
             let _ = unsafe { windows::Win32::System::Threading::ResetEvent(event) };
             println!("SHOW requested by a second launch");
             let handle = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                match open_main_window(&handle) {
-                    Ok(()) => println!("WINDOW opened reason=second-launch"),
-                    Err(e) => println!("WINDOW FAILED error={e}"),
-                }
+            let _ = app.run_on_main_thread(move || match open_main_window(&handle) {
+                Ok(()) => println!("WINDOW opened reason=second-launch"),
+                Err(e) => println!("WINDOW FAILED error={e}"),
             });
         }
         let _ = unsafe { CloseHandle(event) };
@@ -1852,6 +1898,129 @@ fn main() {
         }
     }
 
+    // Theme packages: import, export and reset, for the page's buttons and for tests.
+    // The validation is the same either way, which is the point of routing the page
+    // through these instead of giving it its own path.
+    if let Some(i) = std::env::args().position(|a| a == "--import-theme") {
+        let Some(path) = std::env::args().nth(i + 1) else {
+            println!("THEME FAILED: --import-theme needs a path");
+            std::process::exit(2);
+        };
+        match commands::import_theme(path) {
+            Ok(name) => {
+                println!("THEME OK name={name}");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("THEME FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if let Some(i) = std::env::args().position(|a| a == "--export-theme") {
+        let Some(path) = std::env::args().nth(i + 1) else {
+            println!("THEME FAILED: --export-theme needs a path");
+            std::process::exit(2);
+        };
+        match commands::export_theme(path) {
+            Ok(target) => {
+                println!("THEME EXPORTED {target}");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("THEME FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if let Some(i) = std::env::args().position(|a| a == "--apply-theme") {
+        let Some(name) = std::env::args().nth(i + 1) else {
+            println!("THEME FAILED: --apply-theme needs a name");
+            std::process::exit(2);
+        };
+        match commands::apply_theme(name) {
+            Ok(()) => {
+                println!("THEME ACTIVE");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("THEME FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if std::env::args().any(|a| a == "--reset-theme") {
+        match commands::reset_theme() {
+            Ok(()) => {
+                println!("THEME RESET");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("THEME FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if std::env::args().any(|a| a == "--list-themes") {
+        let view = commands::list_themes();
+        // One line per theme, so a test can assert on the list without parsing JSON
+        // and a human running it by hand can read the result.
+        for theme in &view.themes {
+            println!(
+                "THEME name={} builtin={}",
+                theme.name,
+                if theme.builtin { "yes" } else { "no" }
+            );
+        }
+        match view.active {
+            Some(name) => println!("THEME ACTIVE name={name}"),
+            None => println!("THEME ACTIVE none"),
+        }
+        std::process::exit(0);
+    }
+
+    if let Some(i) = std::env::args().position(|a| a == "--remove-theme") {
+        let Some(name) = std::env::args().nth(i + 1) else {
+            println!("THEME FAILED: --remove-theme needs a name");
+            std::process::exit(2);
+        };
+        match commands::remove_theme(name) {
+            Ok(()) => {
+                println!("THEME REMOVED");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("THEME FAILED: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Preview one sound slot without the UI. Exists so a test can prove the preview
+    // selects what the settings say, which a click cannot demonstrate.
+    if let Some(i) = std::env::args().position(|a| a == "--preview-sound") {
+        let Some(slot) = std::env::args().nth(i + 1) else {
+            println!("SOUND FAILED: --preview-sound needs a slot");
+            std::process::exit(2);
+        };
+        let report = commands::preview_sound(slot);
+        println!(
+            "SOUND PREVIEW slot={} id={} source={} played={}",
+            std::env::args().nth(i + 1).unwrap_or_default(),
+            report.sound,
+            report.source,
+            report.played
+        );
+        if let Some(reason) = report.reason {
+            println!("SOUND PREVIEW REASON {reason}");
+        }
+        std::process::exit(0);
+    }
+
     // Import a sound from a path. The dialog only produces the path this takes.
     if let Some(i) = std::env::args().position(|a| a == "--import-sound") {
         let Some(path) = std::env::args().nth(i + 1) else {
@@ -2264,9 +2433,8 @@ fn main() {
                     let handle = app.handle().clone();
                     std::thread::spawn(move || {
                         std::thread::sleep(std::time::Duration::from_millis(1500));
-                        let outcome = async_std::task::block_on(
-                            commands::show_popup_preview(handle),
-                        );
+                        let outcome =
+                            async_std::task::block_on(commands::show_popup_preview(handle));
                         match outcome {
                             Ok(()) => println!("PREVIEW command returned ok"),
                             Err(e) => println!("PREVIEW command failed: {e}"),

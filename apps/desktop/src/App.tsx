@@ -12,6 +12,7 @@ const Activity = lazy(() => import("./pages/Activity"));
 const Repositories = lazy(() => import("./pages/Repositories"));
 const About = lazy(() => import("./pages/About"));
 const Settings = lazy(() => import("./pages/Settings"));
+const Builder = lazy(() => import("./pages/Builder"));
 // Loaded only when the wizard is actually shown, so a returning user never pays for it.
 const Welcome = lazy(() => import("./pages/Welcome"));
 
@@ -23,6 +24,7 @@ const PAGES = [
   { id: "gallery", label: "Achievements", component: Gallery },
   { id: "activity", label: "Activity", component: Activity },
   { id: "repositories", label: "Repositories", component: Repositories },
+  { id: "builder", label: "Builder", component: Builder },
   { id: "settings", label: "Settings", component: Settings },
   { id: "about", label: "About", component: About },
 ] as const;

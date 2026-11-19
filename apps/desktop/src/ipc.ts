@@ -178,6 +178,13 @@ export interface SettingsView {
   githubLogins: LoginMapping[];
   filters: FilterSet;
   popup: PopupStyle;
+  /**
+   * What had to be dropped when the settings file was read.
+   *
+   * `null` means the file parsed cleanly. A string means fields the user DID write
+   * were ignored, so the page shows a banner instead of silently displaying defaults.
+   */
+  loadWarning: string | null;
 }
 
 export interface StatusView {
@@ -291,6 +298,30 @@ export const importAsset = (path: string) => invoke<StoredAsset>("import_asset",
 export const removeAsset = (name: string) => invoke<void>("remove_asset", { name });
 export const importSound = (path: string) => invoke<StoredAsset>("import_sound", { path });
 export const availableSounds = () => invoke<string[]>("available_sounds");
+
+/** What a sound preview played (spec 19). */
+export interface SoundPreview {
+  /** The sound id that was chosen. */
+  sound: string;
+  /** Which rule chose it: BuiltIn, RarityCustom, GlobalCustom, ... */
+  source: string;
+  /** Whether anything reached the audio device. */
+  played: boolean;
+  /** Why nothing was played, when nothing was. */
+  reason: string | null;
+}
+
+/**
+ * Play the sound the current settings select for one slot.
+ *
+ * Read-only on the settings side: it plays what a real notification would play, so the
+ * user can hear the difference between slots before a commit happens.
+ */
+export const previewSound = (slot: string) =>
+  invoke<SoundPreview>("preview_sound", { slot });
+
+/** The slots the page offers, so the list is not duplicated in two languages. */
+export const previewSoundSlots = () => invoke<string[]>("preview_sound_slots");
 export const uiReady = (view: string) => invoke<void>("ui_ready", { view });
 
 /** One prerequisite, as the Rust preflight reports it. */
@@ -331,3 +362,78 @@ export const openExternal = (url: string) => invoke<void>("open_external", { url
  */
 export const uiLanguage = (lang: string, sample: string) =>
   invoke<void>("ui_language", { lang, sample });
+
+/** One row of the theme list (spec 23). */
+export interface ThemeSummary {
+  name: string;
+  /** The synthesised default: it cannot be renamed or deleted. */
+  builtin: boolean;
+}
+
+export interface ThemeListView {
+  themes: ThemeSummary[];
+  /**
+   * Which theme's style is in effect.
+   *
+   * `null` means the stored style matches no theme — a slider was moved — so the page
+   * says "modified" instead of naming a theme that is not actually in effect.
+   */
+  active: string | null;
+}
+
+export const listThemes = () => invoke<ThemeListView>("list_themes");
+export const applyTheme = (name: string) => invoke<void>("apply_theme", { name });
+/** Returns the stored name, so the page can say which entry appeared. */
+export const importTheme = (path: string) => invoke<string>("import_theme", { path });
+/** Returns the path written. */
+export const exportTheme = (path: string) => invoke<string>("export_theme", { path });
+export const resetTheme = () => invoke<void>("reset_theme");
+export const removeTheme = (name: string) => invoke<void>("remove_theme", { name });
+
+/** A user achievement rule (spec 22). Flat on the wire: see the builder crate. */
+export type RuleExpr =
+  | { op: "condition"; metric: UserMetric; at_least: number }
+  | { op: "all"; children: RuleExpr[] }
+  | { op: "any"; children: RuleExpr[] };
+
+export type UserMetric =
+  | "commits"
+  | "pull_requests_merged"
+  | "releases"
+  | "streak_days";
+
+export interface UserAchievement {
+  id: string;
+  name: string;
+  description: string;
+  rule: RuleExpr;
+  version: number;
+}
+
+/**
+ * Store a user achievement definition.
+ *
+ * The definition travels as JSON text so the page cannot hand Rust a pre-parsed rule
+ * that skipped `definition::validate`; the same entry point the CLI uses is the one
+ * the form uses.
+ */
+export const addAchievement = (definition: unknown) =>
+  invoke<string>("add_achievement", { definition: JSON.stringify(definition) });
+
+/** Remove one user achievement. */
+export const removeAchievement = (id: string) => invoke<void>("remove_achievement", { id });
+
+/** The stored user achievements. */
+export const listAchievements = () => invoke<UserAchievement[]>("list_user_achievements");
+
+/** Built-in achievement ids and names, for the "this name is taken" message. */
+export interface BuiltinAchievementSummary {
+  id: string;
+  name: string;
+  description: string;
+  rarity: string;
+  hidden: boolean;
+}
+
+export const listBuiltinAchievements = () =>
+  invoke<BuiltinAchievementSummary[]>("list_builtin_achievements");

@@ -12,6 +12,8 @@ import {
   importAsset,
   importSound,
   availableSounds,
+  previewSound,
+  previewSoundSlots,
   listAssets,
   removeAsset,
   showPreview,
@@ -19,6 +21,13 @@ import {
   exportDiagnostics,
   getUnlinkedGithubLogins,
   linkGithubLogin,
+  listThemes,
+  applyTheme,
+  importTheme,
+  exportTheme,
+  resetTheme,
+  removeTheme,
+  type ThemeSummary,
   type UnlinkedLogin,
 } from "../ipc";
 import { t, tf } from "../i18n";
@@ -90,6 +99,87 @@ export default function Settings() {
   // not linked yet, so this list is a to-do rather than an error log.
   const [waiting, setWaiting] = useState<UnlinkedLogin[]>([]);
   const [linkNotice, setLinkNotice] = useState<string>("");
+
+  // Theme packages (spec 23). The list is kept next to the settings so the section
+  // renders without a second round trip, and it is refreshed after every action
+  // because apply/import/delete all change what "active" means.
+  const [themes, setThemes] = useState<ThemeSummary[]>([]);
+  const [activeTheme, setActiveTheme] = useState<string | null>(null);
+  const [themeNotice, setThemeNotice] = useState("");
+
+  const refreshThemes = useCallback(async () => {
+    try {
+      const view = await listThemes();
+      setThemes(view.themes);
+      setActiveTheme(view.active);
+    } catch {
+      // Cosmetic: a theme list that cannot be read must not break the page.
+    }
+  }, []);
+
+  // `success` is already-translated text: passing a key here would hide the literal
+  // from scripts/check-i18n.mjs, which only sees literal t() calls.
+  const runThemeAction = useCallback(
+    async (action: () => Promise<unknown>, success: string) => {
+      setThemeNotice("");
+      try {
+        await action();
+        setThemeNotice(success);
+      } catch (e) {
+        setThemeNotice(tf("Failed: {error}", { error: e instanceof Error ? e.message : String(e) }));
+      }
+      await refreshThemes();
+      // Applying or resetting a theme writes the popup style through the settings
+      // document, so the sliders below have to show the new values.
+      try {
+        setSettings(await getSettings());
+      } catch {
+        /* the list is already correct; the slider block will catch up on reload */
+      }
+    },
+    [refreshThemes],
+  );
+
+  const importThemeFile = useCallback(async () => {
+    const picked = await openFileDialog(["json"]);
+    if (!picked) return;
+    await runThemeAction(() => importTheme(picked), t("Theme imported"));
+  }, [runThemeAction]);
+
+  const exportThemeFile = useCallback(async () => {
+    // No save dialog here: the native dialog only produces a path for open, and
+    // inventing one silently would write somewhere the user did not choose.
+    const target = window.prompt(t("Path to write the theme package to"));
+    if (!target) return;
+    await runThemeAction(() => exportTheme(target), t("Theme exported"));
+  }, [runThemeAction]);
+
+  // Sound preview (spec 19). The slot list comes from Rust so the page cannot offer a
+  // slot the selector does not understand.
+  const [previewSlots, setPreviewSlots] = useState<string[]>([]);
+  const [soundPreviewNotice, setSoundPreviewNotice] = useState("");
+
+  const playPreview = useCallback(async (slot: string) => {
+    setSoundPreviewNotice("");
+    try {
+      const report = await previewSound(slot);
+      if (report.played) {
+        setSoundPreviewNotice(tf("Playing {slot}: {sound} ({source})", { slot, sound: report.sound, source: report.source }));
+      } else {
+        // Not playing is a legitimate outcome: muted, volume zero, or a missing file.
+        // Saying WHY is the difference between a useful preview and a dead button.
+        setSoundPreviewNotice(
+          tf("{slot} selects {sound}, but nothing was played: {reason}", {
+            slot,
+            sound: report.sound,
+            reason: report.reason ?? "unknown",
+          }),
+        );
+      }
+    } catch (e) {
+      setSoundPreviewNotice(tf("Preview failed: {error}", { error: e instanceof Error ? e.message : String(e) }));
+    }
+  }, []);
 
   const refreshWaiting = useCallback(async () => {
     try {
@@ -230,7 +320,9 @@ export default function Settings() {
     void refreshAssets();
     void refreshSounds();
     void refreshWaiting();
-  }, [load, refreshAssets, refreshSounds, refreshWaiting]);
+    void refreshThemes();
+    previewSoundSlots().then(setPreviewSlots, () => setPreviewSlots([]));
+  }, [load, refreshAssets, refreshSounds, refreshWaiting, refreshThemes]);
 
   const save = async () => {
     if (!settings) return;
@@ -258,6 +350,13 @@ export default function Settings() {
       {settings.emails.length === 0 ? (
         <p className="notice">
           {t("No identity yet. Add the email you commit with; until then the companion records nothing rather than guessing which commits are yours.")}
+        </p>
+      ) : null}
+
+      {settings.loadWarning ? (
+        <p className="error" data-testid="settings-load-warning">
+          {t("Some settings could not be read and were reset to their defaults.")}{" "}
+          {settings.loadWarning}
         </p>
       ) : null}
 
@@ -385,6 +484,45 @@ export default function Settings() {
       >
         {t("Add mapping")}
       </button>
+
+      <h3>{t("Themes")}</h3>
+      <p className="muted">
+        {t("A theme is a saved popup appearance. Importing one is validated: a package that contains code or a stylesheet is refused, and ranges are clamped.")}
+      </p>
+      <p className="muted">
+        {activeTheme
+          ? tf("Active theme: {name}", { name: activeTheme })
+          : t("Popup appearance has been edited, so no theme is active.")}
+      </p>
+      <ul className="events" data-testid="theme-list">
+        {themes.map((theme) => (
+          <li key={theme.name}>
+            <span className="kind">{theme.name}</span>
+            <span className="muted">{theme.builtin ? t("built in") : t("imported")}</span>
+            <button
+              disabled={theme.name === activeTheme}
+              onClick={() => void runThemeAction(() => applyTheme(theme.name), t("Theme applied"))}
+            >
+              {t("Apply")}
+            </button>
+            {theme.builtin ? null : (
+              <button
+                onClick={() => void runThemeAction(() => removeTheme(theme.name), t("Theme deleted"))}
+              >
+                {t("Delete")}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <div className="row">
+        <button onClick={() => void importThemeFile()}>{t("Import theme…")}</button>
+        <button onClick={() => void exportThemeFile()}>{t("Export theme…")}</button>
+        <button onClick={() => void runThemeAction(resetTheme, t("Default theme restored"))}>
+          {t("Restore default")}
+        </button>
+      </div>
+      {themeNotice ? <p className="muted">{themeNotice}</p> : null}
 
       <h3>{t("Popup appearance")}</h3>
       <p className="muted">
@@ -533,6 +671,18 @@ export default function Settings() {
         <span className="notice">{soundNotice}</span>
       </div>
       <p className="tiny">{sounds.join(" · ") || t("No sounds found.")}</p>
+
+      <p className="muted">
+        {t("Preview the sound a real notification would play for each slot. It uses your saved overrides and volume, so what you hear is what you get.")}
+      </p>
+      <div className="row" data-testid="sound-preview">
+        {previewSlots.map((slot) => (
+          <button key={slot} onClick={() => void playPreview(slot)}>
+            {slot}
+          </button>
+        ))}
+      </div>
+      <p className="notice" data-testid="sound-preview-notice">{soundPreviewNotice}</p>
 
       <h3>{t("Custom assets")}</h3>
       <p className="muted">
