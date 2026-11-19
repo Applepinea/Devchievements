@@ -1,119 +1,158 @@
 # Devchievements
 
-让每一次代码提交，都成为值得记录的成就。
+Achievements for Developers — 一个本地优先的开发者成就系统。
 
-Devchievements 是一个面向开发者的本地成就系统，通过 Git 和 GitHub 活动记录开发过程，并将其转化为成就、等级和每日里程碑。
+Devchievements 观察你本机的 Git 活动（以及浏览器扩展上报的 GitHub 活动），把它变成**永久成就**、
+**每日等级**和**连续活跃记录**，用弹窗和提示音庆祝。所有数据默认只存在本机。
 
-项目希望为日常开发增加一些游戏化元素，让代码提交、项目进展和长期积累变得更加直观。
+> 独立第三方软件，与 GitHub 官方没有任何隶属、认可或赞助关系。
 
-功能
+---
 
-成就系统
+## 功能
 
-* 根据 Git 和 GitHub 活动解锁成就。
-* 支持编程、项目、社区协作和开发里程碑等成就类别。
-* 支持隐藏成就。
-* 成就解锁记录永久保存。
+### 永久成就（解锁一次，永不撤销）
 
-每日等级
+内置目录当前有 **9 个**成就，全部按官方统计口径判定，且**累计类成就是跨仓库合计**
+（Century 是「任何地方累计 100 次」，不是「某个仓库 100 次」）：
 
-* 根据每日 Commit 次数计算等级进度。
-* 记录每日开发活动。
-* 查看历史活动和等级变化。
-* 支持每日里程碑。
+| 成就 | 条件 | 稀有度 |
+| --- | --- | --- |
+| First Commit | 第 1 次有效提交 | Common |
+| Getting Started | 累计 10 次有效提交 | Common |
+| Century | 累计 100 次有效提交 | Rare |
+| Thousand Commits | 累计 1000 次有效提交 | Legendary |
+| First Release | 发布第 1 个 Release | Uncommon |
+| Merged | 第 1 个 PR 被合并 | Uncommon |
+| One Week | 连续 7 天活跃 | Rare |
+| One Month | 连续 30 天活跃 | Epic |
+| A Year of Code（隐藏） | 连续 365 天活跃 | Legendary |
 
-桌面通知
+**关于连续天数**：`One Week` / `One Month` / `A Year of Code` 的规则已存在并有测试，
+但评估快照里的连续天数字段目前恒为 0，所以它们**还不会真正解锁**。这是已知缺口，
+见 [STATUS.md](STATUS.md) 的「已知功能缺口」一节。
 
-* Windows 桌面成就通知。
-* 成就解锁和等级提升提醒。
-* 通知提示音。
-* 支持自定义通知图片、音效和窗口大小。
+### 每日等级
 
-自定义设置
+按**当天所有仓库合计**的有效提交次数给一个等级（三个仓库各 3 / 2 / 1 次就是当天 6 次，不是三次独立的小额），
+一天最多升一次，升级时弹窗：
 
-* 自定义部分成就规则和统计范围。
-* 调整通知外观和提示音。
-* 管理成就及活动记录。
+| 次数 | 等级 |
+| --- | --- |
+| 0 | 无 |
+| 1–3 | Common |
+| 4–9 | Uncommon |
+| 10–19 | Rare |
+| 20+ | Legendary |
 
-本地数据管理
+### 通知
 
-* 成就和活动记录保存在本地。
-* 区分本地 Git 事件与 GitHub 平台事件。
-* 外部账号授权遵循最小权限原则。
+- 普通提交只播一声轻提示音，**不弹窗**；成就解锁与等级升级才弹窗。
+- 同一事件触发多项奖励时合并成一个弹窗（主标题取最高稀有度）。
+- 事件按年龄分档：10 分钟内正常通知，10 分钟–24 小时**汇总为一条**（不弹窗），
+  超过 24 小时只静默更新统计。
+- 弹窗走应用自己的窗口，不使用 Windows 系统通知（见 ADR-0015）。
 
-平台支持
+### 自定义
 
-操作系统
+- **主题**：保存/切换/导入/导出/恢复默认的弹窗外观；主题包不得包含任何代码，导入时校验。
+- **Popup Editor**：宽高、缩放、角落、边距、圆角、图标尺寸、透明度、动画、模糊、显示时长。
+- **资源与音效**：导入图片（读魔数校验真实类型）与 WAV 音效；**每个槽位可试听**，
+  试听走真实选择路径（用你自己的覆盖配置与音量），静音时会告诉你「选中了什么、为什么没播」。
+- **事件过滤器**：按仓库/作者/时间范围筛选用户口径的统计。
+- **自定义成就**：写一条规则（JSON 或表单），在满足它的那次提交上解锁。
+- **历史导入**：导入已有仓库的历史提交，静默入库、幂等、可续传。
 
-操作系统	支持情况
-Windows 10 / 11	首发目标平台
-Linux	暂不支持
-macOS	暂不支持
+---
 
-平台集成
+## 支持范围
 
-平台	支持情况
-GitHub	当前开发目标
-哔哩哔哩	暂不支持
-YouTube	暂不支持
+**只支持 Windows 10 / 11。** macOS 与 Linux 不在支持范围内，这是产品决定而不是遗漏，
+理由见 [ADR-0017](docs/decisions/0017-windows-only.md)。
 
-目前项目专注于 Windows 桌面环境和 GitHub 生态，暂不计划在首发版本中支持其他平台。
+---
 
-成就分类
+## 安装
 
-分类	内容
-💻 编程	Commit、代码活动及编程里程碑
-🌐 社区	GitHub 协作与社区贡献
-🚀 项目	仓库创建、项目开发和版本发布
-🧠 学习	技术学习与知识积累
-🔍 探索	技术探索与工具使用
-🏅 里程碑	长期开发目标
-👀 隐藏	特殊条件触发的隐藏成就
+下载安装包（`Devchievements.msix` 或 `Devchievements_0.1.0_x64-setup.exe`）并运行。安装器会检查 WebView2 运行库并在缺失时安装它。
 
-技术架构
+**未做**：安装包没有 Authenticode 代码签名（没有证书），SmartScreen 会提示；更新签名的 `.sig`
+是另一回事，两者不能互相替代。
 
-项目采用模块化、事件驱动的设计，将数据采集、成就判定、本地存储和通知处理分离。
+---
 
-主要设计方向：
+## 构建
 
-* 使用统一事件模型处理不同来源的开发活动。
-* 将成就判定逻辑与具体平台的数据接口分离。
-* 使用本地数据库保存成就和活动记录。
-* 通过事件队列处理通知任务。
-* 为未来增加其他平台集成预留接口。
+环境准备（每个新 Shell 都要做一次）：
 
-开发计划
+```powershell
+. .\scripts\env.ps1
+```
 
-Devchievements 目前仍在开发中，以下为计划实现的功能：
+桌面应用是**独立**的 cargo 工程（MSVC 工具链），其余 crate 走 workspace（GNU 工具链）：
 
-* [ ]	核心成就判定引擎
-* [ ]	Git 活动采集
-* [ ]	本地数据库与事件持久化
-* [ ]	Windows 桌面通知
-* [ ]	每日等级与里程碑
-* [ ]	主界面与成就图鉴
-* [ ]	GitHub 浏览器集成
-* [ ]	自定义成就与通知设置
-* [ ]	安装程序与自动更新
+```powershell
+# 桌面应用（前端 + Rust）
+cmd /c "scripts\dev\build-desktop.bat build"
 
-具体功能和开发进度以实际发布版本为准。
+# 安装包（NSIS）
+cmd /c "scripts\dev\build-installer.bat"
 
-安装
+# 浏览器扩展
+pnpm --filter @devchievements/extension build
+```
 
-目前尚未发布正式版本。
+发布构建要用 `DEVCH_RELEASE=1`，并提前在环境里给出 `TAURI_SIGNING_PRIVATE_KEY` 与
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`；缺任何一个都会直接失败，不会回退到仓库里的开发密钥。
 
-安装包将在项目发布后通过 GitHub Releases 提供。
+---
 
-参与开发
+## 测试
 
-欢迎提交 Bug 反馈、功能建议和成就设计。
+一条命令验证整个仓库：
 
-* Bug 反馈：通过 GitHub Issues 提交。
-* 功能建议：欢迎提出新的成就类型和使用体验改进建议。
-* 代码贡献：请在提交 Pull Request 前阅读项目贡献指南。
+```powershell
+node scripts/verify.mjs
+```
 
-许可证
+它依次跑 fmt / clippy / test / build / build-wasm / 桌面端类型检查 / 桌面端前端构建 /
+桌面端 Rust 构建 / 扩展构建 / 扩展单元测试，日志写入 `.verify/`。
 
-本项目采用 GNU General Public License v3.0（GPL-3.0） 开源协议。
+当前实测（2026-11-19 23:42）：**10 个步骤全部 PASS，483 个 Rust 测试通过**（另有 3 个 ignored）。
 
-详细内容请参阅 LICENSE。
+另有真实的端到端脚本（真二进制、真数据库、真窗口），见 `scripts/e2e/`，例如：
+
+```powershell
+node scripts/e2e/full-loop.mjs          # git commit → hook → helper → spool → companion → sqlite → 弹窗
+node scripts/e2e/ui-pages.mjs           # 真实窗口逐页打开
+node scripts/e2e/csp.mjs                # 内联脚本注入被 CSP 拒绝
+node scripts/e2e/theme-manager.mjs      # 主题导入/应用/导出/恢复默认
+node scripts/e2e/builder-form.mjs       # 自定义成就真实解锁
+```
+
+**未验证**：CI 从未在 GitHub Actions 上运行过（本机没有仓库）；Authenticode 签名无证书。
+
+---
+
+## 隐私
+
+- **默认全部本地。** 不上传 Git 历史、提交信息、仓库名、PR 标题或任何活动记录。
+- **没有遥测**，也没有开关可以打开它。
+- 诊断导出默认脱敏（仓库与路径别名化）；只有显式勾选才包含真实名称，且警告写在文件本身里。
+- **Privacy Mode**：隐藏仓库名与详情，用通用文案，并同样作用于日志与诊断。
+- Privacy Mode **不是加密**，不要当成加密。
+
+---
+
+## 文档
+
+- [STATUS.md](STATUS.md) — 唯一权威进度表，含每个状态对应的复现命令
+- [AGENTS.md](AGENTS.md) — 本仓库的强制工程约束
+- [docs/decisions/](docs/decisions/) — 架构决策记录（ADR）
+- [docs/spec/](docs/spec/) — 产品规范拆分件
+
+---
+
+## 许可证
+
+GNU General Public License v3.0 or later（GPL-3.0-or-later）。全文见 [LICENSE](LICENSE)。

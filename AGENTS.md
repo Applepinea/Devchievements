@@ -240,6 +240,15 @@ Phase 0 → Phase 1 → Phase 2a → 【检查点 A】 → Phase 2b → 【检�
 - **不得**用静态假数据冒充真实数据（所有页面必须从真实数据库读取）。
 - **不得**编造性能数据。没有实测的指标一律标记为未验证。
 - 当前环境无法验证的平台/能力 → `Platform Unverified`，并在 CI 中至少完成构建验证。
+- **测试名声称「无副作用」时，必须断言副作用集合为空。** 名字里带 `quiet` / `silent` /
+  `no_` / `never` / `not_` 的测试，断言对象必须是 `side_effect_intents`、outbox
+  （`pending_notifications()` / `outbox_counts()`）、弹窗列表之类的**副作用集合本身**，而不是
+  只看返回值、谓词或某个计数器。若该层根本没有副作用集合（纯函数、纯谓词），名字里就不要出现
+  「无声」，改用描述实际断言的说法。
+  - 反例：`an_old_record_still_counts_but_is_quiet` 只断言 `ingested == 1`，
+    通知被发出也照样通过。
+  - 正例：同文件 `empty_commits_produce_no_output` 断言 `EngineOutput::is_empty()`，
+    而它同时覆盖 `state_changes` 与 `side_effect_intents` 两个集合。
 
 ---
 

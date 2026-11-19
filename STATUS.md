@@ -7,7 +7,7 @@
 >
 > **不可混淆的五件事**（AGENTS.md §10）：代码已写 / 构建已过 / 自动化测试已过 / 实际运行测试已过 / 平台兼容性已验证。
 >
-> 最后更新：2026-11-18 —— **Phase 4b 进行中（安装包打通、更新机制接入、发布流水线就位）**
+> 最后更新：2026-11-19 —— **Phase 4b 进行中**（安装包/商店/扩展链路已打通；本轮修 14 项审查待办，见下方「已知功能缺口」与本轮变更记录）
 
 ---
 
@@ -20,34 +20,113 @@ node scripts/verify.mjs
 当前结果（真实执行，非推测）：
 
 ```text
-PASS  fmt                      1245 ms
-PASS  clippy                   3876 ms
-PASS  test                    15657 ms   440 tests, 48 suites, 0 failed
-PASS  build                    1664 ms
-PASS  build-wasm                548 ms
-PASS  desktop-ui-build         2476 ms
-PASS  desktop-build           11184 ms
-PASS  extension-build         10234 ms
-PASS  extension-test            218 ms
+PASS  fmt                       731 ms
+PASS  clippy                    937 ms
+PASS  test                     8854 ms   483 tests passed, 0 failed, 3 ignored
+PASS  build                     400 ms
+PASS  build-wasm                190 ms
+PASS  desktop-ui-typecheck     1479 ms
+PASS  desktop-ui-build          424 ms
+PASS  desktop-build            8279 ms
+PASS  extension-build          1197 ms
+PASS  extension-test            191 ms
 ALL CHECKS PASSED
 ```
 
-桌面应用是**独立**的 cargo 工程（不能用 workspace 的 GNU 工具链），所以它的测试不在
-`verify.mjs` 里，要单独跑：`scripts/dev/build-desktop.bat test`（当前 6 个测试，
-覆盖更新前的数据库快照/回滚与公钥漂移检查）。
+最后实测：**2026-11-19 23:42**（`.verify/summary.json` 有机器可读记录）。改这行数字的唯一方法
+是重跑 `node scripts/verify.mjs`。
+
+桌面 crate 的单元测试不在 `verify.mjs` 里（它是独立 cargo 工程），单独跑：
+`cmd /c "scripts\dev\build-desktop.bat test --bins"` → **51 passed**（audio 14、settings 8、
+theme_store 8、preflight 7、update 6、autostart 4、local_helper 4）。
+
+桌面应用是**独立**的 cargo 工程（不能用 workspace 的 GNU 工具链；用 workspace 的 cargo 会
+报 `dlltool.exe: program not found`），所以它的测试不在 `verify.mjs` 里。它自己的构建步骤
+`desktop-build` 在 `verify.mjs` 里，但**只构建不测试**，单测要单独跑（上一段）。
 
 原始日志与机器可读摘要：`.verify/`
+
+### 本轮新增/修改的 e2e 脚本（全部实测 PASS）
+
+| 脚本 | 检查项 | 覆盖 |
+| --- | --- | --- |
+| `scripts/e2e/theme-manager.mjs` | 30 | 内置主题存在/激活、导入、应用改 `settings.json`、重启后保留、含 `script` 包被拒、含 `css` 包被拒、越界值被夹、导出可回导、内置不可删、删用户主题、恢复默认、**恢复默认不删用户主题包** |
+| `scripts/e2e/builder-form.mjs` | 17 | 表单线格式被接受、写进 settings、rule version、导出 round-trip、**真实 hook 记录 + 真实 drain 后解锁**、超深被拒、条件过多被拒、shadows built-in 被拒、重复 id 被拒、拒绝后不落盘 |
+| `scripts/e2e/csp.mjs` | 8 | 启动无 CSP 违规、bundle 渲染、注入的 inline `<script>` 不执行、渲染进程报告 `script-src` 违规、inline 事件处理器不执行、inline style 仍生效、应用仍响应、native 侧无 renderer 错误 |
+| `scripts/e2e/release-signing.mjs` | 15 | 开发路径用仓库密钥并警告；`DEVCH_RELEASE=1` 缺 key → 退出码 7 且不回落；缺口令 → 退出码 7；两者齐全 → **CI 提供的 key/口令不被覆盖**；脚本自身文档化两条路径 |
+| `scripts/e2e/sound-preview.mjs` | 24 | 试听走**真实选择路径**：内置文件、用户覆盖、每日等级槽位都播「按当前设置真正会响的那一个」；静音与音量 0 如实报告「选了哪个、为什么没播」而不是假装播放；用户文件被删后回落内置而不是变哑；悬空覆盖仍能回答并说明它想要哪个 |
+| `scripts/e2e/cross-repository.mjs` | 9 | 三个仓库的提交合起来算每日等级与累计成就；仓库页仍显示各自计数；重建投影后数字不变 |
+| `scripts/e2e/sound-serialized.mjs` | 7 | 一次投递连续两条通知时，第二个声音必须等第一个放完（有等待 865 ms / 去掉等待 22 ms，而第一个声音本身 778 ms）；两个弹窗都出现；`PlaySoundW` 没有拒收缓冲区 |
+
+`scripts/e2e/` 现有 **46** 个脚本；本轮新增 7 个（`theme-manager` / `builder-form` / `csp` /
+`release-signing` / `sound-preview` / `cross-repository` / `sound-serialized`），修改 6 个
+（`browser-achievement` +4 项、`ui-pages` 加 builder 页、`native-host` / `browser-to-popup` /
+`login-mapping` 随 origin 校验调整、`preview-button` 修掉对自己诊断行的误判）。
+
+### T14 测试名审计（quiet / silent / no / never）
+
+规则（已写入 [AGENTS.md](AGENTS.md) §10）：名字声称「无声」或「无副作用」的测试，**断言对象必须是副作用集合本身**。
+
+审查范围：`crates/**` 里所有名字含 `quiet` / `silent` / `no_` / `never` / `not_` 的测试。
+
+**已符合**（断言的是副作用集合）：
+
+| 测试 | 断言对象 |
+| --- | --- |
+| `empty_commits_produce_no_output` | `EngineOutput::is_empty()`（同时覆盖 `state_changes` 与 `side_effect_intents`） |
+| `facts_that_do_not_count_produce_no_changes` | `EngineOutput` 的两个集合 |
+| `a_second_merged_pull_request_counts_but_does_not_announce_again` | `out.side_effect_intents.is_empty()` |
+| `already_unlocked_achievements_are_not_re_announced` | `side_effect_intents` 里没有对应项 |
+| `importing_history_records_commits_silently` | `outbox_counts()` 为空 |
+| `a_quiet_policy_records_the_unlock_without_queueing_a_notification` | `SELECT … FROM outbox` 为空 |
+| `a_plain_commit_produces_a_sound_and_no_popup` | `Present**ation` 变体（纯函数，无副作用集合，名字描述的是返回值） |
+| `an_old_record_still_counts_but_is_quiet` | **本轮补齐**：`report.queued_notifications == 0` + `pending_notifications()` 为空（原先只看 `ingested`） |
+| `a_weekend_replay_produces_no_windows` | **本轮新增**：`sink.shown` 里没有 `Popup`，且 `shown <= 1` |
+| `a_digested_commit_with_no_reward_stays_completely_silent` | **本轮新增**：`server.shown.is_empty()` + outbox 无行 |
+| `a_plain_commit_plays_a_sound_and_shows_no_popup` | `sink.shown[0] == Presentation::SoundOnly`（列表本身） |
+| `not_a_repository_is_reported_and_never_a_panic` | 断言的是 `Err` 而非 panic（无副作用集合可断言） |
+| `an_unavailable_channel_never_blocks_the_hook` | 断言返回类型；该层没有副作用集合 |
+| `a_nonexistent_local_time_does_not_panic` | 同上，断言不 panic |
+
+**没有需要改名或补断言的项。** 三处「名字声称安静但断言不足」的地方（上面标**本轮**的三行）已在本轮修复。
+
+### 「Tested」抽查：命令能复现
+
+T10 的验收要求是「随机抽 10 个 Tested 项，命令都能复现」。2026-11-19 抽查结果：
+
+| 状态项 | 复现命令 | 结果 |
+| --- | --- | --- |
+| 1.21 Builder 复杂度 | `node scripts/cargo-run.mjs test -p devchievements-achievements` | exit 0 |
+| 1.16 Golden Tests | `node scripts/cargo-run.mjs test -p devchievements-golden-tests` | exit 0 |
+| 2a.14 通知队列与合并 | `node scripts/cargo-run.mjs test -p devchievements-notifications` | exit 0（27 项） |
+| 2a.20 新鲜度三档 | `node scripts/cargo-run.mjs test -p devchievements-companion-core` | exit 0（20 项） |
+| 3b.8 浏览器活动成就 | `node scripts/e2e/browser-achievement.mjs` | PASSED |
+| 4a.1 资源安全 | `node scripts/cargo-run.mjs test -p devchievements-assets` | exit 0 |
+| 4a.3 主题包 + 界面 | `node scripts/e2e/theme-manager.mjs` | PASSED（30 项） |
+| 4a.8 Achievement Builder | `node scripts/e2e/builder-form.mjs` | PASSED（17 项） |
+| 4b.6 多语言 | `node scripts/check-i18n.mjs` | exit 0（225/226，1 条未用） |
+| 4b.11 向导/页面可达性 | `node scripts/e2e/ui-pages.mjs` | PASSED（7 页 × 2） |
+
+另外本轮新增：`node scripts/e2e/csp.mjs` → PASSED（严格 CSP 生效，注入的内联脚本被拒）；
+`node scripts/e2e/sound-serialized.mjs` → PASSED（7 项；把令牌 `Drop` 里的等待去掉后**同一脚本失败**，第二个声音只晚 22 ms 就开播）。
 
 ---
 
 ## 当前阶段
 
-**Phase 0：项目基础与技术验证** —— `Partially Implemented`（已完成，见下）
-**Phase 1：Core Engine 与数据层** —— `Tested`（完成）
-**Phase 2a：本地 Git 到通知的真实闭环** —— `Partially Implemented`（Toast/UI 未验证）
-**Phase 2b：完整 Desktop Only 产品** —— `Partially Implemented`（跨平台仅 Windows 实测）
+| 阶段 | 状态 | 备注 |
+| --- | --- | --- |
+| Phase 0 项目基础与技术验证 | `Partially Implemented` | 归档；GitHub 仓库仍未创建 |
+| Phase 1 Core Engine 与数据层 | `Tested` | 完成 |
+| Phase 2a 本地 Git 到通知闭环 | `Tested` | Toast 通道已由自有弹窗取代（ADR-0015） |
+| Phase 2b Desktop Only 产品 | `Tested` | 仅 Windows 实测（ADR-0017） |
+| Phase 3a Browser Only | `Partially Implemented` | Outbox 队列与页面未做，详见 3a 表 |
+| Phase 3b Full Experience | `Tested` | 扩展检测 + 桌面判定（ADR-0018） |
+| Phase 4a 自定义系统 | `Tested` | 主题管理与 Achievement Builder 本轮补齐 |
+| Phase 4b 产品化与发布准备 | `Partially Implemented` | 见 4b 表；平台签名与发布流水线仍受阻 |
 
-**下一个门禁：检查点 A**（需 Phase 2a 完成）。当前**没有任何检查点被跨越。**
+**检查点 A / B / C 均已获用户明确批准**（B：「继续 phase3」；C：「进入 phase4」；4b：「继续做phase4b」）。
+当前**没有待批准的检查点**。
 
 ---
 
@@ -126,7 +205,8 @@ ALL CHECKS PASSED
 | 2a.10 | Companion 启动消费 Spool | `Tested` | 无头 Companion 真实消费并计数 |
 | 2a.11 | 最小诊断视图 | `Partially Implemented` | **数据侧完成**：`--diagnostics` 输出真实 JSON，仓库别名化、路径脱敏，12 项 e2e 校验；UI 需 WebView2 |
 | 2a.14 | 通知队列与合并（§16.4、§16.6） | `Tested` | 一个事件一个弹窗；普通提交只出声不弹窗 |
-| 2a.18 | 提示音：内置默认 + 基础播放（§19） | `Tested` | 15 个选择逻辑测试；真实提交实测；奖励音为用户提供的 achievement.wav |
+| 2a.20 | 新鲜度三档（§16.3） | `Tested` | 0–10 分钟弹窗、10 分钟–24 小时**一条汇总不弹窗**、超过 24 小时静默；`the_freshness_bands_decide_what_the_user_sees`（9m / 11m / 23h59m / 24h01m）+ `a_weekend_replay_produces_no_windows`（50 条重放 0 弹窗 ≤1 汇总）+ `browser-achievement` e2e 中间档 4 项。**未做**：汇总形态是托盘 tooltip + 日志，无独立窗口；文案未本地化；阈值不可调 |
+| 2a.18 | 提示音：内置默认 + 基础播放（§19） | `Tested` | 15 个选择逻辑测试；真实提交实测；奖励音为用户提供的 achievement.wav。**2026-11-19 补修播放本身**：缓冲区跨播放存活、两个声音不重叠（`sound-serialized` e2e 7 项，正反两跑）|
 | 2a.13 | Privacy Mode 基础行为（§26.2） | `Tested` | 26 个测试；**托盘开关 + 持久化 + 通知文案实测**（8 项 e2e） |
 | 2a.19 | 设置文件（§26.4 版本化配置） | `Tested` | `settings.json`：身份邮箱、隐私模式；未知字段忽略 |
 | 2a.12 | Crash Recovery 矩阵（§32.5） | `Partially Implemented` | 6 个场景中 4 个已真实通过；2 个需实时 IPC |
@@ -147,12 +227,12 @@ ALL CHECKS PASSED
 | 1.4 | Commit 去重键 | `Tested` | `repo_id + sha`；patch id 仅辅助 |
 | 1.5 | 用户身份识别（多邮箱） | `Tested` | 身份模型 + 优先级 + GitHub login 映射 + Git 配置读取；**未配置时禁止统计已强制** |
 | 1.6 | 时区系统 + 日界线 | `Tested` | 内置 TZDB；DST 与 04:00 边界已测 |
-| 1.7 | 每日等级与每日里程碑 | `Tested` | 14 个测试；用户阈值不影响官方口径 |
+| 1.7 | 每日等级与每日里程碑 | `Tested` | 14 个测试；用户阈值不影响官方口径；**等级看当天跨仓库合计**（ADR-0021），`cross-repository` e2e 覆盖 3/2/1 → 6 次 → Rare |
 | 1.8 | 永久成就（含 required_capabilities） | `Tested` | 13 个测试；能力由条件推导 |
 | 1.9 | 用户过滤器 | `Tested` | 18 个测试；官方口径与用户口径在类型上分离 |
-| 1.10 | 统计投影 | `Tested` | 读写 + 可重建性均已测（`rebuild_from_events` 复现同值） |
+| 1.10 | 统计投影 | `Tested` | 读写 + 可重建性均已测（`rebuild_from_events` 复现同值，**含全局每日表**）；`a_rebuild_produces_the_same_global_numbers_as_live_ingestion` 守护 |
 | 1.11 | Engine（含读集） | `Tested` | 7 个测试；读集有断言守护 |
-| 1.12 | SQLite Storage Adapter 与 SQLx 迁移 | `Tested` | 版本化 schema + 12 个真实库测试 |
+| 1.12 | SQLite Storage Adapter 与 SQLx 迁移 | `Tested` | 版本化 schema（当前 **v4**）+ 真实库测试；**迁移前自动备份**（`VACUUM INTO` 到 `backups/`，备份失败即中止迁移），v3 → v4 回填由 `upgrading_an_old_database_backs_up_first_and_keeps_every_unlock` 覆盖 |
 | 1.13 | 事件持久化 | `Tested` | 事件+投影+解锁+Outbox **同一事务**，有测试守护 |
 | 1.14 | Outbox 与通知所有权状态机（纯逻辑） | `Tested` | 18 个测试；合法转换表 + 防重复展示 |
 | 1.15 | 历史导入管线（引擎侧） | `Tested` | 用提交时间归档、幂等、可续传；跨日用例已测 |
@@ -171,7 +251,8 @@ ALL CHECKS PASSED
 
 **Phase 0：项目基础与技术验证** —— 状态 `Partially Implemented`
 
-**下一个门禁：检查点 A**（需 Phase 2a 完成）。当前**没有任何检查点被跨越。**
+> 归档节。三个遗留项里，MSVC 工具链（ADR-0014）与浏览器启动已在后续 Phase 解决；
+> 只有「GitHub 仓库」仍未创建。
 
 ---
 
@@ -185,8 +266,8 @@ ALL CHECKS PASSED
 | 0.4 | 根 STATUS.md | `Implemented` | 本文件 |
 | 0.5 | 规范拆分 docs/spec/ | `Tested` | 49 章 → 47 文件，覆盖率断言通过 |
 | 0.6 | ADR 框架与 docs/development/ | `Implemented` | 7 份有效 ADR + 模板 + 索引 |
-| 0.7 | 基础 CI | `Implemented` | `.github/workflows/ci.yml` 已写，**从未运行过**（无仓库） |
-| 0.8 | Tauri 2 启动 + React + TS | `Blocked` | 无 MSVC；GNU 目标不支持 Tauri Windows 打包。见 [ADR-0012](docs/decisions/0012-isolated-dev-toolchain.md) |
+| 0.7 | 基础 CI | `Platform Unverified` | `.github/workflows/ci.yml` 已写并通过 `scripts/check-workflows.mjs` 的静态检查（三个 workflow 全部 ok），**从未在 GitHub Actions 上真正运行**（无仓库）。多 Git 版本矩阵 `git-version-matrix` job 已配置，同样未运行 |
+| 0.8 | Tauri 2 启动 + React + TS | `Tested` | **已解除**（ADR-0014 引入 MSVC 工具链）：`scripts/dev/build-desktop.bat build` 通过，`verify.mjs` 的 `desktop-build` 每次执行；真实窗口由 `ui-pages` / `popup` / `csp` e2e 驱动 |
 | 0.9 | WXT + MV3 构建 | `Tested` | WXT 0.20.27，`verify.mjs` 每次都会重建 |
 | 0.10 | Native Messaging 最小通信 | `Implemented` | Rust 侧 framing 已实现并有单测；**浏览器联调未做**（沙箱） |
 | 0.11 | **SQLite + SQLx 读写与迁移** | `Tested` | **本轮解除阻塞**：5 个真实数据库测试全通过（往返、幂等、事务回滚、级联、重开保留） |
@@ -194,7 +275,7 @@ ALL CHECKS PASSED
 | 0.13 | MV3 CSP `wasm-unsafe-eval` 真实浏览器验证 | `Platform Unverified` | manifest 含该 CSP 且 wasm 已打包；**浏览器无法启动** |
 | 0.14 | Helper 实现方案对比 | `Tested` | **本轮补齐方案 B**：三方案全部实测。见 [ADR-0002](docs/decisions/0002-hook-helper-implementation.md) |
 | 0.15 | Git 行为实验（15 场景） | `Tested` | [git-behavior-experiments.md](docs/development/git-behavior-experiments.md) |
-| 0.16 | 最低 Git 版本结论 | `Not Started` | 只有 2.54.0 一个版本的数据。见 [ADR-0003](docs/decisions/0003-minimum-git-version.md) |
+| 0.16 | 最低 Git 版本结论 | `Implemented` | 三版本实测（2.30.2 / 2.40.1 / 2.54.0 各 15/15 场景，2.20.1 直接失败）→ **最低 2.30.x**，ADR-0003 改 `Accepted`。**未验证**：CI 矩阵从未在 GitHub Actions 上运行；2.20.1–2.30.2 之间无数据。见 [ADR-0003](docs/decisions/0003-minimum-git-version.md) 与 [git-version-matrix.md](docs/development/git-version-matrix.md) |
 | 0.17 | 分类等待窗口 | `Tested` | 实测 436–452 ms → 改 800 ms。见 [ADR-0004](docs/decisions/0004-rewrite-classification-window.md) |
 | 0.18 | trace fixtures + JSON Schema | `Tested` | 15 份 fixture，Schema 与 Rust 侧双重校验 |
 | 0.19 | 桌面上通知能力实测 | `Not Started` | Phase 0 无 Companion，无法验证 |
@@ -261,10 +342,12 @@ ALL CHECKS PASSED
 
 | 阻塞 | 影响 | 需要什么 |
 | --- | --- | --- |
-| 无 MSVC、无管理员权限 | **Tauri 无法构建**（其余 Rust 侧已完全可用） | 用户升权安装 VS Build Tools + Windows SDK |
-| 沙箱禁止浏览器启动 | MV3 CSP、扩展端到端、Native Messaging 联调 | 沙箱外运行，或手动加载扩展验证 |
+| 无 Authenticode 证书 | 安装包无代码签名，SmartScreen 会警告（更新签名 `.sig` 是另一回事，不能替代） | 购买/提供证书 |
+| 无 GitHub 仓库 | CI 与多 Git 版本矩阵**从未在 GitHub Actions 上运行**；本地已用三个 PortableGit 版本实测 | 用户创建仓库并授权 |
 | 沙箱禁止 `sh.exe` | shell 钩子链式执行、`git submodule add` | 中立环境复测 |
-| 无 GitHub 仓库 | CI 从未运行；多 Git 版本矩阵无法执行 | 用户创建仓库并授权 |
+| `cli` 命令模式无法写 HKCU | 开机自启动、native host 注册表项的真机行为 | 真机/提权环境验证 |
+
+> 已解决（历史）：MSVC 工具链（ADR-0014）、浏览器启动（`extension-load` / `native-host` e2e 已真实跑通）。
 
 ---
 
@@ -304,17 +387,37 @@ ALL CHECKS PASSED
 
 ---
 
+## 已知功能缺口
+
+本节是本轮静态审查（14 项待办）的落点。**每一项都能用一条命令复现当前结论。**
+
+| 缺口 | 状态 | 复现 / 证据 |
+| --- | --- | --- |
+| ~~每日等级与累计成就按单仓库统计（T1）~~ | **已修** | 新增 `daily_global_projection` 表（schema 4）；`load_snapshot` 改读 `global_commit_total()` 与 `daily_global_projection()`；仓库级计数照旧维护。迁移是**加表 + 从既有投影回填**（不重放事件、不撤销解锁），迁移前自动备份。复现：`node scripts/e2e/cross-repository.mjs` → 9 项 PASS（3/2/1 次提交 = 一天 6 次 = Rare）。见 [ADR-0021](docs/decisions/0021-cross-repository-statistics.md) |
+| 9 个内置成就中 5 个不可达：`first_release` / `first_pr_merged` / `streak_7` / `streak_30` / `streak_365`（T2） | **未修** | `first_release`/`first_pr_merged` 的可达性依赖浏览器计数（ADR-0019 已让它们可解锁，见 3b.8）；`streak_*` 仍不可达，因为 `StateSnapshot` 没有连续天数，`engine.rs:225` 硬编码 `longest_streak_days: 0`。**新增成就名单需用户确认** |
+| 规范 §22 line 12 的**时间范围 / 仓库 / 稀有度 / 隐藏 / 可重复**五项不在 `RuleExpr` 模型里（T7 相关） | **未做** | `crates/achievements/src/builder.rs` 的 `RuleExpr` 只有 `Condition` / `All` / `Any`，`UserMetric` 四个；`UserAchievement` 没有稀有度与可见性字段。扩模型会改数据库与统计口径，需 ADR 与用户确认 |
+| 规范 V2.5 仍写多平台 / Browser Only 三态 / Offer-Claim（T5） | **未做** | 与 ADR-0017（仅 Windows）、ADR-0018（扩展只检测）冲突。规范改动需用户确认 |
+| ~~发布构建会用仓库里的开发密钥签名~~ | **已修（T8）** | `DEVCH_RELEASE=1` 时缺 key 或口令直接退出码 7；`node scripts/e2e/release-signing.mjs` 15 项 PASS |
+| 浏览器真实链路未在真实浏览器完成端到端（T9） | **部分** | `extension-load` / `native-host` / `browser-to-popup` e2e 已用 CDP 加载未打包扩展并跑通；缺的是**真实 GitHub 提交/合并 PR/发布 Release** 三类事件的现场记录。需要用户配合 |
+| Authenticode 代码签名（4b.4） | **受阻** | 无证书；更新签名 `.sig` 不能替代 |
+| 发布流水线与多 Git 版本 CI 从未在 GitHub Actions 上运行 | **受阻** | 无仓库。本地已用 PortableGit 2.30.2 / 2.40.1 / 2.54.0 三版本实测（见 ADR-0003） |
+| 成就名与等级名未本地化 | **未做** | Rust 侧生成英文文案；等成就目录定稿 |
+| ~~`settings.json` 单个坏字段会重置整份设置（丢 `emails`）~~ | **已修（T8）** | 改为逐字段容错 + `.corrupt-<ms>.bak` 备份 + 设置页横幅；8 个单测（`settings::tests::one_bad_field_does_not_lose_the_rest` 等）。复现：`cmd /c "scripts\dev\build-desktop.bat test --bins"` → 51 passed |
+| 汇总通知无独立窗口形态，阈值不可调 | **未做** | 见 2a.20；ADR-0020「代价」一节 |
+| 播放闸门的时长只认 WAV 头 | **部分** | 导入的 mp3/ogg 交给 `PlaySoundW` 仍能响，但 `audio::wav_format` 只认 RIFF/WAVE；取不到时长时**不设闸门**（等于回到「可能被下一声截断」）。复现：`cmd /c "scripts\dev\build-desktop.bat test --bins"` → `audio::playback_tests::an_unreadable_header_never_blocks_playback`（断言的是「不挂住」，不是「也有闸门」） |
+
+---
+
 ## 下一步
 
-**需要用户决定（见 [Phase 0 报告](docs/development/phase-0-report.md#5-需要你决定的三件事)）：**
+**需要用户决定的两件事**（都不阻塞其他工作）：
 
-1. 是否提供 MSVC 环境（解锁 Tauri）。
-2. 是否在沙箱外补做 MV3 浏览器验证（成本极低）。
-3. 是否创建 GitHub 仓库（解锁 CI 与最低 Git 版本结论）。
+1. **T2**：新成就名单是否采用建议的 Legendary Day（单日 20 次）、Release Veteran（累计 10 Release）、Team Player（累计 10 PR 合并）、First Issue、First Repository，再加一个隐藏成就？连续天数成就已具备前提（T1 的全局每日投影已就绪）。
+2. **T12**：WebView2 安装器（当前仍在版本控制里）如何处理 —— 构建时下载并校验 SHA256，还是 Git LFS？
 
-**Phase 1 可以立刻开工的部分**：事件模型、身份识别、时区、投影与 Engine、每日等级、
-永久成就、Outbox 状态机、packfile 支持、Golden Tests。
-唯一与 MSVC 无关但**风险最高**的待办是 **packfile 解析**（见 risk-analysis A3）。
+T1 已于 2026-11-19 获用户批准并完成（迁移方式即「迁移前自动备份 + 从既有投影回填」，不重放事件、不撤销解锁）。
+
+**不需要确认就能继续的**：T5（规范 V2.6 文本）、T9（需要你在沙箱外配合）、T10/T11（文档）、T13 的 CI 矩阵配置、T14 的测试审计。
 
 ---
 
@@ -322,6 +425,16 @@ ALL CHECKS PASSED
 
 | 日期 | 变更 |
 | --- | --- |
+| 2026-11-19 23:42（重新打包 MSIX） | 提示音修复之后重打 MSIX 并就地升级本机安装：`scripts/msix/build-msix.mjs` 10 项全过；装进 `C:\Program Files\WindowsApps\DevchievementsCompanion_0.1.0.0_x64__zm3808zyk7ry0` 的 `devchievements-desktop.exe` 与本地 release 构建 **SHA256 一致**（`E29487D1…3AC458`，19,820,544 B）。用**已安装**的那份二进制跑 `--preview-sound common`（778 ms 的音效）耗时 1408 ms，说明等待逻辑确实在包内生效。`C:\Documents\Devchievements\` 下的 `.msix`（9,168,333 B）与 NSIS 安装包（7,003,765 B）都已换成新构建，`使用说明.txt` 重写 |
+| 2026-11-19（提示音播放器） | 用户报「音频有时无法正常播放，有时只播放出后半部分」，查出**两个独立缺陷**。①**释放后使用**：播放槽是 `Vec<u8>`，旧代码先把新数据拷进槽、再从槽里取指针交给 `PlaySoundW`，于是下一次播放会把系统仍在读的缓冲区释放掉——表现就是「只响半截」或干脆没声。改为 `Arc<Box<[u8]>>` 句柄（`PlaybackBuffer`，地址稳定、随句柄存活），指针取自这块不再移动的分配。②**互相打断**：`PlaySoundW(SND_ASYNC)` 是**替换**当前声音、不能混播，§16.6 也禁止混播；一次 drain 连续投递两条通知时，第二条把第一条截断。改为**播放令牌** `SoundPlayback`：它同时持有进程级闸门、缓冲区句柄和「必须等到放完」的义务，`Drop` 时才等待——所以「忘记等待」不可能发生，而调用方仍能决定**什么时候**等（先记日志、先开窗，再等）。时长从 WAV 头（`fmt ` 的 byte_rate + `data` 长度）算，留 60 ms 尾巴余量；通知与试听按钮走同一个 `start_buffer`，所以试听也不会盖掉通知。顺带修掉一个由本次改动**引入**的语义坑：`SOUND play ... at=` 原来在调用返回后取时间，加了等待之后就变成「声音结束时刻」——现在改成由令牌在**交给设备的那一刻**打时间戳。**实测证据（在最终代码上正反两跑）**：把 `Drop` 里的等待去掉后，`sound-serialized` e2e **失败**（第二个 `SOUND play` 只比第一个晚 **22 ms**，而第一个长 778 ms），`a_second_sound_cannot_start_while_the_first_is_still_playing` 也**失败**（第二个声音只等了 **40 ms**，第一个长 160 ms）；等待加回去后 e2e 晚 **865 ms**、桌面单测 **51 项全绿**。发布二进制另测：`--preview-sound common` 耗时 871 ms（778 + 60 余量 + 启动），`commit` 257 ms。单测 7 项（WAV 时长自解析、截断文件只按实有音频计时、无法解析的头必须立刻返回而不是挂住、已放完的声音不再等待、两次播放不重叠、令牌在第一个声音结束前不放行、缓冲区跨越调用存活）。顺带：`PlaySoundW` 返回失败时现在打印 `PlaySoundW refused the buffer (N bytes)`，不再静默——否则「有时候没声」永远查不到。**未做/未验证**：只解析 WAV 头（导入的 mp3/ogg 会被当成「时长未知」因而不设闸门）、仍用 `PlaySoundW` 而非 WASAPI 会话、多显示器/独占模式未测 |
+| 2026-11-19（MSIX 重新打包） | 把本轮改动（跨仓库统计 T1 / 提示音试听 / 主题管理 / 构建器 / CSP / 新鲜度三档）打进商店包：先确认 release 二进制**比源码旧**（源码 22:49–22:50 改过，二进制停在 22:41），重新构建 Vite 产物 + MSVC release 后再执行 `scripts/msix/build-msix.mjs`。10 项检查全过：包 9,167,475 B / 22:58:15，`signtool verify /pa` 成功、0 warning 0 error，`Get-AppxPackage` 已注册，装进 WindowsApps 的 `devchievements-desktop.exe` 与本地 release **SHA256 完全一致**（`5C978D65…AC3CA`，19,819,520 B）。用数据目录副本跑 `--diagnostics`（退出码 0）验证包内迁移：schema 3 → 4、建出 `daily_global_projection`、写出 `backups/pre-migration-v3-to-v4-1795100319802.db`（110,592 B），事件与解锁数不变。交付副本已覆盖 `C:\Documents\Devchievements\Devchievements.msix`（两侧 SHA256 相同）。**未验证**：无 Authenticode 时间戳（`File is not timestamped`）、商店审核口径、Clean 机器免信任证书安装 |
+| 2026-11-19（主题管理 + 构建器表单） | 补 T6/T7：主题包校验 crate 一直有测试，但**桌面没有任何入口**，STATUS 却把 4a.3 记为 Tested。新增 `theme_store.rs`（主题存 `themes.json`，与 settings/数据库分开，导入一个主题不会和保存设置打架）、6 个 Tauri 命令 + 6 个 CLI flag、设置页「主题」区（列表/应用/导入/导出/恢复默认/删除）；`theme-manager` e2e 30 项（含脚本包被拒、样式表包被拒、越界值被夹、重启后保留、导出可回导、恢复默认不删用户主题包）。Achievement Builder 页面：表单（commits / PR merged / releases / streak days 四个真实 metric、AND-OR、JSON 双向编辑）+ 本地超限提示 + 已存规则列表/删除；新增 `add_achievement`/`remove_achievement`/`list_user_achievements`/`list_builtin_achievements` 四个命令；`builder-form` e2e 17 项，其中「规则在满足它的那次真实提交上解锁」用真 hook 记录 + 真 companion drain 验证。**未做**：§22 line 12 的时间范围/仓库/稀有度/隐藏/可重复五项在 `RuleExpr` 模型里不存在，未擅自扩 crate schema；导出主题走 `window.prompt` 而不是原生保存对话框 |
+| 2026-11-19（弹窗边距 + 设置 BOM） | 用户报「除左上角外其他位置边距调不到 0」。根因**不在**定位算术（那部分三年前就有测试且全绿），而在调用方：`popup::place` 用 `monitor.position()` 当原点（这台机器上恒为 0,0），却用 `SPI_GETWORKAREA` 拿尺寸——`SPI_GETWORKAREA` **只描述主显示器**且**丢掉了工作区自己的 left/top 偏移**。实测用户屏幕工作区是 `{x=72, y=36, w=2488, h=1564}`（150% 缩放），于是右上/右下算出 `1932*1.5=2898` 这类**超出屏幕**的坐标，被末尾的 clamp 压回边缘，表现为「只有左上角是对的」。改为 `Monitor::work_area()`（每显示器独立，且自带原点），并删掉已成死代码的 SPI 辅助函数。实测四角 `margin=0` 现在分别落在 `72,36 / 1959,36 / 72,1449 / 1959,1449`，完全对称。**顺带修掉一个会让用户永远查不出原因的坑**：`settings.json` 若带 UTF-8 BOM（Windows PowerShell 的 `Set-Content -Encoding utf8`、记事本的「UTF-8 带 BOM」都默认写它），`serde_json` 会拒绝整份文档，于是**所有字段静默回退默认值**——从界面看就是「我改了设置它不生效」。已在 `load_with_report` 剥掉 BOM，并加测试 `a_utf8_bom_does_not_discard_the_file` 断言 margin 与自己写的值都存活。新增测试：`a_position_is_relative_to_the_screen_it_is_given_not_to_the_primary_one`、`a_zero_margin_reaches_the_edge_in_every_corner` |
+| 2026-11-19（跨仓库统计 T1 + 提示音试听） | **T1**：§14.1 的每日等级与 §13.2 的累计成就改为**跨仓库合计**。此前 A 3 次 + B 2 次 + C 1 次被算成三个独立的 3/2/1（最高 Uncommon），规范要求的是**当天 6 次 = Rare**；Century 同理永远不会在分散提交时解锁，且仪表盘总数（全局求和）与成就进度基数（单仓库）互相矛盾。新增表 `daily_global_projection`（schema 3 → 4），`load_snapshot`/`load_browser_snapshot` 改读全局；仓库级计数照旧维护只供仓库页。状态变更名拆为 `global_commit_total`，存储层用 `+1` 维护 per-repo 列——**这是实现中发现并修掉的真实缺陷**：把全局绝对值写进 per-repo 列会让 `SUM` 重复累加（测出 68920，正确答案 120）。迁移是**加表 + 从既有投影回填**，不重放事件、不撤销解锁；迁移前 `VACUUM INTO` 自动备份到 `<data>/backups/`，备份失败则中止迁移。测试：`the_daily_rank_counts_every_repository_together`、`the_commit_total_counts_every_repository_together`、`a_rebuild_produces_the_same_global_numbers_as_live_ingestion`、`upgrading_an_old_database_backs_up_first_and_keeps_every_unlock`（手工构造 v3 库），e2e `cross-repository.mjs` 9 项。ADR-0021。**提示音试听**：设置页新增每个槽位的试听按钮（commit / 5 个稀有度 / 5 个每日等级），走**真实选择路径**（用户自己的覆盖配置 + 音量），静音或音量 0 时如实报告「选中了什么、为什么没播」而不是假装播放；新增 `preview_sound` / `preview_sound_slots` 命令与 `--preview-sound` CLI；6 个单测 + `sound-preview.mjs` e2e 21 项 |
+| 2026-11-19（安全加固 T8） | **CSP**：`tauri.conf.json` 的 `csp` 由 `null` 改为严格策略（`script-src 'self'`、`object-src 'none'`、`frame-ancestors 'none'` 等）；新增 `scripts/e2e/csp.mjs`（8 项）在**真实 WebView2 窗口**里证明注入的 inline script 被拒（附真实拒绝原文），且页面 bundle 仍渲染、inline style 仍生效、应用仍响应。**native-host**：新增 `verify_origin`，只接受固定扩展 ID 的 origin，且在任何 stdin 读取之前执行；5 个单测 + `native-host` e2e 通过。**settings.json**：`load` 改为**逐字段容错**（一个坏字段不再丢掉 `emails`），坏的原文写 `.corrupt-<ms>.bak` 备份，设置页显示告警横幅；7 个单测。**发布签名**：`build-installer.bat` 分 `DEVCH_RELEASE` 与开发两条路径，发布路径缺 key 或口令时**退出码 7 直接失败**、不再静默使用仓库里的开发密钥；新增 `scripts/e2e/release-signing.mjs`（15 项，含「CI 提供的 key 不被覆盖」）。踩坑记录：`exit /b` 写在 `if defined (…)` 括号块里在本机仍上报 0，改成 `goto` 链才拿到 7 |
+| 2026-11-19（多 Git 版本证据 T13 + README T11） | **ADR-0003** 由 `Proposed` 改为 `Accepted`，最低版本 **2.30.x**：PortableGit 2.30.2 / 2.40.1 / 2.54.0 各 15/15 场景，2.20.1 连 `git init -b` 都没有；15/15 场景的 hook 顺序 / 事件数 / reflog 文本三版本逐字一致；`post-rewrite` 延迟 388.6–534.8 ms（独立复现 ADR-0004「300 ms 不够」）。**证据边界写进 ADR 本身**：CI 矩阵从未在 GitHub Actions 上运行，2.20.1–2.30.2 之间无数据，单主机单次。另发现并记录**已提交 fixture 05 是 harness 产物**（`GIT_SEQUENCE_EDITOR` 反斜杠路径被 MSYS 吃掉 + `sed -i` 不确定），fixture 与 ADR-0004 数值**未改**，登记为技术债。补 `docs/development/git-version-matrix.md`。**README 重写**：只写已实现的 9 个成就、只写 Windows、无未勾选计划表、无哔哩哔哩/YouTube/学习/探索/社区 |
+| 2026-11-19（仓库卫生 T12 + 测试审计 T14） | **T12**：`apps/desktop/src-tauri/null` 删除；`.gitignore` 新增 `apps/desktop/src-tauri/gen/schemas/` 与 `scripts/perf/.first-screen/`；取消跟踪 186 个可再生文件（磁盘副本保留）：`null` 1 + `.wxt` 7 + `gen/schemas` 4 + `.first-screen` 174。**追踪文件 578 → 392**，产物类文件 25 → 1（唯一是 WebView2 安装器，实测 1.81 MiB，与清单一致）。**T14**：把「名字声称无声就必须断言副作用集合为空」写进 [AGENTS.md](AGENTS.md) §10；审查 113 个 `quiet`/`silent`/`no_`/`never`/`not_` 测试，13 个关键项逐个核对断言对象（表见下文「T14 测试名审计」），三处断言不足的已补 |
+| 2026-11-19（新鲜度三档真正生效） | 修 T3：§16.3 的中间档（10 分钟–24 小时）此前**仍是完整弹窗**，周末重放 Spool 会弹一串「刚刚解锁」。`NotificationPolicy` 增加 `Digest` 档，`spool_consumer` 三档映射改为**无通配臂**（新档位将编译失败而不是静默回到 Inform）；存储写一行 `kind='digest_summary'`，投递时把一次投递的所有 digest 行折成**一个** `Presentation::Digest`（桌面更新托盘 tooltip、headless 打一行，均不创建窗口、不播庆祝音效）；补 ADR-0020。测试：`the_freshness_bands_decide_what_the_user_sees`（9 分钟 / 11 分钟 / 23h59m / 24h01m）、`a_weekend_replay_produces_no_windows`（50 条重放 0 弹窗 ≤1 汇总）、storage/notifications 各一个单测 |
 | 2026-11-18（拒绝即删除） | 查「并没有弹窗」的现场：报告被 §7 身份闸门拒绝后**随 Spool 消费一起删掉**，设置问题变成永久丢数据，UI 上毫无痕迹。新增 schema v3 表 `browser_reports_rejected` 保存原始 payload；设置页「等你处理」列出未关联账号并可一键关联，关联时**写回 Spool 回放**（与扩展投递同一条路径）；`unlinked-login` e2e 15 项 |
 | 2026-11-18（过期事件仍弹窗） | 修 §16.3 的执行缺陷：新鲜度原来只在消费端把「排队数」改成 0，**Outbox 行照样写、照样弹**。改为写入端策略（`Inform`/`Quiet`/`Silent`）：超过 24 小时的事件仍然解锁、仍然计统计，但不写 Outbox；解锁来源仍是 realtime。10 分钟–24 小时的「汇总通知」形态仍未实现（已知未做）|
 | 2026-11-18（浏览器成就打通） | 修「浏览器报告存进去但什么都不会发生」：Engine 新增 `evaluate_browser_event`（PR Merge / Release / Repository Created / Star Given 各自计数、解锁 §13.2 浏览器成就、**不**移动每日等级）；schema v2 加 5 列并幂等升级旧库；新增 `browser-achievement` e2e 19 项；ADR-0019 |
@@ -355,12 +468,12 @@ ALL CHECKS PASSED
 | --- | --- | --- | --- |
 | 4a.1 | 资源安全校验（magic bytes / SVG / 配额） | `Tested` | 14 个测试，含伪装成 PNG 的脚本、SVG 执行向量 |
 | 4a.2 | Popup Editor 约束与定位 | `Tested` | 15 个测试：范围钳制、四角定位、缩放 |
-| 4a.3 | 主题包校验与导入 | `Tested` | 拒绝含脚本/样式/javascript: 的主题；未来 schema 拒绝而非猜测 |
-| 4a.4 | Sound Manager | `Tested` | 导入音效 + 设置页可管理；`sound-manager` 7 项（含删除后降级不静音） |
+| 4a.3 | 主题包校验与导入 | `Tested` | 拒绝含脚本/样式/javascript: 的主题；未来 schema 拒绝而非猜测；**设置页「主题」区已接入**（列表/应用/导入/导出/恢复默认/删除），`theme-manager` e2e 30 项 |
+| 4a.4 | Sound Manager | `Tested` | 导入音效 + 设置页可管理；`sound-manager` 7 项（含删除后降级不静音）；**每槽位试听**（commit / 5 稀有度 / 5 每日等级）走真实选择路径，静音时如实报告而非假装播放；6 个单测 + `sound-preview` e2e 24 项 |
 | 4a.5 | Asset Manager | `Tested` | 导入/删除 + **接入弹窗渲染**；`asset-import` 9 项、`popup` 10 项 |
 | 4a.6 | Popup Editor | `Tested` | 宽/缩放/角落/边距/时长/圆角/图标尺寸/透明度/动画/模糊 + 实时预览；`popup` 11 项 |
 | 4a.7 | Event Filters 界面 | `Tested` | 设置页可编辑；9 项 e2e 含「不影响官方统计」 |
-| 4a.8 | Achievement Builder（JSON 模式） | `Partially Implemented`（仅缺表单界面） | 定义校验与存储 12+12 项；**用户规则现已接入评估**：`ingest_commit_with_rules` 在同一事务内用官方统计判定并复用内置成就的记录路径；`user-achievements` e2e 6 项（真实 git 提交 → hook → helper → drain → 解锁）；**表单界面仍未做** |
+| 4a.8 | Achievement Builder | `Tested` | 定义校验与存储 12+12 项；用户规则接入评估（同一事务、官方统计、复用内置记录路径）；**Builder 页面已做**：表单（4 个真实 metric / AND-OR / JSON 双向）+ 本地超限提示 + 列表/删除，`builder-form` e2e 17 项（含「真实提交触发解锁」「超限被拒」「删除不撤销已解锁」）。**未做**：时间范围 / 仓库 / 稀有度 / 隐藏 / 可重复 —— `RuleExpr` 模型里没有这些字段，属规范 §22 line 12 与实现的差距，未擅自扩 crate |
 | 4a.9 | 配置完整导入导出 | `Tested` | 11 个单元测试 + 18 项 e2e，含「失败不改变现状」 |
 
 ---
@@ -398,7 +511,8 @@ ALL CHECKS PASSED
 Phase 3a / 3b 的工作已完成为可验收状态，验收材料见
 [checkpoint-c-acceptance.md](docs/development/checkpoint-c-acceptance.md)。
 
-**状态：等待用户验收。** 按 §38，未获明确确认不进入 Phase 4a。
+**状态：已批准。** 用户以「进入 phase4」批准了检查点 C，Phase 4a / 4b 已在其后开展。
+本节保留为验收材料索引，不再表示「等待确认」。
 
 ## 支持范围
 
