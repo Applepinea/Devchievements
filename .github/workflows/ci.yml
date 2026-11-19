@@ -142,10 +142,17 @@ jobs:
         run: |
           $version = "${{ matrix.git }}"
           $root = Join-Path $env:RUNNER_TEMP "git-$version"
-          $exe = Join-Path $env:RUNNER_TEMP "PortableGit-$version-64bit.7z.exe"
-          $url = "https://github.com/git-for-windows/git/releases/download/v$version.windows.1/PortableGit-$version-64bit.7z.exe"
+          # Asset name is "64-bit" with a hyphen (verified against the GitHub
+          # release API on 2026-11-20). "64bit" 404s and GitHub serves an HTML
+          # import-map page, which Invoke-WebRequest happily saves; the unpack
+          # then fails looking for cmd/git.exe inside a web page.
+          $exe = Join-Path $env:RUNNER_TEMP "PortableGit-$version-64-bit.7z.exe"
+          $url = "https://github.com/git-for-windows/git/releases/download/v$version.windows.1/PortableGit-$version-64-bit.7z.exe"
           Write-Host "downloading $url"
           Invoke-WebRequest -Uri $url -OutFile $exe
+          if ((Get-Item $exe).Length -lt 10MB) {
+            throw "downloaded $exe is only $((Get-Item $exe).Length) bytes - not the self-extractor"
+          }
           Start-Process -FilePath $exe -ArgumentList "-y", "-o$root" -Wait
           $git = Join-Path $root "cmd/git.exe"
           for ($i = 0; $i -lt 60; $i++) {
