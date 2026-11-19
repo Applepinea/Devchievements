@@ -1,4 +1,4 @@
-//! Outbox delivery: grouping, merging, claiming, acknowledging (spec 16.4, 16.6, 17.9).
+﻿//! Outbox delivery: grouping, merging, claiming, acknowledging (spec 16.4, 16.6, 17.9).
 //!
 //! # Why delivery is separated from the state machine
 //!
@@ -350,6 +350,7 @@ fn title_of(id: &str) -> String {
     }
     devchievements_achievements::builtin_achievements()
         .into_iter()
+        .chain(devchievements_achievements::builtin_repeatable_achievements())
         .find(|a| a.achievement_id == id)
         .map(|a| a.name.clone())
         .unwrap_or_else(|| humanise(id))
@@ -384,6 +385,14 @@ fn item_for(row: &PendingNotification) -> Option<NotificationItem> {
                     is_daily_rank: false,
                 }),
             }
+        }
+        "achievement_triggered" => {
+            // Deliberately NOT a popup item. The row exists so every trigger has its
+            // own notification id and audit trail, but spec 16.4 keeps an ordinary
+            // commit to a light acknowledgement: turning each commit into a window
+            // would be a regression users would notice immediately. The trigger is
+            // still counted in the gallery, where it belongs.
+            None
         }
         "daily_rank_upgrade" => {
             let rank = payload.get("rank")?.as_str()?;

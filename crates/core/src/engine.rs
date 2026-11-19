@@ -160,6 +160,17 @@ pub enum SideEffectKind {
         /// The new rank.
         rank: crate::daily_rank::DailyRank,
     },
+    /// A repeatable achievement fired for this event.
+    ///
+    /// Carries the triggering event id as well as the achievement id because the pair
+    /// is what makes a second commit a second record rather than a duplicate. The
+    /// consumer must persist both and let the database's unique key decide.
+    RepeatableAchievementTriggered {
+        /// Stable achievement id.
+        achievement_id: String,
+        /// The event that caused this trigger.
+        triggering_event_id: String,
+    },
     /// A plain commit was recorded (light sound only by default).
     CommitRecorded,
 }
@@ -324,6 +335,32 @@ impl Engine {
                 kind: SideEffectKind::AchievementUnlocked {
                     achievement_id,
                     source: crate::UnlockSourceTag::Realtime,
+                },
+            });
+        }
+
+        // Repeatable achievements are judged against the same statistics and the same
+        // capability, but they are NOT passed to `evaluate`: that function's
+        // already-unlocked check is precisely what must not apply here. Each counted
+        // commit is one event, and the event id is carried into the intent so storage
+        // can enforce `(achievement, event)` uniqueness instead of relying on this
+        // layer remembering what it already sent.
+        let repeatable = crate::achievements::evaluate_repeatable(
+            &crate::achievements::builtin_repeatable_achievements(),
+            &statistics,
+            &[crate::achievements::Capability::LocalGit],
+        );
+        for achievement_id in repeatable {
+            out.side_effect_intents.push(SideEffectIntent {
+                // The id differs per event, which is what lets two commits produce two
+                // notifications while a replay of one commit produces none.
+                // Same shape as a permanent unlock (ach:<id>:<event>), so the
+                // notification queue has one id grammar. The achievement id differs,
+                // and the event suffix is what makes two commits two rows.
+                notification_id: format!("ach:{achievement_id}:{event_id}"),
+                kind: SideEffectKind::RepeatableAchievementTriggered {
+                    achievement_id,
+                    triggering_event_id: event_id.to_string(),
                 },
             });
         }
@@ -710,6 +747,108 @@ mod tests {
                 out.side_effect_intents.is_empty(),
                 "and nothing may be celebrated: {:?}",
                 out.side_effect_intents
+            );
+        });
+    }
+
+    /// The repeatable triggers in an output, as `(achievement, event)` pairs.
+    fn repeatable_ids(out: &crate::EngineOutput) -> Vec<(String, String)> {
+        out.side_effect_intents
+            .iter()
+            .filter_map(|i| match &i.kind {
+                SideEffectKind::RepeatableAchievementTriggered {
+                    achievement_id,
+                    triggering_event_id,
+                } => Some((achievement_id.clone(), triggering_event_id.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_counted_commit_fires_the_repeatable_achievement() {
+        with_ctx(|ctx| {
+            let out = Engine.evaluate_commit(&StateSnapshot::default(), &commit(), "e1", ctx);
+            assert_eq!(
+                repeatable_ids(&out),
+                vec![("commit_complete".to_string(), "e1".to_string())]
+            );
+        });
+    }
+
+    #[test]
+    fn two_commits_produce_two_independent_triggers() {
+        // The distinguishing property of a repeatable achievement: a previous trigger
+        // must not suppress the next one, and each carries its own event.
+        with_ctx(|ctx| {
+            let first = Engine.evaluate_commit(&StateSnapshot::default(), &commit(), "e1", ctx);
+            let second = Engine.evaluate_commit(&StateSnapshot::default(), &commit(), "e2", ctx);
+            assert_eq!(repeatable_ids(&first).len(), 1);
+            assert_eq!(
+                repeatable_ids(&second),
+                vec![("commit_complete".to_string(), "e2".to_string())]
+            );
+        });
+    }
+
+    #[test]
+    fn the_repeatable_notification_id_names_its_event() {
+        // Two triggers must be two outbox ids, or the second is dropped as a duplicate.
+        with_ctx(|ctx| {
+            let a = Engine.evaluate_commit(&StateSnapshot::default(), &commit(), "e1", ctx);
+            let b = Engine.evaluate_commit(&StateSnapshot::default(), &commit(), "e2", ctx);
+            let ids = |out: &crate::EngineOutput| -> Vec<String> {
+                out.side_effect_intents
+                    .iter()
+                    .filter(|i| {
+                        matches!(
+                            i.kind,
+                            SideEffectKind::RepeatableAchievementTriggered { .. }
+                        )
+                    })
+                    .map(|i| i.notification_id.clone())
+                    .collect()
+            };
+            assert_eq!(ids(&a), vec!["ach:commit_complete:e1".to_string()]);
+            assert_eq!(ids(&b), vec!["ach:commit_complete:e2".to_string()]);
+        });
+    }
+
+    #[test]
+    fn a_browser_activity_does_not_fire_the_commit_repeatable() {
+        // A merged PR is not a commit; the repeatable rule is about commits.
+        with_ctx(|ctx| {
+            let out = Engine.evaluate_browser_event(
+                &StateSnapshot::default(),
+                BrowserActivity::PullRequestMerged,
+                "e1",
+                ctx,
+            );
+            assert!(repeatable_ids(&out).is_empty());
+        });
+    }
+
+    #[test]
+    fn a_daily_rank_upgrade_is_not_a_repeatable_trigger() {
+        // Spec 14: the daily rank is its own system. Reaching a rank must not be
+        // recorded as an achievement of either kind.
+        with_ctx(|ctx| {
+            let snapshot = StateSnapshot {
+                daily_commit_count: 3,
+                daily_rank_today: Some(crate::daily_rank::DailyRank::Common),
+                ..Default::default()
+            };
+            let out = Engine.evaluate_commit(&snapshot, &commit(), "e1", ctx);
+            assert!(
+                out.side_effect_intents
+                    .iter()
+                    .any(|i| matches!(i.kind, SideEffectKind::DailyRankUpgrade { .. })),
+                "the rank upgrade must still be announced on its own"
+            );
+            assert_eq!(
+                repeatable_ids(&out).len(),
+                1,
+                "exactly the one commit trigger, not one per rank"
             );
         });
     }

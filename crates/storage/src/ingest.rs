@@ -369,7 +369,13 @@ async fn ingest_commit_inner(
         return Ok(IngestOutcome::Rejected(e.to_string()));
     }
 
-    let mut tx = pool.begin().await?;
+    // BEGIN IMMEDIATE, not a deferred BEGIN. A deferred transaction only takes the
+    // write lock at the first INSERT, so two concurrent deliveries of one event both
+    // pass the duplicate check and one then fails with "database is locked" -- after
+    // the user's commit has already been accepted by the spool. Taking the write lock
+    // up front serialises the check-then-insert pair and lets the busy timeout wait
+    // for the other writer instead of failing.
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
 
     // ---- duplicate check inside the transaction ----
     let existing: Option<(String,)> =
@@ -403,12 +409,23 @@ async fn ingest_commit_inner(
     }
 
     // ---- persist the raw event ----
-    sqlx::query(
+    //
+    // The insert itself is the final idempotency authority, not the SELECTs above.
+    // Two concurrent deliveries can both pass a read, but only one can insert the
+    // primary key (or the repository+sha unique index), so `rows_affected == 0` is
+    // the race-free "already known" answer.
+    // RETURNING is used instead of rows_affected() because SQLite reports the
+    // statement's change count, and under contention that count proved able to report
+    // an ignored insert as a change. A returned row exists only if THIS statement
+    // actually inserted, which is the property the duplicate decision needs.
+    let inserted = sqlx::query(
         "INSERT INTO events (event_id, event_type, source, source_confidence,
             canonical_repository_id, external_id, commit_sha, occurred_at, observed_at,
             received_at, local_date, timezone, date_policy, payload, schema_version,
             ingest_batch)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+         ON CONFLICT DO NOTHING
+         RETURNING event_id",
     )
     .bind(event.event_id.as_str())
     .bind(format!("{:?}", event.event_type))
@@ -425,8 +442,13 @@ async fn ingest_commit_inner(
     .bind(i64::from(event.date_policy))
     .bind(&event.payload)
     .bind(i64::from(event.schema_version.0))
-    .execute(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await?;
+
+    if inserted.is_none() {
+        tx.rollback().await?;
+        return Ok(IngestOutcome::Duplicate);
+    }
 
     // ---- evaluate with the declared read-set ----
     //
@@ -515,6 +537,46 @@ async fn ingest_commit_inner(
                 "daily_rank_upgrade",
                 format!("{{\"rank\":\"{}\"}}", rank.as_str()),
             ),
+            SideEffectKind::RepeatableAchievementTriggered {
+                achievement_id,
+                triggering_event_id,
+            } => {
+                // The pair is a database-enforced idempotency key. The event's own
+                // primary key and the commit-sha index stop a replay earlier, but this
+                // constraint is deliberately independent of them: it remains correct
+                // if a producer changes its event-id scheme or retries concurrently.
+                let rule_version =
+                    devchievements_core::achievements::builtin_repeatable_achievements()
+                        .into_iter()
+                        .find(|a| a.achievement_id == *achievement_id)
+                        .map(|a| i64::from(a.rule_version))
+                        .unwrap_or(1);
+                let result = sqlx::query(
+                    "INSERT OR IGNORE INTO repeatable_achievement_events
+                        (achievement_id, triggering_event_id, unlocked_at, rule_version,
+                         canonical_repository_id)
+                     VALUES (?, ?, ?, ?, ?)",
+                )
+                .bind(achievement_id)
+                .bind(triggering_event_id)
+                .bind(now_ms)
+                .bind(rule_version)
+                .bind(event.canonical_repository_id.as_str())
+                .execute(&mut *tx)
+                .await?;
+
+                // A retry of an already-recorded trigger may not manufacture a second
+                // notification, even if the caller supplies a different outbox id.
+                if result.rows_affected() == 0 {
+                    continue;
+                }
+                let payload = serde_json::json!({
+                    "achievement_id": achievement_id,
+                    "triggering_event_id": triggering_event_id,
+                })
+                .to_string();
+                ("achievement_triggered", payload)
+            }
             SideEffectKind::AchievementUnlocked {
                 achievement_id,
                 source,
@@ -564,6 +626,10 @@ async fn ingest_commit_inner(
                 }
                 // A plain commit is not a reward, so it never appears in a summary.
                 SideEffectKind::CommitRecorded => {}
+                // A repeatable completion is not an unlock summary: it happens on
+                // ordinary commits, and folding it in would turn a quiet replay back
+                // into a stream of "you were away" summaries (spec 16.3/16.4).
+                SideEffectKind::RepeatableAchievementTriggered { .. } => {}
             }
             continue;
         }

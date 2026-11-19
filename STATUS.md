@@ -20,20 +20,20 @@ node scripts/verify.mjs
 当前结果（真实执行，非推测）：
 
 ```text
-PASS  fmt                       731 ms
-PASS  clippy                    937 ms
-PASS  test                     8854 ms   483 tests passed, 0 failed, 3 ignored
-PASS  build                     400 ms
-PASS  build-wasm                190 ms
-PASS  desktop-ui-typecheck     1479 ms
-PASS  desktop-ui-build          424 ms
-PASS  desktop-build            8279 ms
-PASS  extension-build          1197 ms
-PASS  extension-test            191 ms
+PASS  fmt                       291 ms
+PASS  clippy                   2426 ms
+PASS  test                    16996 ms   502 tests passed, 0 failed
+PASS  build                    3091 ms
+PASS  build-wasm               2697 ms
+PASS  desktop-ui-typecheck     1503 ms
+PASS  desktop-ui-build          444 ms
+PASS  desktop-build           17531 ms
+PASS  extension-build          1239 ms
+PASS  extension-test            204 ms
 ALL CHECKS PASSED
 ```
 
-最后实测：**2026-11-19 23:42**（`.verify/summary.json` 有机器可读记录）。改这行数字的唯一方法
+最后实测：**2026-11-20 01:30**（`.verify/summary.json` 有机器可读记录）。改这行数字的唯一方法
 是重跑 `node scripts/verify.mjs`。
 
 桌面 crate 的单元测试不在 `verify.mjs` 里（它是独立 cargo 工程），单独跑：
@@ -55,7 +55,7 @@ theme_store 8、preflight 7、update 6、autostart 4、local_helper 4）。
 | `scripts/e2e/csp.mjs` | 8 | 启动无 CSP 违规、bundle 渲染、注入的 inline `<script>` 不执行、渲染进程报告 `script-src` 违规、inline 事件处理器不执行、inline style 仍生效、应用仍响应、native 侧无 renderer 错误 |
 | `scripts/e2e/release-signing.mjs` | 15 | 开发路径用仓库密钥并警告；`DEVCH_RELEASE=1` 缺 key → 退出码 7 且不回落；缺口令 → 退出码 7；两者齐全 → **CI 提供的 key/口令不被覆盖**；脚本自身文档化两条路径 |
 | `scripts/e2e/sound-preview.mjs` | 24 | 试听走**真实选择路径**：内置文件、用户覆盖、每日等级槽位都播「按当前设置真正会响的那一个」；静音与音量 0 如实报告「选了哪个、为什么没播」而不是假装播放；用户文件被删后回落内置而不是变哑；悬空覆盖仍能回答并说明它想要哪个 |
-| `scripts/e2e/cross-repository.mjs` | 9 | 三个仓库的提交合起来算每日等级与累计成就；仓库页仍显示各自计数；重建投影后数字不变 |
+| `scripts/e2e/cross-repository.mjs` | 16 | 三个仓库的提交合起来算每日等级与累计成就；仓库页仍显示各自计数；六个提交产生六条独立可重复触发与六条独立通知；触发记录不进入永久表、不进入每日里程碑 |
 | `scripts/e2e/sound-serialized.mjs` | 7 | 一次投递连续两条通知时，第二个声音必须等第一个放完（有等待 865 ms / 去掉等待 22 ms，而第一个声音本身 778 ms）；两个弹窗都出现；`PlaySoundW` 没有拒收缓冲区 |
 
 `scripts/e2e/` 现有 **46** 个脚本；本轮新增 7 个（`theme-manager` / `builder-form` / `csp` /
@@ -232,7 +232,7 @@ T10 的验收要求是「随机抽 10 个 Tested 项，命令都能复现」。2
 | 1.9 | 用户过滤器 | `Tested` | 18 个测试；官方口径与用户口径在类型上分离 |
 | 1.10 | 统计投影 | `Tested` | 读写 + 可重建性均已测（`rebuild_from_events` 复现同值，**含全局每日表**）；`a_rebuild_produces_the_same_global_numbers_as_live_ingestion` 守护 |
 | 1.11 | Engine（含读集） | `Tested` | 7 个测试；读集有断言守护 |
-| 1.12 | SQLite Storage Adapter 与 SQLx 迁移 | `Tested` | 版本化 schema（当前 **v4**）+ 真实库测试；**迁移前自动备份**（`VACUUM INTO` 到 `backups/`，备份失败即中止迁移），v3 → v4 回填由 `upgrading_an_old_database_backs_up_first_and_keeps_every_unlock` 覆盖 |
+| 1.12 | SQLite Storage Adapter 与 SQLx 迁移 | `Tested` | 版本化 schema（当前 **v5**）+ 真实库测试；**迁移前自动备份**（`VACUUM INTO` 到 `backups/`，备份失败即中止迁移），v3 → v4 回填由 `upgrading_an_old_database_backs_up_first_and_keeps_every_unlock` 覆盖，v4 → v5 加表由 `upgrading_v4_to_v5_keeps_the_permanent_unlocks_and_adds_the_trigger_table` 覆盖（重复迁移不再备份、不重建） |
 | 1.13 | 事件持久化 | `Tested` | 事件+投影+解锁+Outbox **同一事务**，有测试守护 |
 | 1.14 | Outbox 与通知所有权状态机（纯逻辑） | `Tested` | 18 个测试；合法转换表 + 防重复展示 |
 | 1.15 | 历史导入管线（引擎侧） | `Tested` | 用提交时间归档、幂等、可续传；跨日用例已测 |
@@ -389,11 +389,13 @@ T10 的验收要求是「随机抽 10 个 Tested 项，命令都能复现」。2
 
 ## 已知功能缺口
 
-本节是本轮静态审查（14 项待办）的落点。**每一项都能用一条命令复现当前结论。**
+本节是本轮静态审查（14 项待办）与可重复成就任务的落点。**每一项都能用一条命令复现当前结论。**
 
 | 缺口 | 状态 | 复现 / 证据 |
 | --- | --- | --- |
 | ~~每日等级与累计成就按单仓库统计（T1）~~ | **已修** | 新增 `daily_global_projection` 表（schema 4）；`load_snapshot` 改读 `global_commit_total()` 与 `daily_global_projection()`；仓库级计数照旧维护。迁移是**加表 + 从既有投影回填**（不重放事件、不撤销解锁），迁移前自动备份。复现：`node scripts/e2e/cross-repository.mjs` → 9 项 PASS（3/2/1 次提交 = 一天 6 次 = Rare）。见 [ADR-0021](docs/decisions/0021-cross-repository-statistics.md) |
+| 可重复成就**不补历史**：旧数据库升级后触发表从空开始 | **有意为之** | 迁移是加表，不重放事件、不伪造历史；只有升级后的新有效提交开始计数。复现：`upgrading_v4_to_v5_keeps_the_permanent_unlocks_and_adds_the_trigger_table` → 新表 0 行、永久解锁保留 |
+| 每日等级的自定义阈值只有 crate 层能力，设置文件与事件处理未接线 | **未做** | `DailyRankThresholds::custom()` 有 6 个单元测试，但 `Settings` 没有阈值字段，`Engine::evaluate_commit` 仍固定用 `official()`；任务要求「保留现有功能」，因此未擅自改核心统计口径 |
 | 9 个内置成就中 5 个不可达：`first_release` / `first_pr_merged` / `streak_7` / `streak_30` / `streak_365`（T2） | **未修** | `first_release`/`first_pr_merged` 的可达性依赖浏览器计数（ADR-0019 已让它们可解锁，见 3b.8）；`streak_*` 仍不可达，因为 `StateSnapshot` 没有连续天数，`engine.rs:225` 硬编码 `longest_streak_days: 0`。**新增成就名单需用户确认** |
 | 规范 §22 line 12 的**时间范围 / 仓库 / 稀有度 / 隐藏 / 可重复**五项不在 `RuleExpr` 模型里（T7 相关） | **未做** | `crates/achievements/src/builder.rs` 的 `RuleExpr` 只有 `Condition` / `All` / `Any`，`UserMetric` 四个；`UserAchievement` 没有稀有度与可见性字段。扩模型会改数据库与统计口径，需 ADR 与用户确认 |
 | 规范 V2.5 仍写多平台 / Browser Only 三态 / Offer-Claim（T5） | **未做** | 与 ADR-0017（仅 Windows）、ADR-0018（扩展只检测）冲突。规范改动需用户确认 |
@@ -427,6 +429,7 @@ T1 已于 2026-11-19 获用户批准并完成（迁移方式即「迁移前自�
 | --- | --- |
 | 2026-11-20 00:55（商店提交材料 + CI 首跑修复） | 提交商店前把外部依赖全部打通。**CI 首跑**：三个 Git 矩阵 job 全部失败，日志显示 `Invoke-WebRequest` 存下的"自解压包"只有几 KB、内容是 GitHub 的 import-map JSON——资产名 `PortableGit-<ver>-64bit.7z.exe` 404 后 GitHub 返回了 HTML 页。对照 release API 核实真名是 `64-bit`，修正并加 10 MB 大小守卫后重跑 **run 44568079398 五个 job 全部 success**（这也是仓库 CI 第一次真正运行）。**隐私政策 URL**：`https://applepinea.github.io/Devchievements/` 此前渲染的是旧 README——Pages 源是 "deploy from branch / root"，pages.yml 的产物根本没被用。把 Pages 源切到 GitHub Actions（API `build_type: workflow`），手动触发 pages.yml；第一次 deploy-pages 因瞬时 API 故障失败，rerun 又因同 run 出现两个同名 artifact 失败，**新开一次 run（44570193529）成功**，页面实测 200 且含 "Privacy Policy" 与联系邮箱。**提交材料汇总**写进 [docs/store/submission-package-2026-11-20.md](docs/store/submission-package-2026-11-20.md)：MSIX（00:31 版，9,162,830 B）+ 隐私 URL + 文案 + 认证备注 + 4 张截图全部就绪；只剩 Partner Center 注册、上传、干净 Win10 三项验证需要用户。**未验证**：干净 Win10 虚拟机三项（真机）；商店审核本身 |
 | 2026-11-20 00:31（重新打包 MSIX，商店提交准备） | 工作区干净（HEAD = 8108bce），源码与 23:42 那版包一致，本轮为商店提交把全流程再走一遍并留证据：重新构建 MSVC release（2m 36s，19,823,104 B，13 条 dead_code 警告是既有债务，不是本轮引入）→ `scripts/msix/build-msix.mjs` 11 项全过（含引导器/5 个图标/makeappx/signtool/注册）→ `signtool verify /pa` 成功（时间戳仍为 None，无证书）→ 本地 release 与 WindowsApps 安装副本 **SHA256 一致**（`F60BDE0E…09B865`，19,823,104 B）→ 用**已安装**副本跑 `--preview-sound common`（778 ms 音效）耗时 1188 ms ≥ 838 ms 下限，说明播放闸门在包内生效 → 新包 9,162,830 B 已覆盖 `C:\Documents\Devchievements\Devchievements.msix`。**未验证**：干净 Win10 虚拟机三项（真机才能做）；商店审核口径 |
+| 2026-11-20 01:30（可重复成就） | 新增 `commit_complete`：每个有效 Commit 触发一次，独立表按 `(achievement_id, triggering_event_id)` 唯一，同一事件重复导入或并发投递只落一条；永久成就仍按 ID 唯一，每日等级仍在自己的投影/里程碑表。9 个永久成就的 ID、条件、稀有度与 `streak_365` 隐藏属性未改。图鉴新增「可重复成就」区（累计次数 + 逐条触发记录）与「每日等级」当日卡片；普通提交仍只响不弹，可重复触发只计数并保留独立 Outbox 通知。`verify.mjs` 十步全 PASS（500 tests）、桌面 crate 51 项、`cross-repository` e2e 16 项。见 [ADR-0022](docs/decisions/0022-repeatable-achievements.md) |
 | 2026-11-19 23:42（重新打包 MSIX） | 提示音修复之后重打 MSIX 并就地升级本机安装：`scripts/msix/build-msix.mjs` 10 项全过；装进 `C:\Program Files\WindowsApps\DevchievementsCompanion_0.1.0.0_x64__zm3808zyk7ry0` 的 `devchievements-desktop.exe` 与本地 release 构建 **SHA256 一致**（`E29487D1…3AC458`，19,820,544 B）。用**已安装**的那份二进制跑 `--preview-sound common`（778 ms 的音效）耗时 1408 ms，说明等待逻辑确实在包内生效。`C:\Documents\Devchievements\` 下的 `.msix`（9,168,333 B）与 NSIS 安装包（7,003,765 B）都已换成新构建，`使用说明.txt` 重写 |
 | 2026-11-19（提示音播放器） | 用户报「音频有时无法正常播放，有时只播放出后半部分」，查出**两个独立缺陷**。①**释放后使用**：播放槽是 `Vec<u8>`，旧代码先把新数据拷进槽、再从槽里取指针交给 `PlaySoundW`，于是下一次播放会把系统仍在读的缓冲区释放掉——表现就是「只响半截」或干脆没声。改为 `Arc<Box<[u8]>>` 句柄（`PlaybackBuffer`，地址稳定、随句柄存活），指针取自这块不再移动的分配。②**互相打断**：`PlaySoundW(SND_ASYNC)` 是**替换**当前声音、不能混播，§16.6 也禁止混播；一次 drain 连续投递两条通知时，第二条把第一条截断。改为**播放令牌** `SoundPlayback`：它同时持有进程级闸门、缓冲区句柄和「必须等到放完」的义务，`Drop` 时才等待——所以「忘记等待」不可能发生，而调用方仍能决定**什么时候**等（先记日志、先开窗，再等）。时长从 WAV 头（`fmt ` 的 byte_rate + `data` 长度）算，留 60 ms 尾巴余量；通知与试听按钮走同一个 `start_buffer`，所以试听也不会盖掉通知。顺带修掉一个由本次改动**引入**的语义坑：`SOUND play ... at=` 原来在调用返回后取时间，加了等待之后就变成「声音结束时刻」——现在改成由令牌在**交给设备的那一刻**打时间戳。**实测证据（在最终代码上正反两跑）**：把 `Drop` 里的等待去掉后，`sound-serialized` e2e **失败**（第二个 `SOUND play` 只比第一个晚 **22 ms**，而第一个长 778 ms），`a_second_sound_cannot_start_while_the_first_is_still_playing` 也**失败**（第二个声音只等了 **40 ms**，第一个长 160 ms）；等待加回去后 e2e 晚 **865 ms**、桌面单测 **51 项全绿**。发布二进制另测：`--preview-sound common` 耗时 871 ms（778 + 60 余量 + 启动），`commit` 257 ms。单测 7 项（WAV 时长自解析、截断文件只按实有音频计时、无法解析的头必须立刻返回而不是挂住、已放完的声音不再等待、两次播放不重叠、令牌在第一个声音结束前不放行、缓冲区跨越调用存活）。顺带：`PlaySoundW` 返回失败时现在打印 `PlaySoundW refused the buffer (N bytes)`，不再静默——否则「有时候没声」永远查不到。**未做/未验证**：只解析 WAV 头（导入的 mp3/ogg 会被当成「时长未知」因而不设闸门）、仍用 `PlaySoundW` 而非 WASAPI 会话、多显示器/独占模式未测 |
 | 2026-11-19（MSIX 重新打包） | 把本轮改动（跨仓库统计 T1 / 提示音试听 / 主题管理 / 构建器 / CSP / 新鲜度三档）打进商店包：先确认 release 二进制**比源码旧**（源码 22:49–22:50 改过，二进制停在 22:41），重新构建 Vite 产物 + MSVC release 后再执行 `scripts/msix/build-msix.mjs`。10 项检查全过：包 9,167,475 B / 22:58:15，`signtool verify /pa` 成功、0 warning 0 error，`Get-AppxPackage` 已注册，装进 WindowsApps 的 `devchievements-desktop.exe` 与本地 release **SHA256 完全一致**（`5C978D65…AC3CA`，19,819,520 B）。用数据目录副本跑 `--diagnostics`（退出码 0）验证包内迁移：schema 3 → 4、建出 `daily_global_projection`、写出 `backups/pre-migration-v3-to-v4-1795100319802.db`（110,592 B），事件与解锁数不变。交付副本已覆盖 `C:\Documents\Devchievements\Devchievements.msix`（两侧 SHA256 相同）。**未验证**：无 Authenticode 时间戳（`File is not timestamped`）、商店审核口径、Clean 机器免信任证书安装 |
@@ -477,6 +480,7 @@ T1 已于 2026-11-19 获用户批准并完成（迁移方式即「迁移前自�
 | 4a.7 | Event Filters 界面 | `Tested` | 设置页可编辑；9 项 e2e 含「不影响官方统计」 |
 | 4a.8 | Achievement Builder | `Tested` | 定义校验与存储 12+12 项；用户规则接入评估（同一事务、官方统计、复用内置记录路径）；**Builder 页面已做**：表单（4 个真实 metric / AND-OR / JSON 双向）+ 本地超限提示 + 列表/删除，`builder-form` e2e 17 项（含「真实提交触发解锁」「超限被拒」「删除不撤销已解锁」）。**未做**：时间范围 / 仓库 / 稀有度 / 隐藏 / 可重复 —— `RuleExpr` 模型里没有这些字段，属规范 §22 line 12 与实现的差距，未擅自扩 crate |
 | 4a.9 | 配置完整导入导出 | `Tested` | 11 个单元测试 + 18 项 e2e，含「失败不改变现状」 |
+| 4a.10 | 可重复成就（Commit Complete） | `Tested` | 独立目录 + 独立表 `repeatable_achievement_events`（schema 5，`UNIQUE(achievement_id, triggering_event_id)`）；每个有效 Commit 一条记录，同一事件重复/并发处理只落一条；通知 ID 为 `ach:commit_complete:<event>`，普通提交仍只响不弹；图鉴分「永久 / 可重复 / 每日」三块并显示累计次数与逐条历史。9 个永久成就的 ID/条件/稀有度未改。见 [ADR-0022](docs/decisions/0022-repeatable-achievements.md) |
 
 ---
 

@@ -40,6 +40,8 @@ macro_rules! app_commands {
             commands::get_dashboard,
             commands::get_storage_health,
             commands::get_gallery,
+            commands::get_repeatable_achievements,
+            commands::get_daily_rank,
             commands::mark_achievements_viewed,
             commands::get_activity,
             commands::get_repositories,

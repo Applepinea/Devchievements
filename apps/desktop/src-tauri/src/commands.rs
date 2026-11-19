@@ -56,6 +56,34 @@ pub struct GalleryItem {
     pub viewed: bool,
 }
 
+/// Today's daily rank, which is its own system and never an achievement.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyRankView {
+    /// The local date the rank belongs to.
+    pub local_date: String,
+    /// Valid commits counted today, across every repository.
+    pub commits: u32,
+    /// common / uncommon / rare / epic / legendary, or none.
+    pub rank: Option<String>,
+    /// Commits needed for the next rank.
+    pub next_threshold: Option<u32>,
+    /// The next rank's name.
+    pub next_rank: Option<String>,
+}
+
+/// One repeatable achievement card: a count and its own trigger history.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepeatableAchievementItem {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub rarity: String,
+    pub trigger_count: i64,
+    pub events: Vec<devchievements_storage::read_models::RepeatableTriggerEntry>,
+}
+
 /// Everything the About page shows.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -272,6 +300,72 @@ pub async fn get_gallery() -> Result<Vec<GalleryItem>, String> {
             }
         })
         .collect())
+}
+
+/// Repeatable achievements are fetched separately so a trigger can never appear as
+/// another permanently unlocked achievement in the gallery.
+#[tauri::command]
+pub async fn get_repeatable_achievements() -> Result<Vec<RepeatableAchievementItem>, String> {
+    let pool = pool().await?;
+    let entries = devchievements_storage::read_models::repeatable_achievements(
+        &pool,
+        devchievements_privacy::stable_alias,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let catalogue = devchievements_achievements::builtin_repeatable_achievements();
+    Ok(catalogue
+        .into_iter()
+        .map(|achievement| {
+            let entry = entries
+                .iter()
+                .find(|e| e.achievement_id == achievement.achievement_id);
+            RepeatableAchievementItem {
+                id: achievement.achievement_id.clone(),
+                name: achievement.name.clone(),
+                description: achievement.description.clone(),
+                rarity: format!("{:?}", achievement.rarity).to_lowercase(),
+                trigger_count: entry.map_or(0, |e| e.trigger_count),
+                events: entry.map_or_else(Vec::new, |e| e.events.clone()),
+            }
+        })
+        .collect())
+}
+
+/// Today's rank and commit count (spec 14.1). Read-only and separate from both
+/// achievement catalogues on purpose: a rank is never stored in either table.
+#[tauri::command]
+pub async fn get_daily_rank() -> Result<DailyRankView, String> {
+    use devchievements_core::TimezoneProvider;
+
+    let stored = crate::settings::Settings::load(&settings_path());
+    // Match the zone the ingestion path actually freezes into the local date: the
+    // desktop companion is constructed with Asia/Taipei (main.rs), and without a
+    // configured zone an empty day near midnight would otherwise be looked up under a
+    // different date and show zero commits.
+    let zone = stored
+        .timezone
+        .unwrap_or_else(|| "Asia/Taipei".to_string());
+    let now = now_ms();
+    let local_date = devchievements_core::BundledTimezoneProvider::new()
+        .local_date(now, &zone, 0)
+        .ok_or_else(|| format!("cannot resolve the local date for {zone}"))?;
+
+    let pool = pool().await?;
+    let day = devchievements_storage::projections::daily_global_projection(&pool, &local_date)
+        .await
+        .map_err(|e| e.to_string())?;
+    let commits = day.as_ref().map_or(0, |d| d.commit_count);
+    let rank = day.and_then(|d| d.daily_rank);
+    let progress = devchievements_daily_rank::DailyRankThresholds::official().progress(commits);
+
+    Ok(DailyRankView {
+        local_date,
+        commits,
+        rank: rank.map(|r| r.as_str().to_string()),
+        next_threshold: progress.next_threshold,
+        next_rank: progress.next_rank.map(|r| r.as_str().to_string()),
+    })
 }
 
 /// Clear the new marker on the given achievements.

@@ -118,6 +118,50 @@ function main() {
     // Century is about the user: a hundred commits spread over three repositories.
     const unlocked = db.prepare("SELECT achievement_id FROM unlocked_achievements").all().map((r) => r.achievement_id);
     check("First Commit unlocked once", unlocked.filter((id) => id === "first_commit").length === 1, JSON.stringify(unlocked));
+    check(
+      "a repeatable achievement never enters the permanent unlock table",
+      !unlocked.includes("commit_complete"),
+      JSON.stringify(unlocked),
+    );
+
+    // Every counted commit is exactly one repeatable trigger, keyed by its own event.
+    const triggers = db
+      .prepare("SELECT achievement_id, triggering_event_id, unlocked_at FROM repeatable_achievement_events")
+      .all();
+    check("six commits produce six repeatable triggers", triggers.length === 6, JSON.stringify(triggers));
+    check(
+      "the six triggers belong to six distinct events",
+      new Set(triggers.map((row) => row.triggering_event_id)).size === 6,
+      JSON.stringify(triggers),
+    );
+    check(
+      "all six triggers are Commit Complete",
+      triggers.every((row) => row.achievement_id === "commit_complete"),
+      JSON.stringify(triggers),
+    );
+    check(
+      "each trigger has its own timestamp",
+      triggers.every((row) => Number.isFinite(row.unlocked_at) && row.unlocked_at > 0),
+      JSON.stringify(triggers),
+    );
+
+    const triggerNotifications = db
+      .prepare("SELECT COUNT(*) AS n FROM outbox WHERE kind = 'achievement_triggered'")
+      .get();
+    check(
+      "each trigger independently queued one notification",
+      triggerNotifications.n === 6,
+      JSON.stringify(triggerNotifications),
+    );
+
+    // The rank system is separate: its table and its notifications mention no
+    // achievement, and the repeatable table mentions no rank.
+    const milestones = db.prepare("SELECT COUNT(*) AS n FROM daily_milestones").get();
+    check(
+      "the repeatable trigger was not recorded as a daily milestone",
+      milestones.n === 0,
+      JSON.stringify(milestones),
+    );
   } finally {
     db.close();
   }
@@ -127,7 +171,7 @@ function main() {
     console.log("CROSS REPOSITORY FAILED (" + failures + " checks)");
     process.exitCode = 1;
   } else {
-    console.log("CROSS REPOSITORY PASSED: six commits in three repositories are one day of six, rated Rare");
+    console.log("CROSS REPOSITORY PASSED: six commits are one day of six, rated Rare, with six independent repeatable triggers");
   }
 }
 

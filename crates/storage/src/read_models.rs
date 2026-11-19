@@ -31,6 +31,76 @@ pub struct GalleryEntry {
     pub triggering_event_id: Option<String>,
 }
 
+/// One repeatable achievement and its independently recorded triggers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepeatableAchievementEntry {
+    /// Stable achievement id; it never becomes a permanent-table key.
+    pub achievement_id: String,
+    /// Number of distinct triggering events recorded.
+    pub trigger_count: i64,
+    /// The individual records, newest first.
+    pub events: Vec<RepeatableTriggerEntry>,
+}
+
+/// One occurrence of a repeatable achievement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepeatableTriggerEntry {
+    /// Storage row id, unique even if event identifiers change scheme.
+    pub id: i64,
+    /// The event responsible for this occurrence.
+    pub triggering_event_id: String,
+    /// When this occurrence was processed by the companion.
+    pub unlocked_at: i64,
+    /// Rule in force for this occurrence.
+    pub rule_version: i64,
+    /// Repository alias, never an unredacted canonical identifier.
+    pub repository: String,
+}
+
+/// Read every trigger and fold it into its achievement for display.
+///
+/// There is deliberately no `unlocked` field here: these achievements do not become
+/// permanently unlocked on their first event. Counts are derived from the same rows
+/// shown below, so they cannot drift from the visible history.
+pub async fn repeatable_achievements(
+    pool: &SqlitePool,
+    alias: impl Fn(&str) -> String,
+) -> StorageResult<Vec<RepeatableAchievementEntry>> {
+    let rows = sqlx::query(
+        "SELECT id, achievement_id, triggering_event_id, unlocked_at, rule_version,
+                canonical_repository_id
+         FROM repeatable_achievement_events
+         ORDER BY achievement_id ASC, unlocked_at DESC, id DESC",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut entries: std::collections::BTreeMap<String, RepeatableAchievementEntry> =
+        std::collections::BTreeMap::new();
+    for row in rows {
+        let achievement_id: String = row.get("achievement_id");
+        let entry =
+            entries
+                .entry(achievement_id.clone())
+                .or_insert_with(|| RepeatableAchievementEntry {
+                    achievement_id,
+                    trigger_count: 0,
+                    events: Vec::new(),
+                });
+        entry.trigger_count += 1;
+        entry.events.push(RepeatableTriggerEntry {
+            id: row.get("id"),
+            triggering_event_id: row.get("triggering_event_id"),
+            unlocked_at: row.get("unlocked_at"),
+            rule_version: row.get("rule_version"),
+            repository: alias(row.get::<String, _>("canonical_repository_id").as_str()),
+        });
+    }
+    Ok(entries.into_values().collect())
+}
+
 /// One day of activity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -178,6 +178,7 @@ pub fn validate(
     // user may already have unlocked.
     if crate::builtin_achievements()
         .iter()
+        .chain(crate::builtin_repeatable_achievements().iter())
         .any(|a| a.achievement_id == definition.id)
     {
         return Err(DefinitionError::ShadowsBuiltin(definition.id.clone()));
@@ -257,6 +258,18 @@ mod tests {
         // outcome the user may already have unlocked.
         let result = validate(
             &definition("first_commit"),
+            &[],
+            ComplexityLimits::default(),
+        );
+        assert!(matches!(result, Err(DefinitionError::ShadowsBuiltin(_))));
+    }
+
+    #[test]
+    fn a_user_rule_cannot_shadow_a_repeatable_builtin() {
+        // The repeatable catalogue is also reserved: a user rule with the same id
+        // would make the gallery show two different things under one name.
+        let result = validate(
+            &definition("commit_complete"),
             &[],
             ComplexityLimits::default(),
         );

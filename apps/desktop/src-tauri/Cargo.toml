@@ -22,6 +22,7 @@ devchievements-companion-core = { path = "../../../crates/companion-core" }
 devchievements-storage = { path = "../../../crates/storage" }
 devchievements-core = { path = "../../../crates/core" }
 devchievements-achievements = { path = "../../../crates/achievements" }
+devchievements-daily-rank = { path = "../../../crates/daily-rank" }
 devchievements-events = { path = "../../../crates/events" }
 devchievements-notifications = { path = "../../../crates/notifications" }
 devchievements-sound = { path = "../../../crates/sound" }

@@ -937,6 +937,7 @@ dependencies = [
  "devchievements-companion-core",
  "devchievements-config",
  "devchievements-core",
+ "devchievements-daily-rank",
  "devchievements-events",
  "devchievements-filters",
  "devchievements-git-hooks",

@@ -86,6 +86,12 @@ pub async fn open(path: &std::path::Path) -> StorageResult<SqlitePool> {
         // WAL: the Hook Helper writes while the UI reads, and neither may block the
         // other.
         .journal_mode(SqliteJournalMode::Wal)
+        // Two writers can arrive at once (a Hook drain retrying while another path
+        // ingests). SQLite's default is to fail immediately with "database is locked",
+        // which would turn a valid commit into an error the caller has to retry. A
+        // bounded wait resolves the race inside the database and preserves the
+        // event-level idempotency the retry was relying on.
+        .busy_timeout(std::time::Duration::from_secs(5))
         .foreign_keys(true);
 
     let pool = SqlitePoolOptions::new()

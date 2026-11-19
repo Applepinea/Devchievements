@@ -1,4 +1,4 @@
-//! Outbox state machine and notification ownership protocol (spec 16, 17).
+﻿//! Outbox state machine and notification ownership protocol (spec 16, 17).
 //!
 //! # The problem this solves
 //!

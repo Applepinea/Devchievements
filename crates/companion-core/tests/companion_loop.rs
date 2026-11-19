@@ -438,8 +438,10 @@ async fn one_commit_with_several_rewards_produces_exactly_one_popup() {
 }
 
 #[tokio::test]
-async fn a_plain_commit_plays_a_sound_and_shows_no_popup() {
-    // Spec 16.4: a normal commit gets a light acknowledgement, not a window.
+async fn every_repeatable_trigger_is_recorded_while_commits_stay_sound_only() {
+    // A repeatable achievement is recorded for every counted commit and gets its own
+    // outbox notification, but spec 16.4 still keeps an ordinary commit to a sound:
+    // the third commit must not become a new window just because the record exists.
     let fx = Fixture::new("sound").await;
     let processor = OutboxProcessor::new(fx.pool.clone());
     let mut sink = RecordingSink::default();
@@ -474,7 +476,8 @@ async fn a_plain_commit_plays_a_sound_and_shows_no_popup() {
     );
     sink.shown.clear();
 
-    // Commit 3 stays inside Uncommon (2-4 commits), so nothing new unlocks.
+    // Commit 3 stays inside Uncommon (2-4 commits), so no permanent achievement and no
+    // rank upgrade fires. Only the repeatable completion remains.
     push_record(&fx.spool, "evt-3", &"9".repeat(40), now_ms(), 1);
     let report = fx
         .companion()
@@ -487,11 +490,49 @@ async fn a_plain_commit_plays_a_sound_and_shows_no_popup() {
         .await
         .expect("deliver 3");
 
-    assert_eq!(sink.shown.len(), 1, "one acknowledgement for one commit");
+    assert_eq!(sink.shown.len(), 1, "one presentation for one commit");
     assert_eq!(
         sink.shown[0],
         Presentation::SoundOnly,
-        "a plain commit must not open a window"
+        "a commit with no permanent reward stays a sound, not a window"
+    );
+
+    // And each trigger is a separate row keyed by its event, with its own
+    // notification row, even though none of them added a window.
+    let triggers: Vec<(String, String)> = sqlx::query_as(
+        "SELECT achievement_id, triggering_event_id FROM repeatable_achievement_events
+         ORDER BY id ASC",
+    )
+    .fetch_all(&fx.pool)
+    .await
+    .expect("triggers");
+    assert_eq!(triggers.len(), 3, "three commits, three independent rows");
+    assert!(triggers.iter().all(|(id, _)| id == "commit_complete"));
+    assert_eq!(
+        triggers
+            .iter()
+            .map(|(_, event)| event.as_str())
+            .collect::<Vec<_>>(),
+        vec!["evt-1", "evt-2", "evt-3"]
+    );
+    let permanent: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM unlocked_achievements WHERE achievement_id = 'commit_complete'",
+    )
+    .fetch_one(&fx.pool)
+    .await
+    .expect("permanent count");
+    assert_eq!(
+        permanent.0, 0,
+        "a repeatable must never occupy the permanent table"
+    );
+    let triggered_rows: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE kind = 'achievement_triggered'")
+            .fetch_one(&fx.pool)
+            .await
+            .expect("trigger notifications");
+    assert_eq!(
+        triggered_rows.0, 3,
+        "three triggers are three independently addressed notifications"
     );
 
     fx.cleanup();
@@ -840,14 +881,15 @@ async fn the_freshness_bands_decide_what_the_user_sees() {
     }
 }
 
-/// A digested event that unlocked nothing produces no summary at all.
+/// A digested commit with no permanent reward produces no summary at all.
 ///
-/// The middle band exists to summarise what happened while the user was away. A plain
-/// commit that moved no rank and unlocked no achievement has nothing to summarise, so
-/// it must not manufacture an empty "0 achievements" line -- and it must not fall back
-/// to the fresh-band sound either, because the user is not at the keyboard.
+/// The middle band exists to summarise what happened while the user was away. The third
+/// commit stays inside Uncommon, and its repeatable completion is not an unlock summary
+/// (spec 16.4 keeps ordinary commits to a sound), so there is nothing to fold. It must
+/// not manufacture an empty "0 achievements" line, and it must not fall back to the
+/// fresh-band sound either, because the user is not at the keyboard.
 #[tokio::test]
-async fn a_digested_commit_with_no_reward_stays_completely_silent() {
+async fn a_digested_commit_with_no_permanent_reward_stays_completely_silent() {
     let fx = Fixture::new("digest-no-reward").await;
 
     // Two fresh commits establish the day and consume the first two ranks.
@@ -862,8 +904,9 @@ async fn a_digested_commit_with_no_reward_stays_completely_silent() {
         .expect("deliver");
     sink.shown.clear();
 
-    // The third commit stays inside Uncommon (2-4), so its only intent is the bare
-    // commit -- and it is eleven minutes old, i.e. in the digest band.
+    // The third commit stays inside Uncommon (2-4) and its repeatable completion is
+    // not an unlock summary, so there is nothing to fold. It is eleven minutes old,
+    // i.e. in the digest band.
     push_record(
         &fx.spool,
         "evt-3",

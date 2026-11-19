@@ -260,6 +260,16 @@ impl Achievement {
         }
         self.condition.is_satisfied(snapshot)
     }
+
+    /// Whether this achievement can trigger more than once.
+    ///
+    /// The flag is not a hint: it decides which of the two lifecycles applies, and the
+    /// two are stored in different tables with different keys. A repeatable one is
+    /// keyed by `(achievement, event)`; a permanent one by the achievement alone.
+    /// See [`evaluate`] and [`evaluate_repeatable`].
+    pub fn is_repeatable(&self) -> bool {
+        self.repeatable
+    }
 }
 
 /// Why an unlock happened (spec 13.4). Never conflate these in the UI.
@@ -312,13 +322,23 @@ pub struct EvaluationResult {
     pub still_locked: Vec<String>,
     /// Achievements skipped because the capability is unavailable.
     pub unavailable: Vec<String>,
+    /// Repeatable achievements handed to [`evaluate`] by mistake.
+    ///
+    /// Reported rather than silently dropped: the permanent lifecycle cannot describe
+    /// them, and a caller that mixes the two has a bug worth seeing in a test.
+    pub skipped_repeatable: Vec<String>,
 }
 
-/// Evaluate all rules for a snapshot.
+/// Evaluate all PERMANENT rules for a snapshot.
 ///
 /// `existing_unlocks` is the set of achievement ids already unlocked. Per spec
 /// 13.1 an already-unlocked achievement is never reconsidered or revoked, so it is
 /// reported separately and never appears in `newly_unlocked`.
+///
+/// Repeatable achievements are NOT evaluated here and are reported in
+/// `skipped_repeatable`. Their whole point is that a previous trigger must not
+/// suppress the next one, so the `existing_unlocks` check above is exactly the wrong
+/// rule for them; [`evaluate_repeatable`] applies theirs.
 pub fn evaluate(
     achievements: &[Achievement],
     snapshot: &StatisticsSnapshot,
@@ -329,6 +349,11 @@ pub fn evaluate(
 
     for achievement in achievements {
         let id = achievement.achievement_id.clone();
+
+        if achievement.is_repeatable() {
+            result.skipped_repeatable.push(id);
+            continue;
+        }
 
         if existing_unlocks.iter().any(|e| e == &id) {
             result.already_unlocked.push(id);
@@ -348,6 +373,31 @@ pub fn evaluate(
     }
 
     result
+}
+
+/// Evaluate repeatable rules for ONE event.
+///
+/// # Why this ignores `existing_unlocks`
+///
+/// [`evaluate`] skips an achievement it has already seen, because a permanent unlock
+/// is final. A repeatable achievement must fire on every new satisfying event, so the
+/// only question here is whether the rule holds now -- and the only thing that may
+/// suppress a second record for the same event is the storage layer's unique key on
+/// `(achievement_id, triggering_event_id)`.
+///
+/// The caller therefore evaluates once per event, and idempotency is enforced where it
+/// can actually be enforced: in the database, in the same transaction as the event.
+pub fn evaluate_repeatable(
+    achievements: &[Achievement],
+    snapshot: &StatisticsSnapshot,
+    available_capabilities: &[Capability],
+) -> Vec<String> {
+    achievements
+        .iter()
+        .filter(|a| a.is_repeatable())
+        .filter(|a| a.is_evaluable_with(available_capabilities) && a.is_satisfied(snapshot))
+        .map(|a| a.achievement_id.clone())
+        .collect()
 }
 
 /// The built-in launch achievement set (spec 13.2).
@@ -451,6 +501,36 @@ pub fn builtin_achievements() -> Vec<Achievement> {
             true,
         ),
     ]
+}
+
+/// Achievements that may fire more than once (spec 13.2).
+///
+/// Kept out of [`builtin_achievements`] on purpose. That function is the catalogue of
+/// things the user unlocks once and the gallery shows as goals; a repeatable one has
+/// no single unlock time to show and would make `evaluate` report it as
+/// `already_unlocked` after the first commit, silently stopping it.
+///
+/// # Why the condition is `CommitsAtLeast(1)`
+///
+/// The rule is "every valid commit", and the engine calls this once per commit after
+/// the empty/merge filter. The condition therefore has to be satisfiable by a single
+/// commit; it is not a total and must never be read as one.
+pub fn builtin_repeatable_achievements() -> Vec<Achievement> {
+    vec![Achievement {
+        achievement_id: "commit_complete".to_string(),
+        achievement_version: 1,
+        rule_version: 1,
+        introduced_at: 0,
+        retired_at: None,
+        statistics_profile: StatisticsProfile::Official,
+        hidden: false,
+        condition: RuleCondition::CommitsAtLeast(1),
+        retroactive_policy: RetroactivePolicy::default_for_builtin(),
+        name: "Commit Complete".to_string(),
+        description: "Every commit counts once more.".to_string(),
+        rarity: Rarity::Common,
+        repeatable: true,
+    }]
 }
 
 #[cfg(test)]
@@ -659,5 +739,102 @@ mod tests {
             .map(|a| a.achievement_id)
             .collect();
         assert_eq!(hidden, vec!["streak_365".to_string()]);
+    }
+
+    #[test]
+    fn the_repeatable_catalogue_holds_exactly_one_entry() {
+        // Permanent achievements and repeatable ones are two catalogues with two
+        // lifecycles; mixing them is the bug this test exists to catch.
+        let repeatable = builtin_repeatable_achievements();
+        assert_eq!(repeatable.len(), 1);
+        let a = &repeatable[0];
+        assert_eq!(a.achievement_id, "commit_complete");
+        assert_eq!(a.name, "Commit Complete");
+        assert_eq!(a.rarity, Rarity::Common);
+        assert!(!a.hidden, "a repeatable achievement has nothing to hide");
+        assert!(a.is_repeatable());
+        assert_eq!(a.condition, RuleCondition::CommitsAtLeast(1));
+    }
+
+    #[test]
+    fn no_repeatable_appears_in_the_permanent_catalogue() {
+        let permanent: Vec<String> = builtin_achievements()
+            .into_iter()
+            .map(|a| a.achievement_id)
+            .collect();
+        for a in builtin_repeatable_achievements() {
+            assert!(
+                !permanent.contains(&a.achievement_id),
+                "{} must not be listed as a permanent achievement",
+                a.achievement_id
+            );
+        }
+    }
+
+    #[test]
+    fn evaluate_reports_a_repeatable_instead_of_silently_dropping_it() {
+        // Reported, not swallowed: a caller passing the wrong catalogue sees it.
+        let mut s = snap();
+        s.commit_count = 1;
+        let result = evaluate(
+            &builtin_repeatable_achievements(),
+            &s,
+            &[],
+            &[Capability::LocalGit],
+        );
+        assert!(result.newly_unlocked.is_empty());
+        assert_eq!(
+            result.skipped_repeatable,
+            vec!["commit_complete".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_repeatable_fires_again_on_the_next_event() {
+        // The whole difference from a permanent achievement: a second event with the
+        // same statistics is a second trigger, not a no-op.
+        let rules = builtin_repeatable_achievements();
+        let mut s = snap();
+        s.commit_count = 1;
+
+        let first = evaluate_repeatable(&rules, &s, &[Capability::LocalGit]);
+        let second = evaluate_repeatable(&rules, &s, &[Capability::LocalGit]);
+        assert_eq!(first, vec!["commit_complete".to_string()]);
+        assert_eq!(second, first, "no memory may suppress the second trigger");
+    }
+
+    #[test]
+    fn a_repeatable_needs_its_capability() {
+        // Never bypass the capability check to make a repeatable fire.
+        let mut s = snap();
+        s.commit_count = 1;
+        let fired = evaluate_repeatable(
+            &builtin_repeatable_achievements(),
+            &s,
+            &[Capability::BrowserGithub],
+        );
+        assert!(
+            fired.is_empty(),
+            "a LocalGit rule must not run without LocalGit"
+        );
+    }
+
+    #[test]
+    fn a_repeatable_does_not_fire_without_a_satisfying_event() {
+        let rules = builtin_repeatable_achievements();
+        let s = snap();
+        assert!(
+            evaluate_repeatable(&rules, &s, &[Capability::LocalGit]).is_empty(),
+            "zero commits is not a trigger"
+        );
+    }
+
+    #[test]
+    fn a_retired_repeatable_can_never_fire() {
+        let mut rules = builtin_repeatable_achievements();
+        rules[0].retired_at = Some(1);
+        let mut s = snap();
+        s.commit_count = 1;
+        assert!(evaluate_repeatable(&rules, &s, &[Capability::LocalGit]).is_empty());
     }
 }

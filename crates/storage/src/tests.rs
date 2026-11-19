@@ -997,6 +997,293 @@ async fn upgrading_an_old_database_backs_up_first_and_keeps_every_unlock() {
 }
 
 #[tokio::test]
+async fn a_repeatable_achievement_records_every_commit_independently() {
+    // The central contract: a repeatable achievement is one row per trigger, while a
+    // permanent one stays one row per achievement. Both live in this transaction.
+    let pool = temp_pool("repeatable").await;
+    let facts = ingest::commit_facts(1, false);
+    let identity = configured_identity();
+
+    for n in 0..2 {
+        let sha = format!("{:040x}", n + 1);
+        let event = commit_event(&sha, 1_794_787_200_000 + n, "2026-11-16");
+        let mut fx = fixture();
+        let ctx = fx.ctx();
+        ingest::ingest_commit(&pool, &event, &facts, 0, &identity, &ctx)
+            .await
+            .expect("ingest");
+    }
+
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT achievement_id, triggering_event_id FROM repeatable_achievement_events
+         ORDER BY id ASC",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("repeatable rows");
+    assert_eq!(rows.len(), 2, "two commits are two independent triggers");
+    assert!(rows.iter().all(|(id, _)| id == "commit_complete"));
+    assert_ne!(rows[0].1, rows[1].1, "each trigger names its own event");
+
+    let permanent: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM unlocked_achievements WHERE achievement_id = 'commit_complete'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("permanent");
+    assert_eq!(
+        permanent.0, 0,
+        "a repeatable must not occupy the permanent table"
+    );
+
+    let notifications: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE kind = 'achievement_triggered'")
+            .fetch_one(&pool)
+            .await
+            .expect("outbox");
+    assert_eq!(
+        notifications.0, 2,
+        "each trigger gets its own notification row"
+    );
+
+    // The read model derives its count from the same rows the UI lists.
+    let entries = crate::read_models::repeatable_achievements(&pool, |id| id.to_string())
+        .await
+        .expect("read model");
+    let entry = entries
+        .iter()
+        .find(|e| e.achievement_id == "commit_complete")
+        .expect("commit_complete entry");
+    assert_eq!(entry.trigger_count, 2);
+    assert_eq!(entry.events.len(), 2);
+}
+
+#[tokio::test]
+async fn replaying_one_commit_cannot_duplicate_its_repeatable_record() {
+    // Database-level idempotency, not an in-memory check: the UNIQUE key refuses the
+    // second pair even when the caller never looked first.
+    let pool = temp_pool("repeatable-unique").await;
+    let facts = ingest::commit_facts(1, false);
+    let event = commit_event(&"a".repeat(40), 1_794_787_200_000, "2026-11-16");
+    let identity = configured_identity();
+
+    {
+        let mut fx = fixture();
+        let ctx = fx.ctx();
+        ingest::ingest_commit(&pool, &event, &facts, 0, &identity, &ctx)
+            .await
+            .expect("first");
+    }
+    let before = ingest::outbox_counts(&pool).await.expect("outbox");
+
+    // The same event id is the ingestion idempotency key (spec 5.3).
+    {
+        let mut fx = fixture();
+        let ctx = fx.ctx();
+        let replay = ingest::ingest_commit(&pool, &event, &facts, 0, &identity, &ctx)
+            .await
+            .expect("replay");
+        assert_eq!(replay, IngestOutcome::Duplicate);
+    }
+
+    // And the constraint itself holds even if a future caller bypasses that guard.
+    let direct = sqlx::query(
+        "INSERT OR IGNORE INTO repeatable_achievement_events
+            (achievement_id, triggering_event_id, unlocked_at, rule_version,
+             canonical_repository_id)
+         VALUES ('commit_complete', ?, 1, 1, 'github:o/r')",
+    )
+    .bind(event.event_id.as_str())
+    .execute(&pool)
+    .await
+    .expect("direct insert");
+    assert_eq!(direct.rows_affected(), 0, "the unique pair must refuse it");
+
+    let rows: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM repeatable_achievement_events")
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+    assert_eq!(rows.0, 1, "a replay must not produce a second trigger");
+    assert_eq!(
+        ingest::outbox_counts(&pool).await.expect("outbox"),
+        before,
+        "and it must not manufacture a second notification"
+    );
+}
+
+#[tokio::test]
+async fn two_concurrent_deliveries_of_one_event_record_it_once() {
+    // At-least-once delivery is the norm. Both calls may reach the insert; whichever
+    // loses either sees Duplicate or a constraint error, but the user must still get
+    // exactly one trigger and one notification.
+    let pool = temp_pool("repeatable-race").await;
+    let facts = ingest::commit_facts(1, false);
+    let event = commit_event(&"b".repeat(40), 1_794_787_200_000, "2026-11-16");
+
+    let mut left_fx = fixture();
+    let mut right_fx = fixture();
+    let left_event = event.clone();
+    let right_event = event;
+    let left_facts = facts;
+    let right_facts = facts;
+    let left_identity = configured_identity();
+    let right_identity = configured_identity();
+    let left_ctx = left_fx.ctx();
+    let right_ctx = right_fx.ctx();
+    let left = ingest::ingest_commit(
+        &pool,
+        &left_event,
+        &left_facts,
+        0,
+        &left_identity,
+        &left_ctx,
+    );
+    let right = ingest::ingest_commit(
+        &pool,
+        &right_event,
+        &right_facts,
+        0,
+        &right_identity,
+        &right_ctx,
+    );
+    let (first, second) = tokio::join!(left, right);
+    // The requirement is about what is durable, not about which caller notices the
+    // duplicate. Both may return Ingested under SQLite's snapshot semantics, so the
+    // assertions below are the ones that matter: one event, one trigger, one
+    // notification. A caller returning Duplicate or a transient busy error is also
+    // acceptable; the retry path then sees the committed row.
+    let first = format!("{first:?}");
+    let second = format!("{second:?}");
+
+    let triggers: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM repeatable_achievement_events")
+        .fetch_one(&pool)
+        .await
+        .expect("triggers");
+    assert_eq!(
+        triggers.0, 1,
+        "one event is one trigger, race or no race; results: first={first}, second={second}"
+    );
+    let notifications: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE kind = 'achievement_triggered'")
+            .fetch_one(&pool)
+            .await
+            .expect("notifications");
+    assert_eq!(notifications.0, 1);
+    assert_eq!(ingest::event_count(&pool).await.expect("events"), 1);
+}
+
+#[tokio::test]
+async fn an_imported_commit_records_its_trigger_without_a_notification() {
+    // Spec 11.2: history is silent. Silence means no outbox row, not "not recorded".
+    let pool = temp_pool("repeatable-import").await;
+    let facts = ingest::commit_facts(1, false);
+    let event = commit_event(&"c".repeat(40), 1_794_787_200_000, "2026-11-16");
+    let mut fx = fixture();
+    let ctx = fx.ctx();
+    let outcome = ingest::ingest_import(&pool, &event, &facts, 0, &configured_identity(), &ctx)
+        .await
+        .expect("import");
+    assert_eq!(outcome, IngestOutcome::IngestedSilently);
+
+    let triggers: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM repeatable_achievement_events")
+        .fetch_one(&pool)
+        .await
+        .expect("triggers");
+    assert_eq!(triggers.0, 1, "the trigger is still a fact worth showing");
+
+    let pending: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM outbox WHERE kind = 'achievement_triggered'")
+            .fetch_one(&pool)
+            .await
+            .expect("outbox");
+    assert_eq!(pending.0, 0, "an import must not announce the trigger");
+
+    // The daily rank is its own table and was never involved in this record.
+    let rank_rows: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM daily_milestones WHERE milestone_id = 'commit_complete'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("milestones");
+    assert_eq!(
+        rank_rows.0, 0,
+        "a repeatable achievement is not a daily milestone"
+    );
+}
+
+#[tokio::test]
+async fn upgrading_v4_to_v5_keeps_the_permanent_unlocks_and_adds_the_trigger_table() {
+    let dir = std::env::temp_dir().join(format!("devch-v4-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).expect("dir");
+    let pool = crate::open(&dir.join("companion.db")).await.expect("open");
+
+    // The v4 shape: schema_meta, an existing permanent unlock, and no repeatable table.
+    sqlx::raw_sql(
+        "CREATE TABLE schema_meta (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+         INSERT INTO schema_meta (key, value) VALUES ('schema_version', '4');
+         CREATE TABLE events (event_id TEXT PRIMARY KEY NOT NULL, event_type TEXT NOT NULL,
+             source TEXT NOT NULL, source_confidence TEXT NOT NULL,
+             canonical_repository_id TEXT NOT NULL, external_id TEXT, commit_sha TEXT,
+             occurred_at INTEGER NOT NULL, observed_at INTEGER NOT NULL,
+             received_at INTEGER NOT NULL, local_date TEXT NOT NULL,
+             timezone TEXT NOT NULL, date_policy INTEGER NOT NULL,
+             payload TEXT NOT NULL, schema_version INTEGER NOT NULL, ingest_batch TEXT);
+         CREATE TABLE unlocked_achievements (
+             achievement_id TEXT PRIMARY KEY NOT NULL, unlocked_at INTEGER NOT NULL,
+             unlock_source TEXT NOT NULL, rule_version INTEGER NOT NULL,
+             viewed_at INTEGER, triggering_event_id TEXT);
+         INSERT INTO unlocked_achievements
+             (achievement_id, unlocked_at, unlock_source, rule_version)
+             VALUES ('first_commit', 10, 'realtime', 1);",
+    )
+    .execute(&pool)
+    .await
+    .expect("seed v4");
+
+    ingest::migrate(&pool).await.expect("migrate");
+    assert_eq!(
+        ingest::recorded_schema_version(&pool)
+            .await
+            .expect("version"),
+        Some(5)
+    );
+    let unlocked = projections::unlocked_achievement_ids(&pool)
+        .await
+        .expect("unlocked");
+    assert_eq!(unlocked, vec!["first_commit".to_string()]);
+
+    // Running it again is a no-op, not a second backup or a wiped table.
+    let backups_before = std::fs::read_dir(dir.join("backups"))
+        .expect("backups")
+        .count();
+    ingest::migrate(&pool).await.expect("second migrate");
+    let backups_after = std::fs::read_dir(dir.join("backups"))
+        .expect("backups")
+        .count();
+    assert_eq!(
+        backups_after, backups_before,
+        "a repeat migration takes no backup"
+    );
+    let unlocked = projections::unlocked_achievement_ids(&pool)
+        .await
+        .expect("unlocked");
+    assert_eq!(unlocked, vec!["first_commit".to_string()]);
+
+    let rows: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM repeatable_achievement_events")
+        .fetch_one(&pool)
+        .await
+        .expect("new table");
+    assert_eq!(
+        rows.0, 0,
+        "the new table starts empty, it does not invent history"
+    );
+
+    pool.close().await;
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
 async fn the_daily_rank_counts_every_repository_together() {
     // Spec 14.1 / checklist T1: A 3 commits + B 2 commits + C 1 commit is SIX commits
     // today, which is Rare. Counting per repository is how 3 + 2 + 1 stayed Common.
@@ -1050,6 +1337,77 @@ async fn the_daily_rank_counts_every_repository_together() {
             .expect("repo b"),
         2
     );
+}
+
+#[tokio::test]
+async fn a_new_day_starts_the_daily_rank_again_at_common() {
+    // Spec 14.1/14.3: the rank belongs to one local date. Yesterday's Uncommon must
+    // not suppress today's Common, and today's count must start from zero.
+    let pool = temp_pool("daily-reset").await;
+    let identity = configured_identity();
+    let facts = ingest::commit_facts(1, false);
+    let mut fx = fixture();
+
+    for (sha, date) in [
+        ("1", "2026-11-16"),
+        ("2", "2026-11-16"),
+        ("3", "2026-11-17"),
+    ] {
+        let event = commit_event(&sha.repeat(40), 1_794_787_200_000, date);
+        let ctx = fx.ctx();
+        ingest::ingest_commit(&pool, &event, &facts, 0, &identity, &ctx)
+            .await
+            .expect("ingest");
+    }
+
+    let first = projections::daily_global_projection(&pool, "2026-11-16")
+        .await
+        .expect("first day")
+        .expect("first day row");
+    assert_eq!(first.commit_count, 2);
+    assert_eq!(
+        first.daily_rank,
+        Some(devchievements_daily_rank::DailyRank::Uncommon)
+    );
+
+    let second = projections::daily_global_projection(&pool, "2026-11-17")
+        .await
+        .expect("second day")
+        .expect("second day row");
+    assert_eq!(second.commit_count, 1, "a new day counts from zero");
+    assert_eq!(
+        second.daily_rank,
+        Some(devchievements_daily_rank::DailyRank::Common),
+        "one commit on a new day is Common even if yesterday was Uncommon"
+    );
+
+    // Both days announced their own first rank: the notification is per day, not per
+    // lifetime, and the second day's Common is not swallowed as a duplicate.
+    let ranks: Vec<String> = sqlx::query_scalar(
+        "SELECT payload FROM outbox WHERE kind = 'daily_rank_upgrade' ORDER BY created_at, notification_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("rank notifications");
+    let mut names: Vec<String> = ranks
+        .iter()
+        .filter_map(|p| serde_json::from_str::<serde_json::Value>(p).ok())
+        .filter_map(|v| v.get("rank")?.as_str().map(str::to_string))
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        vec!["common", "common", "uncommon"],
+        "each day announced its own first rank; the second day did not inherit Uncommon"
+    );
+
+    // The repeatable table only knows commits, never ranks.
+    let trigger_ids: Vec<String> =
+        sqlx::query_scalar("SELECT DISTINCT achievement_id FROM repeatable_achievement_events")
+            .fetch_all(&pool)
+            .await
+            .expect("triggers");
+    assert_eq!(trigger_ids, vec!["commit_complete".to_string()]);
 }
 
 #[tokio::test]

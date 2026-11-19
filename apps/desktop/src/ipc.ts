@@ -47,6 +47,31 @@ export interface GalleryItem {
   viewed: boolean;
 }
 
+export interface RepeatableTrigger {
+  id: number;
+  triggeringEventId: string;
+  unlockedAt: number;
+  ruleVersion: number;
+  repository: string;
+}
+
+export interface RepeatableAchievementItem {
+  id: string;
+  name: string;
+  description: string;
+  rarity: string;
+  triggerCount: number;
+  events: RepeatableTrigger[];
+}
+
+export interface DailyRankView {
+  localDate: string;
+  commits: number;
+  rank: string | null;
+  nextThreshold: number | null;
+  nextRank: string | null;
+}
+
 export interface RepositoryEntry {
   alias: string;
   commits: number;
@@ -244,6 +269,9 @@ export const getDashboard = () => invoke<DashboardView>("get_dashboard");
 /** Diagnostics block, fetched after the cards are on screen. */
 export const getStorageHealth = () => invoke<StorageHealth>("get_storage_health");
 export const getGallery = () => invoke<GalleryItem[]>("get_gallery");
+export const getRepeatableAchievements = () =>
+  invoke<RepeatableAchievementItem[]>("get_repeatable_achievements");
+export const getDailyRank = () => invoke<DailyRankView>("get_daily_rank");
 export const markViewed = (ids: string[]) =>
   invoke<number>("mark_achievements_viewed", { ids });
 export const getActivity = (limit?: number) =>

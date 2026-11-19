@@ -17,13 +17,14 @@
 ///
 /// Bumped to 2 when the browser-activity counters were added to
 /// `repository_projection`, to 3 for `browser_reports_rejected`, and to 4 for
-/// `daily_global_projection` + `schema_meta.global_commit_total`.
+/// `daily_global_projection` + `schema_meta.global_commit_total`, and to 5 for
+/// per-event repeatable achievement triggers.
 ///
-/// Version 1-3 databases are upgraded in place by `ingest::migrate`: new columns come
+/// Version 1-4 databases are upgraded in place by `ingest::migrate`: new columns come
 /// from [`COLUMN_UPGRADES`], new tables from [`SCHEMA_SQL`] (`CREATE TABLE IF NOT
 /// EXISTS`), and the new global projection is backfilled from the per-repository rows
 /// that are already correct. Nothing is dropped, so no event and no unlock is lost.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// Columns added after version 1, as `(table, column, SQL type)`.
 ///
@@ -178,6 +179,26 @@ CREATE TABLE IF NOT EXISTS unlocked_achievements (
     -- The event that caused it, when there was one.
     triggering_event_id TEXT
 );
+
+-- ---------------------------------------------------- repeatable achievements
+-- One row per trigger, not one row per achievement. The permanent table above is
+-- deliberately untouched: mixing these lifecycles would let the first trigger
+-- suppress all later ones. The UNIQUE key is the idempotency boundary; no caller
+-- may rely on having checked an in-memory set before inserting.
+CREATE TABLE IF NOT EXISTS repeatable_achievement_events (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    achievement_id      TEXT NOT NULL,
+    triggering_event_id TEXT NOT NULL,
+    unlocked_at         INTEGER NOT NULL,
+    rule_version        INTEGER NOT NULL,
+    -- The repository where the triggering commit happened, for the detail list.
+    canonical_repository_id TEXT NOT NULL,
+    FOREIGN KEY (triggering_event_id) REFERENCES events (event_id) ON DELETE RESTRICT,
+    UNIQUE (achievement_id, triggering_event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_repeatable_achievement_time
+    ON repeatable_achievement_events (achievement_id, unlocked_at DESC, id DESC);
 
 -- ------------------------------------------------------------ daily milestones
 -- Repeatable per day, so the key is (milestone, date) (spec 14.2).
